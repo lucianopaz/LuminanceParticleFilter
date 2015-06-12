@@ -1,3 +1,6 @@
+#dat files
+*.dat
+
 # Temporal backups
 *~
 

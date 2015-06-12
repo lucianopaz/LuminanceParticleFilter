@@ -7,15 +7,15 @@ subjects = unique_subjects(datadir);
 
 % Compute subject decision and confidence kernels
 % Reduce the 4 luminous patches to a single patch.
-target = repmat(squeeze(mean(target,3)),1,3);
-distractor = repmat(squeeze(mean(distractor,3)),1,3);
+target = repmat(squeeze(mean(target,3)),1,5);
+distractor = repmat(squeeze(mean(distractor,3)),1,5);
 
 %%
 
 prior_mu_t = 50*ones(size(target));
 prior_mu_d = 50*ones(size(distractor));
-prior_sigma_t = 10*ones(size(target));
-prior_sigma_d = 10*ones(size(distractor));
+prior_sigma_t = 15*ones(size(target));
+prior_sigma_d = 15*ones(size(distractor));
 sigma = 5;
 n = repmat(1:size(target,2),size(target,1),1);
 
@@ -26,12 +26,13 @@ post_mu_d = (prior_mu_d./prior_sigma_d.^2+cumsum(distractor,2)/sigma.^2).*post_s
 
 dprime = post_mu_t./post_sigma_t-post_mu_d./post_sigma_d;
 
-T = 0:40:960;
+T = (0:size(target,2)-1)*40;
 RT = data(:,2);
 
-[fitted_vars,fval] = fmincon(@merit,[1,200],[],[],[],[],[0,0],[],[],optimset('tolcon',1e-12));
-disp(['Fitted threshold = ',num2str(fitted_vars(1))])
-disp(['Fitted fixed delay = ',num2str(fitted_vars(2))])
+[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.2,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
+covariance = inv(hessian);
+disp(['Fitted threshold = ',num2str(fitted_vars(1)),'+-',num2str(sqrt(covariance(1,1)))])
+disp(['Fitted fixed delay = ',num2str(fitted_vars(2)),'+-',num2str(sqrt(covariance(2,2)))])
 disp(['Best fit objective function value = ',num2str(fval)])
 
 [sdec,sRT] = simulate_decision(fitted_vars(1),fitted_vars(2));
@@ -54,7 +55,7 @@ function out = merit(x)
             sim_RT(i) = T(end);
         end
     end
-    out = sum(abs(RT-sim_RT-x(2)));
+    out = sum((RT-sim_RT-x(2)).^2);
 end
 function [sim_dec,sim_RT] = simulate_decision(t,b)
     sim_dec = zeros(size(RT));
@@ -74,4 +75,7 @@ function [sim_dec,sim_RT] = simulate_decision(t,b)
         end
     end
 end
+    function theoretical_rt_distribution(pmu_t,pmu_d,ps_t,ps_d,sigma,mu_t,mu_d)
+        
+    end
 end
