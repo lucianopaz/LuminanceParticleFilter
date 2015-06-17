@@ -39,15 +39,19 @@ disp(['Best fit objective function value = ',num2str(fval)])
 hist_RT = histc(RT,T);
 hist_sRT = histc(sRT,T);
 cociente = size(target,1)*(T(2)-T(1));
+logn_params = lognfit(RT);
+logn_estim = lognpdf(T,logn_params(1),logn_params(2));
 figure
 % subplot(1,2,1)
 plot(T,hist_RT/cociente,'b')
 hold on
 plot(T,hist_sRT/cociente,'r')
+plot(T,logn_estim,'k')
 hold off
 xlabel('RT [ms]')
 ylabel('Prob density [1/ms]')
-legend({'Subject','Simulation'})
+legend({'Subject','Fitted simulation','Log normal'})
+set(findall(gcf,'type','line'),'linewidth',2)
 % subplot(1,2,2)
 % for j = 0:10
 %     theo_RT = theoretical_rt_distribution(5,200,50,50,15,15,5,50+j,50);
