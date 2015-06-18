@@ -4,11 +4,18 @@ datadir = fullfile('~','Dropbox','DecisionConfidenceKernels','data');
 
 subjects = unique_subjects(datadir);
 [data,target,distractor] = load_stim_and_trial(subjects,6);
+tfluct = squeeze(mean(target,3))-repmat(data(:,1),1,size(target,2));
+dfluct = squeeze(mean(distractor,3))-50;
 
-% Compute subject decision and confidence kernels
-% Reduce the 4 luminous patches to a single patch.
 target = repmat(squeeze(mean(target,3)),1,5);
 distractor = repmat(squeeze(mean(distractor,3)),1,5);
+
+selection = data(:,3); selection(data(:,3)~=1) = 2;
+confidence = data(:,4);
+
+T_dec = mod(data(:,2),1e3);
+[bla,T_dec_ind] = histc(T_dec,0:40:1000);
+T_dec_ind(T_dec_ind==26) = 25;
 
 %%
 
@@ -35,7 +42,7 @@ disp(['Fitted threshold = ',num2str(fitted_vars(1)),'+-',num2str(sqrt(covariance
 disp(['Fitted fixed delay = ',num2str(fitted_vars(2)),'+-',num2str(sqrt(covariance(2,2)))])
 disp(['Best fit objective function value = ',num2str(fval)])
 
-[sdec,sRT] = simulate_decision(fitted_vars(1),fitted_vars(2));
+[sdec,sRT,s_tdec_ind] = simulate_decision(fitted_vars(1),fitted_vars(2));
 hist_RT = histc(RT,T);
 hist_sRT = histc(sRT,T);
 cociente = size(target,1)*(T(2)-T(1));
@@ -52,13 +59,76 @@ xlabel('RT [ms]')
 ylabel('Prob density [1/ms]')
 legend({'Subject','Fitted simulation','Log normal'})
 set(findall(gcf,'type','line'),'linewidth',2)
-% subplot(1,2,2)
-% for j = 0:10
-%     theo_RT = theoretical_rt_distribution(5,200,50,50,15,15,5,50+j,50);
-%     plot(T,theo_RT)
-%     hold all
-% end
-% hold off
+
+prob_acierto = zeros(size(RT));
+for j = 1:length(RT)
+    prob_acierto(j) = 1-normcdf(0,post_mu_t(s_tdec_ind(j))-post_mu_d(s_tdec_ind(j)),post_sigma_t(s_tdec_ind(j)),post_sigma_d(s_tdec_ind(j)));
+end
+% sim_confidence = prob_acierto;
+% sim_confidence = 1./(1+exp(-5*(prob_acierto-median(prob_acierto))));
+sim_confidence = 1./(1+exp(0.004*(T(s_tdec_ind)-median(T(s_tdec_ind)))))';
+
+
+[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,selection,confidence);
+
+[sim_decision_kernel,sim_confidence_kernel,sim_decision_kernel_std,sim_confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,sdec,sim_confidence,false);
+
+figure
+T_kern = 0:40:960;
+subplot(1,2,1)
+errorzone(T_kern,decision_kernel(1,:),decision_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
+hold on
+errorzone(T_kern,decision_kernel(2,:),decision_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_decision_kernel(1,:),sim_decision_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
+hold off
+title('Decision kernel')
+xlabel('T [ms]')
+
+subplot(1,2,2)
+errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
+hold on
+errorzone(T_kern,confidence_kernel(2,:),confidence_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_confidence_kernel(1,:),sim_confidence_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
+hold off
+title('Confidence kernel')
+xlabel('T [ms]')
+
+
+sim_T_dec = mod(sRT,1e3);
+[bla,sim_T_dec_ind] = histc(sim_T_dec,0:40:1000);
+sim_T_dec_ind(sim_T_dec_ind==26) = 25;
+
+[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,selection,confidence,true,false,T_dec_ind);
+
+[sim_decision_kernel,sim_confidence_kernel,sim_decision_kernel_std,sim_confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,sdec,sim_confidence,false,false,sim_T_dec_ind);
+
+figure
+T_kern = -960:40:960;
+subplot(1,2,1)
+errorzone(T_kern,decision_kernel(1,:),decision_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
+hold on
+errorzone(T_kern,decision_kernel(2,:),decision_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_decision_kernel(1,:),sim_decision_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
+hold off
+title('Decision kernel')
+xlabel('T - RT [ms]')
+
+subplot(1,2,2)
+errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
+hold on
+errorzone(T_kern,confidence_kernel(2,:),confidence_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_confidence_kernel(1,:),sim_confidence_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
+errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
+hold off
+title('Confidence kernel')
+xlabel('T - RT [ms]')
 
 function out = merit(x)
     sim_RT = zeros(size(RT));
@@ -73,13 +143,15 @@ function out = merit(x)
     end
     out = sum((RT-sim_RT-x(2)).^2);
 end
-function [sim_dec,sim_RT] = simulate_decision(t,b)
+function [sim_dec,sim_RT,tdec_ind] = simulate_decision(t,b)
     sim_dec = zeros(size(RT));
     sim_RT = zeros(size(RT));
     threshold_passed = abs(dprime)>=t;
+    tdec_ind = zeros(size(RT));
     for i = 1:size(dprime,1)
         ind = find(threshold_passed(i,:),1);
         if ~isempty(ind)
+            tdec_ind(i) = ind;
             sim_RT(i) = T(ind)+b;
             if dprime(ind)>0
                 sim_dec(i) = 1;
@@ -88,31 +160,8 @@ function [sim_dec,sim_RT] = simulate_decision(t,b)
             end
         else
             sim_RT(i) = T(end)+b;
+            tdec_ind(i) = length(T);
         end
     end
 end
-%     function prob = theoretical_rt_distribution(threshold,shift,pmu_t,pmu_d,ps_t,ps_d,sigma,mu_t,mu_d,T_max)
-%         % Esta mal porque hay que encarar esto resolviendo una ecuaci?n
-%         % maestra
-%         if nargin<10
-%             T_max = T(end);
-%         end
-%         T_temp = (0:40:T_max)';
-%         prob = zeros(length(T_temp),1);
-%         n = (1:size(prob,1))';
-%         
-%         dprime_mean = (pmu_t./ps_t.^2-pmu_d./ps_d.^2+n.*(mu_t-mu_d)/sigma.^2);
-%         dprime_std = sqrt(2).*n;
-%         cprob = 0;
-%         for ii=1:length(prob)
-%             pdown = normcdf(-threshold,dprime_mean(ii),dprime_std(ii));
-%             pup = 1-normcdf(threshold,dprime_mean(ii),dprime_std(ii));
-%             prob(ii) = (pdown+pup)*(1-cprob);
-%             cprob = cprob + prob(ii);
-%         end
-%         shift_ind = floor(shift/40);
-%         high_prop = mod(shift,40);
-%         temp_mat = diag((1-high_prop)*ones(length(prob)-shift_ind,1),-shift_ind)+diag(high_prop*ones(length(prob)-shift_ind-1,1),-shift_ind-1);
-%         prob = temp_mat*prob;
-%     end
 end

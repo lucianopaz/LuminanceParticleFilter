@@ -37,34 +37,12 @@ set(findobj(gcf,'type','axes','-and','tag',''),'fontsize',14)
 set(findobj(gcf,'type','axes','-and','tag','legend'),'fontsize',14)
 
 %% Compute decision and confidence kernels
-hsel = nan(size(target));
-hnotsel = nan(size(target));
-lsel = nan(size(target));
-lnotsel = nan(size(target));
-won_index = data(:,3)==1;
-high_index = data(:,4)==2;
-if any(won_index & high_index)
-    hsel(won_index & high_index,:) = target(won_index & high_index,:)-repmat(data(won_index & high_index,1),1,size(target,2));
-    hnotsel(won_index & high_index,:) = distractor(won_index & high_index,:)-50;
-end
-if any(won_index & ~high_index)
-    lsel(won_index & ~high_index,:) = target(won_index & ~high_index,:)-repmat(data(won_index & ~high_index,1),1,size(target,2));
-    lnotsel(won_index & ~high_index,:) = distractor(won_index & ~high_index,:)-50;
-end
-if any(~won_index & high_index)
-    hsel(~won_index & high_index,:) = distractor(~won_index & high_index,:)-50;
-    hnotsel(~won_index & high_index,:) = target(~won_index & high_index,:)-repmat(data(~won_index & high_index,1),1,size(target,2));
-end
-if any(won_index & ~high_index)
-    lsel(~won_index & ~high_index,:) = distractor(~won_index & ~high_index,:)-50;
-    lnotsel(~won_index & ~high_index,:) = target(~won_index & ~high_index,:)-repmat(data(~won_index & ~high_index,1),1,size(target,2));
-end
-% Decision and Confidence kernels locked on stimulus onset
-decision_kernel = [nanmean(cat(1,hsel,lsel),1);nanmean(cat(1,hnotsel,lnotsel),1)];
-confidence_kernel = [nanmean(hsel,1)-nanmean(lsel,1);nanmean(hnotsel,1)-nanmean(lnotsel,1)];
-decision_kernel_std = [nanstd(cat(1,hsel,lsel),1);nanstd(cat(1,hnotsel,lnotsel),1)]/sqrt(size(target,1));
-confidence_kernel_std = [nanstd(hsel)/sqrt(sum(~all(isnan(hsel),2)))+nanstd(lsel)/sqrt(sum(~all(isnan(lsel),2)));...
-                         nanstd(hnotsel)/sqrt(sum(~all(isnan(hnotsel),2)))+nanstd(lnotsel)/sqrt(sum(~all(isnan(lnotsel),2)))];
+tfluct = target-repmat(data(:,1),1,size(target,2));
+dfluct = distractor-50;
+selection = data(:,3); selection(data(:,3)~=1) = 2;
+confidence = data(:,4);
+[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,selection,confidence);
 T = 0:40:1000; T(T==1000)=[];
 figure('position',[100 100 1000 800])
 try
@@ -106,49 +84,9 @@ set(findobj(gcf,'type','axes','-and','tag','legend'),'fontsize',14)
 T_dec = mod(RT,1e3);
 [bla,T_dec_ind] = histc(T_dec,0:40:1000);
 T_dec_ind(T_dec_ind==26) = 25;
-target_T_dec = nan(size(target,1),2*size(target,2)-1);
-distractor_T_dec = nan(size(distractor,1),2*size(distractor,2)-1);
-% Center the luminance fluctuation at response time in the middle of the
-% vector
-for i = 1:size(target,1)
-    target_T_dec(i,size(target,2)+1-T_dec_ind(i):2*size(target,2)-T_dec_ind(i)) = target(i,:);
-    distractor_T_dec(i,size(distractor,2)+1-T_dec_ind(i):2*size(distractor,2)-T_dec_ind(i)) = distractor(i,:);
-end
+[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+    kernels(tfluct,dfluct,selection,confidence,true,false,T_dec_ind);
 
-hsel = nan(size(target_T_dec));
-hnotsel = nan(size(target_T_dec));
-lsel = nan(size(target_T_dec));
-lnotsel = nan(size(target_T_dec));
-if any(won_index & high_index)
-    hsel(won_index & high_index,:) = target_T_dec(won_index & high_index,:)-repmat(data(won_index & high_index,1),1,size(target_T_dec,2));
-    hnotsel(won_index & high_index,:) = distractor_T_dec(won_index & high_index,:)-50;
-end
-if any(won_index & ~high_index)
-    lsel(won_index & ~high_index,:) = target_T_dec(won_index & ~high_index,:)-repmat(data(won_index & ~high_index,1),1,size(target_T_dec,2));
-    lnotsel(won_index & ~high_index,:) = distractor_T_dec(won_index & ~high_index,:)-50;
-end
-if any(~won_index & high_index)
-    hsel(~won_index & high_index,:) = distractor_T_dec(~won_index & high_index,:)-50;
-    hnotsel(~won_index & high_index,:) = target_T_dec(~won_index & high_index,:)-repmat(data(~won_index & high_index,1),1,size(target_T_dec,2));
-end
-if any(won_index & ~high_index)
-    lsel(~won_index & ~high_index,:) = distractor_T_dec(~won_index & ~high_index,:)-50;
-    lnotsel(~won_index & ~high_index,:) = target_T_dec(~won_index & ~high_index,:)-repmat(data(~won_index & ~high_index,1),1,size(target_T_dec,2));
-end
-
-% Ignore fluctuations at times with less than half the data
-hinds = sum(~isnan(hsel))<0.5*sum(high_index);
-linds = sum(~isnan(lsel))<0.5*sum(~high_index);
-hsel(:,sum(~isnan(hsel))<0.5*sum(high_index)) = nan;
-hnotsel(:,sum(~isnan(hnotsel))<0.5*sum(high_index)) = nan;
-lsel(:,sum(~isnan(lsel))<0.5*sum(~high_index)) = nan;
-lnotsel(:,sum(~isnan(lnotsel))<0.5*sum(~high_index)) = nan;
-
-decision_kernel = [nanmean(cat(1,hsel,lsel),1);nanmean(cat(1,hnotsel,lnotsel),1)];
-confidence_kernel = [nanmean(hsel,1)-nanmean(lsel,1);nanmean(hnotsel,1)-nanmean(lnotsel,1)];
-decision_kernel_std = [nanstd(cat(1,hsel,lsel),1);nanstd(cat(1,hnotsel,lnotsel),1)]/sqrt(size(target,1));
-confidence_kernel_std = [nanstd(hsel)/sqrt(sum(~all(isnan(hsel),2)))+nanstd(lsel)/sqrt(sum(~all(isnan(lsel),2)));...
-                         nanstd(hnotsel)/sqrt(sum(~all(isnan(hnotsel),2)))+nanstd(lnotsel)/sqrt(sum(~all(isnan(lnotsel),2)))];
 T = -1000:40:1000; T(T==-1000 | T==1000) = [];
 
 T_decision = T(all(~isnan(decision_kernel),1));
