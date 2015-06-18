@@ -1,14 +1,54 @@
 function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] =...
     kernels(tfluct,dfluct,selection,confidence,is_binary_confidence,locked_on_onset,RT_ind)
+% Compute psychophysical kernels from target and distractor fluctuations.
+% The function allows you to compute then locked to stimulus onset or to
+% decision time.
+% 
+% Sintax:
+% [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] =...
+%      kernels(tfluct,dfluct,selection,confidence,is_binary_confidence,locked_on_onset,RT_ind)
+% 
+% Input:
+%   tfluct: An NxM matrix of target stimulus fluctuations. N is the number
+%       of trials and M is the time step index.
+%   dfluct: Distractor fluctuations matrix with the same size as tfluct.
+%   selection: A binary Nx1 vector indicating if the target (1) or
+%       distractor (2) was selected at each trial
+%   confidence: Is an Nx1 vector. It can have either a binary values
+%       indicating low (1) or high (2) confidence, or be a real value
+%       probability of high confidence reports.
+%   is_binary_confidence: Boolean indicating if the confidence input is a
+%       binary confidence value or not (default true)
+%   locked_on_onset: Boolean indicating if the kernels are to be computed
+%       locked on stimulus onset (taken to be the first time step). Default
+%       if true.
+%   RT_ind: Mandatory if locked_on_onset is false. Is an Nx1 vector that
+%       indicates the time step at which the subject responded.
+% 
+% If there are no confidence reports and you want the decision kernels,
+% supply confidence = ones(size(selection)) and ignore the confidence
+% output.
+% 
+% outputs:
+%    decision_kernel, decision_kernel_std: 2xM vectors containing the
+%       selected and non selected patch fluctuations of the decision kernel
+%       (and standad deviation).
+%    confidence_kernel, confidence_kernel_std: 2xM vectors analogous to the
+%       decision_kernel but containg the information on the confidence
+%       kernel.
 
+    % Default input values
     if nargin<6
         locked_on_onset = true;
         if nargin<5
             is_binary_confidence = true;
         end
     end
-
+    
     if ~locked_on_onset
+        % If the locked on onset kernels are wanted, the fluctuations are
+        % shifted on a new vector so that RT_ind is located at its center
+        
         target_T_dec = nan(size(tfluct,1),2*size(tfluct,2)-1);
         distractor_T_dec = nan(size(dfluct,1),2*size(dfluct,2)-1);
         % Center the luminance fluctuation at response time in the middle of the
@@ -20,7 +60,8 @@ function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kerne
         tfluct = target_T_dec;
         dfluct = distractor_T_dec;
     end
-
+    
+    % High and low, selected and non selected fluctuation vectors
     hsel = nan(size(tfluct));
     hnotsel = nan(size(tfluct));
     lsel = nan(size(tfluct));
@@ -47,6 +88,8 @@ function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kerne
             lnotsel(misses & low_confidence,:) = tfluct(misses & low_confidence,:);
         end
         if ~locked_on_onset
+            % Crop the shifted time steps with less than half the trials'
+            % information
             hsel(:,sum(~isnan(hsel))<0.5*sum(~all(isnan(hsel),2))) = nan;
             hnotsel(:,sum(~isnan(hnotsel))<0.5*sum(~all(isnan(hnotsel),2))) = nan;
             lsel(:,sum(~isnan(lsel))<0.5*sum(~all(isnan(lsel),2))) = nan;
@@ -73,6 +116,8 @@ function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kerne
             lnotsel(misses,:) = tfluct(misses,:).*repmat((1-confidence(misses)),1,size(tfluct,2));
         end
         if ~locked_on_onset
+            % Crop the shifted time steps with less than half the trials'
+            % information
             hsel(:,sum(~isnan(hsel))<0.5*sum(~all(isnan(hsel),2))) = nan;
             hnotsel(:,sum(~isnan(hnotsel))<0.5*sum(~all(isnan(hnotsel),2))) = nan;
             lsel(:,sum(~isnan(lsel))<0.5*sum(~all(isnan(lsel),2))) = nan;
