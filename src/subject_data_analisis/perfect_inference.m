@@ -86,6 +86,7 @@ errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edge
 hold off
 title('Decision kernel')
 xlabel('T [ms]')
+legend({'Subject D_{S}','Subject D_{N}','Simulation D_{S}','Simulation D_{N}'})
 
 subplot(1,2,2)
 errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
@@ -96,6 +97,7 @@ errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','
 hold off
 title('Confidence kernel')
 xlabel('T [ms]')
+legend({'Subject C_{S}','Subject C_{N}','Simulation C_{S}','Simulation C_{N}'})
 
 
 sim_T_dec = mod(sRT,1e3);
@@ -119,6 +121,7 @@ errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edge
 hold off
 title('Decision kernel')
 xlabel('T - RT [ms]')
+legend({'Subject D_{S}','Subject D_{N}','Simulation D_{S}','Simulation D_{N}'})
 
 subplot(1,2,2)
 errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
@@ -129,6 +132,7 @@ errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','
 hold off
 title('Confidence kernel')
 xlabel('T - RT [ms]')
+legend({'Subject C_{S}','Subject C_{N}','Simulation C_{S}','Simulation C_{N}'})
 
 function out = merit(x)
     sim_RT = zeros(size(RT));
