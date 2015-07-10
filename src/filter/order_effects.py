@@ -109,11 +109,11 @@ def smooth_kernel(x,value):
 	u = (numpy.array(x)-value)/std
 	return (1/(math.sqrt(2*math.pi)*0.1))*numpy.exp(-u*u/2)
 
-def main(N,R=500,model=2,l=10000,condition='generative',s0=0.5,s1=0.5,pcause=0.5):
+def main(N,R=500,model=2,l=10000,condition='generative',s0=0.5,s1=0.5,pcause=0.5,simlen=80):
 	if condition in ['generative','preventative']:
 		observations = get_obs_from_ev(condition)
 	elif condition=='new':
-		observations = get_obs_from_experiment(N_obs=80,cause_prob=pcause,s0=s0,s1=s1)
+		observations = get_obs_from_experiment(N_obs=simlen,cause_prob=pcause,s0=s0,s1=s1)
 	else:
 		raise ValueError("Unknown condition = %s"%condition)
 	transition = BetaTrans(l=l)
@@ -197,8 +197,8 @@ def main(N,R=500,model=2,l=10000,condition='generative',s0=0.5,s1=0.5,pcause=0.5
 
 def parse_args():
 	""" Parse arguments passed from the command line """
-	arg_list = ['N','R','model','l','condition','s0','s1','pcause']
-	options = {'N':100,'R':500,'model':2,'l':10000.,'condition':'generative','s0':0.5,'s1':0.5,'pcause':0.5}
+	arg_list = ['N','R','model','l','condition','s0','s1','pcause','simlen']
+	options = {'N':100,'R':500,'model':2,'l':10000.,'condition':'generative','s0':0.5,'s1':0.5,'pcause':0.5,'simlen':80}
 	kwarg_flag = False
 	skip_arg = True
 	arg_n = 0
@@ -219,13 +219,15 @@ def parse_args():
 				options[arg_list[arg_n]] = arg
 			elif c<9:
 				options[arg_list[arg_n]] = float(arg)
+			elif c==9:
+				options[arg_list[arg_n]] = int(arg)
 			else:
 				raise Exception("Unknown fifth option supplied '%s'" %s)
 			arg_n+=1
 		if kwarg_flag:
 			skip_arg = True
 			key = arg[1:]
-			if key in ['N','R','model']:
+			if key in ['N','R','model','simlen']:
 				options[key] = int(sys.argv[c+1])
 			elif key in ['l','s0','s1','pcause']:
 				options[key] = float(sys.argv[c+1])
@@ -255,6 +257,7 @@ def display_help():
  's0': only used when condition is 'new'. Is the probability that the effect is produced by the background noise. [default 0.5]
  's1': only used when condition is 'new'. Is the probability that the effect is produced by the cause. Negative values indicate preventative causal effects. [default 0.5]
  'pcause': only used when condition is 'new'. Is the probability that the cause is present. [default 0.5].
+ 'simlen': only used when condition is 'new'. Is the number of observations that are fed into the filter. [default 80].
  
  Argument can be supplied as positional arguments or as -key value pairs.
  
