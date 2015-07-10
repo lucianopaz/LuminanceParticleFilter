@@ -6,16 +6,20 @@ subjects = unique_subjects(datadir);
 [data,target,distractor] = load_stim_and_trial(subjects,6);
 tfluct = squeeze(mean(target,3))-repmat(data(:,1),1,size(target,2));
 dfluct = squeeze(mean(distractor,3))-50;
+tfluct_ext = nan(size(tfluct,1),125); tfluct_ext(:,1:size(tfluct,2)) = tfluct;
+dfluct_ext = nan(size(dfluct,1),125); dfluct_ext(:,1:size(dfluct,2)) = dfluct;
 
 target = repmat(squeeze(mean(target,3)),1,5);
+target(:,26:end) = randn(size(target,1),size(target,2)-25)*5 + repmat(data(:,1),1,size(target,2)-25);
 distractor = repmat(squeeze(mean(distractor,3)),1,5);
+distractor(:,26:end) = randn(size(distractor,1),size(distractor,2)-25)*5 + 50;
 
 selection = data(:,3); selection(data(:,3)~=1) = 2;
 confidence = data(:,4);
 
-T_dec = mod(data(:,2),1e3);
-[bla,T_dec_ind] = histc(T_dec,0:40:1000);
-T_dec_ind(T_dec_ind==26) = 25;
+T_dec = data(:,2);
+[bla,T_dec_ind] = histc(T_dec,0:40:5000);
+T_dec_ind(T_dec_ind==126) = 125;
 
 %%
 
@@ -36,7 +40,7 @@ dprime = post_mu_t./post_sigma_t-post_mu_d./post_sigma_d;
 T = (0:size(target,2))*40;
 RT = data(:,2);
 
-[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.18,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
+[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.2,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
 covariance = inv(hessian);
 disp(['Fitted threshold = ',num2str(fitted_vars(1)),'+-',num2str(sqrt(covariance(1,1)))])
 disp(['Fitted fixed delay = ',num2str(fitted_vars(2)),'+-',num2str(sqrt(covariance(2,2)))])
@@ -100,18 +104,21 @@ xlabel('T [ms]')
 legend({'Subject C_{S}','Subject C_{N}','Simulation C_{S}','Simulation C_{N}'})
 
 
-sim_T_dec = mod(sRT,1e3);
-[bla,sim_T_dec_ind] = histc(sim_T_dec,0:40:1000);
-sim_T_dec_ind(sim_T_dec_ind==26) = 25;
+sim_T_dec = sRT;
+[bla,sim_T_dec_ind] = histc(sim_T_dec,0:40:5000);
+sim_T_dec_ind(sim_T_dec_ind==126) = 125;
+target(sim_T_dec_ind==0,:) = nan;
+distractor(sim_T_dec_ind==0,:) = nan;
+sim_T_dec_ind(sim_T_dec_ind==0) = 125;
 
 [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
-    kernels(tfluct,dfluct,selection,confidence,true,false,T_dec_ind);
+    kernels(tfluct_ext,dfluct_ext,selection,confidence,true,false,T_dec_ind);
 
 [sim_decision_kernel,sim_confidence_kernel,sim_decision_kernel_std,sim_confidence_kernel_std] = ...
-    kernels(tfluct,dfluct,sdec,sim_confidence,false,false,sim_T_dec_ind);
+    kernels(target-repmat(data(:,1),1,size(target,2)),distractor-50,sdec,sim_confidence,false,false,sim_T_dec_ind);
 
 figure
-T_kern = -960:40:960;
+T_kern = -4960:40:4960;
 subplot(1,2,1)
 errorzone(T_kern,decision_kernel(1,:),decision_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
 hold on

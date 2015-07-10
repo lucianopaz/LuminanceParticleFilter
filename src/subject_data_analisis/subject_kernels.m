@@ -81,13 +81,21 @@ set(findobj(gcf,'type','axes','-and','tag',''),'fontsize',14)
 set(findobj(gcf,'type','axes','-and','tag','legend'),'fontsize',14)
 
 %% Decision and Confidence kernels locked on response time
-T_dec = mod(RT,1e3);
-[bla,T_dec_ind] = histc(T_dec,0:40:1000);
-T_dec_ind(T_dec_ind==26) = 25;
-[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
-    kernels(tfluct,dfluct,selection,confidence,true,false,T_dec_ind);
+% T_dec = mod(RT,1e3);
+% [bla,T_dec_ind] = histc(T_dec,0:40:1000);
+% T_dec_ind(T_dec_ind==26) = 25;
+% [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+%     kernels(tfluct,dfluct,selection,confidence,true,false,T_dec_ind);
+% T = -1000:40:1000; T(T==-1000 | T==1000) = [];
 
-T = -1000:40:1000; T(T==-1000 | T==1000) = [];
+T_dec = RT;
+[bla,T_dec_ind] = histc(T_dec,0:40:5000);
+T_dec_ind(T_dec_ind==126) = 125;
+tfluct_ext = nan(size(tfluct,1),125); tfluct_ext(:,1:size(tfluct,2)) = tfluct;
+dfluct_ext = nan(size(dfluct,1),125); dfluct_ext(:,1:size(dfluct,2)) = dfluct;
+[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
+    kernels(tfluct_ext,dfluct_ext,selection,confidence,true,false,T_dec_ind);
+T = -4960:40:4960;
 
 T_decision = T(all(~isnan(decision_kernel),1));
 decision_kernel(:,all(isnan(decision_kernel),1)) = [];
@@ -95,7 +103,6 @@ T_confidence = T(all(~isnan(confidence_kernel),1));
 confidence_kernel(:,all(isnan(confidence_kernel),1)) = [];
 decision_kernel_std(:,all(isnan(decision_kernel_std),1)) = [];
 confidence_kernel_std(:,all(isnan(confidence_kernel_std),1)) = [];
-T = -1000:40:1000; T(T==-1000 | T==1000) = [];
 figure('position',[100 100 1000 800])
 try
     subplot(1,2,1)
