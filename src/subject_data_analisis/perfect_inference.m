@@ -40,7 +40,7 @@ dprime = post_mu_t./post_sigma_t-post_mu_d./post_sigma_d;
 T = (0:size(target,2))*40;
 RT = data(:,2);
 
-[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.2,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
+[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.6,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
 covariance = inv(hessian);
 disp(['Fitted threshold = ',num2str(fitted_vars(1)),'+-',num2str(sqrt(covariance(1,1)))])
 disp(['Fitted fixed delay = ',num2str(fitted_vars(2)),'+-',num2str(sqrt(covariance(2,2)))])
