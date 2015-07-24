@@ -18,8 +18,8 @@ class subject:
 			if b>max_block:
 				continue
 			aux = io.loadmat(d);
-			target = np.transpose(np.array([s[0] for s in aux['stim'].squeeze()]),(2,1,0))
-			distractor = np.transpose(np.array([s[1] for s in aux['stim'].squeeze()]),(2,1,0))
+			target = np.transpose(np.array([s[0] for s in aux['stim'].squeeze()]),(0,2,1))
+			distractor = np.transpose(np.array([s[1] for s in aux['stim'].squeeze()]),(0,2,1))
 			mean_target_lum = aux['trial'][:,1]
 			rt = aux['trial'][:,5]
 			performance = aux['trial'][:,7]
@@ -29,7 +29,7 @@ class subject:
 			else:
 				selected_side = np.nan*np.ones_like(rt)
 			data_matrix = np.array([mean_target_lum,rt,performance,confidence,selected_side,
-				self.id*np.ones_like(rt),b*np.ones_like(rt)])
+				self.id*np.ones_like(rt),b*np.ones_like(rt)]).T
 			yield data_matrix,target,distractor
 	def load_data(self,max_block=np.Inf):
 		first_element = True
@@ -39,9 +39,9 @@ class subject:
 				all_target = target
 				all_distractor = distractor
 			else:
-				all_data = np.vstack((all_data,data_matrix))
-				all_target = np.vstack((all_target,target))
-				all_distractor = np.vstack((all_distractor,distractor))
+				all_data = np.concatenate((all_data,data_matrix),axis=0)
+				all_target = np.concatenate((all_target,target),axis=0)
+				all_distractor = np.concatenate((all_distractor,distractor),axis=0)
 			first_element = False
 		return all_data,all_target,all_distractor
 
@@ -90,9 +90,13 @@ def merge_subjects(subject_list,name='all',subject_id=0):
 
 def test(data_dir='/Users/luciano/Facultad/datos'):
 	subjects = unique_subjects(data_dir)
+	print str(len(subjects))+' subjects found'
 	ms = merge_subjects(subjects)
+	print 'Successfully merged all subjects with a total of '+str(ms.nsessions)+' sessions'
 	dat,t,d = ms.load_data()
+	print 'Loaded all data. Printing matrices shapes'
 	print dat.shape, t.shape, d.shape
+	print 'Data from '+str(dat.shape[0])+' trials loaded'
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
