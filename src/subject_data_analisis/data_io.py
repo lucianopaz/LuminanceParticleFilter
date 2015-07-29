@@ -13,6 +13,8 @@ class subject:
 		self.blocks = blocks
 		self.data_files = data_files
 		self.nsessions = nsessions
+	def column_description(self):
+		return column_description()
 	def iter_data(self,max_block=np.Inf):
 		for b,d in itertools.izip(self.blocks,self.data_files):
 			if b>max_block:
@@ -44,6 +46,11 @@ class subject:
 				all_distractor = np.concatenate((all_distractor,distractor),axis=0)
 			first_element = False
 		return all_data,all_target,all_distractor
+
+def column_description():
+	out = ['mean target lum','RT','performance','confidence','selected side','subject id','experiment block']
+	print out
+	return out
 
 def unique_subjects(data_dir):
 	""" subjects = unique_subjects(data_dir)
@@ -97,6 +104,7 @@ def test(data_dir='/Users/luciano/Facultad/datos'):
 	print 'Loaded all data. Printing matrices shapes'
 	print dat.shape, t.shape, d.shape
 	print 'Data from '+str(dat.shape[0])+' trials loaded'
+	print dat[0:10,:]
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
