@@ -4,7 +4,7 @@
 
 import numpy as np
 from scipy import io as io
-import os, itertools, sys
+import os, itertools, sys, random
 
 class subject:
 	def __init__(self,name,id,blocks,data_files,nsessions):
@@ -95,6 +95,51 @@ def merge_subjects(subject_list,name='all',subject_id=0):
 	ix = np.argsort(b)
 	return subject(name,subject_id,[b[i] for i in ix],[d[i] for i in ix],ns)
 
+def increase_histogram_count(d,n):
+	"""
+	(out,indexes)=increase_histogram_count(d,n)
+	
+	Take an numpy.array of data d of shape (m,) and return an array out
+	of shape (n,) that copies the elements of d keeping d's histogram
+	approximately invariant. Second output "indexes" is an array so
+	that out = d(indexes)
+	"""
+	d = d.squeeze()
+	if len(d.shape)>1:
+		raise(ValueError('Input data must be an array with only one dimension'))
+	if n<len(d):
+		raise(ValueError('n must be larger than the length of the data'))
+	ud, ui, histogram = np.unique(d, return_inverse=True, return_counts=True)
+	increased_histogram = np.floor(histogram*n/len(d))
+	
+	if np.sum(increased_histogram)<n:
+		temp = np.zeros_like(histogram)
+		cumprob = np.cumsum(histogram)/sum(histogram)
+		for i in range(n-sum(increased_histogram)):
+			ind = np.searchsorted(cumprob,random.random(),'left')
+			temp[ind]+=1
+		increased_histogram+=temp
+	
+	unique_indexes = []
+	for i in range(len(ud)):
+		unique_indexes.append(np.random.permutation([i for i,uii in ui if ui==i]))
+	
+	
+	out = np.zeros(n)
+	indexes = np.zeros_like(out)
+	count_per_value = np.zeros_like(increased_histogram)
+	for c in range(n):
+		cumprob = np.cumsum(increased_histogram-count_per_value)/sum(increased_histogram-count_per_value)
+		ind = np.searchsorted(cumprob,random.random(),'left')
+		out[c] = ud[ind]
+		indexes[c] = unique_indexes[ind][count_per_value[ind]%histogram[ind]]
+		count_per_value[ind]+=1
+	randperm_indexes = np.random.permutation(n)
+	out = out[andperm_indexes]
+	indexes = indexes[randperm_indexes]
+	return out,indexes
+
+
 def test(data_dir='/Users/luciano/Facultad/datos'):
 	subjects = unique_subjects(data_dir)
 	print str(len(subjects))+' subjects found'
@@ -104,7 +149,9 @@ def test(data_dir='/Users/luciano/Facultad/datos'):
 	print 'Loaded all data. Printing matrices shapes'
 	print dat.shape, t.shape, d.shape
 	print 'Data from '+str(dat.shape[0])+' trials loaded'
+	column_content = column_description()
 	print dat[0:10,:]
+	
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
