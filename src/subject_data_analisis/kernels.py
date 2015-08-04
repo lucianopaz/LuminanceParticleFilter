@@ -144,7 +144,11 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	confidence kernels. Provide data_dir fullpath if the default path is
 	not correct
 	"""
-	from matplotlib import pyplot as plt
+	try:
+		from matplotlib import pyplot as plt
+		loaded_plot_libs = True
+	except:
+		loaded_plot_libs = False
 	import data_io as dio
 	# Load subject data
 	subjects = dio.unique_subjects(data_dir)
@@ -173,47 +177,51 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	rdk,rck,rdk_std,rck_std = kernels(fluctuations,1-dat[:,2],dat[:,3]-1,locked_on_onset=False,RT_ind=RT_ind)
 	rT = (np.array(range(2*padding_length-1),dtype=float)-padding_length+1)*ISI
 	
-	# Plot kernels
-	plt.figure(figsize=(13,10))
-	# Decision kernel locked on stimulus onset
-	plt.subplot(221)
-	plt.plot(sT,sdk[0],color='b')
-	plt.plot(sT,sdk[1],color='r')
-	plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color='b',alpha=0.3,edgecolor=None)
-	plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color='r',alpha=0.3,edgecolor=None)
-	plt.plot(plt.gca().get_xlim(),[0,0],color='k')
-	plt.ylabel('Fluctuation [$cd/m^{2}$]')
-	plt.legend(['$D_{S}$','$D_{N}$'])
-	plt.title('Locked on onset')
-	# Confidence kernel locked on stimulus onset
-	ax = plt.subplot(223,sharex=plt.subplot(221),sharey=plt.subplot(221))
-	plt.plot(sT,sck[0],color='b')
-	plt.plot(sT,sck[1],color='r')
-	plt.fill_between(sT,sck[0]-sck_std[0],sck[0]+sck_std[0],color='b',alpha=0.3,edgecolor=None)
-	plt.fill_between(sT,sck[1]-sck_std[1],sck[1]+sck_std[1],color='r',alpha=0.3,edgecolor=None)
-	plt.plot(plt.gca().get_xlim(),[0,0],color='k')
-	plt.xlabel('Time [ms]')
-	plt.ylabel('Fluctuation [$cd/m^{2}$]')
-	plt.legend(['$C_{S}$','$C_{N}$'])
-	# Decision kernel locked on response time
-	plt.subplot(222)
-	plt.plot(rT,rdk[0],color='b')
-	plt.plot(rT,rdk[1],color='r')
-	plt.fill_between(rT,rdk[0]-rdk_std[0],rdk[0]+rdk_std[0],color='b',alpha=0.3,edgecolor=None)
-	plt.fill_between(rT,rdk[1]-rdk_std[1],rdk[1]+rdk_std[1],color='r',alpha=0.3,edgecolor=None)
-	plt.plot(plt.gca().get_xlim(),[0,0],color='k')
-	plt.legend(['$D_{S}$','$D_{N}$'])
-	plt.title('Locked on response time')
-	# Confidence kernel locked on response time
-	plt.subplot(224,sharex=plt.subplot(222),sharey=plt.subplot(222))
-	plt.plot(rT,rck[0],color='b')
-	plt.plot(rT,rck[1],color='r')
-	plt.fill_between(rT,rck[0]-rck_std[0],rck[0]+rck_std[0],color='b',alpha=0.3,edgecolor=None)
-	plt.fill_between(rT,rck[1]-rck_std[1],rck[1]+rck_std[1],color='r',alpha=0.3,edgecolor=None)
-	plt.plot(plt.gca().get_xlim(),[0,0],color='k')
-	plt.xlabel('Time - RT [ms]')
-	plt.legend(['$C_{S}$','$C_{N}$'])
-	plt.show()
+	if loaded_plot_libs:
+		# Plot kernels
+		plt.figure(figsize=(13,10))
+		# Decision kernel locked on stimulus onset
+		plt.subplot(221)
+		plt.plot(sT,sdk[0],color='b')
+		plt.plot(sT,sdk[1],color='r')
+		plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
+		plt.ylabel('Fluctuation [$cd/m^{2}$]')
+		plt.legend(['$D_{S}$','$D_{N}$'])
+		plt.title('Locked on onset')
+		# Confidence kernel locked on stimulus onset
+		ax = plt.subplot(223,sharex=plt.subplot(221),sharey=plt.subplot(221))
+		plt.plot(sT,sck[0],color='b')
+		plt.plot(sT,sck[1],color='r')
+		plt.fill_between(sT,sck[0]-sck_std[0],sck[0]+sck_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(sT,sck[1]-sck_std[1],sck[1]+sck_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
+		plt.xlabel('Time [ms]')
+		plt.ylabel('Fluctuation [$cd/m^{2}$]')
+		plt.legend(['$C_{S}$','$C_{N}$'])
+		# Decision kernel locked on response time
+		plt.subplot(222)
+		plt.plot(rT,rdk[0],color='b')
+		plt.plot(rT,rdk[1],color='r')
+		plt.fill_between(rT,rdk[0]-rdk_std[0],rdk[0]+rdk_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(rT,rdk[1]-rdk_std[1],rdk[1]+rdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
+		plt.legend(['$D_{S}$','$D_{N}$'])
+		plt.title('Locked on response time')
+		# Confidence kernel locked on response time
+		plt.subplot(224,sharex=plt.subplot(222),sharey=plt.subplot(222))
+		plt.plot(rT,rck[0],color='b')
+		plt.plot(rT,rck[1],color='r')
+		plt.fill_between(rT,rck[0]-rck_std[0],rck[0]+rck_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(rT,rck[1]-rck_std[1],rck[1]+rck_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
+		plt.xlabel('Time - RT [ms]')
+		plt.legend(['$C_{S}$','$C_{N}$'])
+		plt.show()
+	else:
+		print sdk,sck,sdk_std,sck_std
+		print rdk,rck,rdk_std,rck_std
 	return 0
 
 if __name__=="__main__":

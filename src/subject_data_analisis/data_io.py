@@ -2,6 +2,7 @@
 #-*- coding: UTF-8 -*-
 """ Package for loading the behavioral dataset """
 
+from __future__ import division
 import numpy as np
 from scipy import io as io
 import os, itertools, sys, random
@@ -115,32 +116,34 @@ def increase_histogram_count(d,n):
 	if np.sum(increased_histogram)<n:
 		temp = np.zeros_like(histogram)
 		cumprob = np.cumsum(histogram)/sum(histogram)
-		for i in range(n-sum(increased_histogram)):
+		for i in range(int(n-sum(increased_histogram))):
 			ind = np.searchsorted(cumprob,random.random(),'left')
 			temp[ind]+=1
 		increased_histogram+=temp
 	
 	unique_indexes = []
 	for i in range(len(ud)):
-		unique_indexes.append(np.random.permutation([i for i,uii in ui if ui==i]))
-	
+		unique_indexes.append(np.random.permutation([j for j,uii in enumerate(ui) if uii==i]))
 	
 	out = np.zeros(n)
-	indexes = np.zeros_like(out)
+	indexes = np.zeros_like(out,dtype=np.int)
 	count_per_value = np.zeros_like(increased_histogram)
 	for c in range(n):
 		cumprob = np.cumsum(increased_histogram-count_per_value)/sum(increased_histogram-count_per_value)
 		ind = np.searchsorted(cumprob,random.random(),'left')
 		out[c] = ud[ind]
-		indexes[c] = unique_indexes[ind][count_per_value[ind]%histogram[ind]]
+		indexes[c] = np.int(unique_indexes[ind][count_per_value[ind]%histogram[ind]])
 		count_per_value[ind]+=1
 	randperm_indexes = np.random.permutation(n)
-	out = out[andperm_indexes]
-	indexes = indexes[randperm_indexes]
-	return out,indexes
-
+	return out[randperm_indexes], indexes[randperm_indexes]
 
 def test(data_dir='/Users/luciano/Facultad/datos'):
+	try:
+		from matplotlib import pyplot as plt
+		loaded_plot_libs = True
+	except:
+		loaded_plot_libs = False
+	
 	subjects = unique_subjects(data_dir)
 	print str(len(subjects))+' subjects found'
 	ms = merge_subjects(subjects)
@@ -152,6 +155,34 @@ def test(data_dir='/Users/luciano/Facultad/datos'):
 	column_content = column_description()
 	print dat[0:10,:]
 	
+	print 'Testing increase_histogram'
+	
+	n = dat.shape[0]*2+10
+	targetmean,indeces = increase_histogram_count(dat[:,0],n)
+	ud, histogram = np.unique(dat[:,0], return_counts=True)
+	inc_ud, inc_histogram = np.unique(targetmean, return_counts=True)
+	print 'Increased histogram and indeces match?'
+	print np.all(targetmean==dat[indeces,0])
+	print 'Does the increase histogram have the desired number of elements?'
+	print np.sum(inc_histogram)==n
+	if loaded_plot_libs:
+		# Plot histograms
+		plt.figure(figsize=(13,10))
+		# Decision kernel locked on stimulus onset
+		plt.bar(ud-0.45,histogram/np.sum(histogram),width=0.45, bottom=0,color='b')
+		plt.bar(inc_ud,inc_histogram/np.sum(inc_histogram),width=0.45, bottom=0,color='r')
+		plt.xlabel('Unique luminance values [$cd/m^{2}$]')
+		plt.ylabel('Fraction of ocurrences')
+		plt.legend(['Raw data','Increased histogram'])
+		plt.show()
+	else:
+		print 'Unique luminance raw data and increased histogram data'
+		print ud
+		print inc_ud
+		print 'Number of ocurrences in raw data'
+		print histogram, np.sum(histogram)
+		print 'Number of ocurrences in increased histogram'
+		print inc_histogram, np.sum(inc_histogram)
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
