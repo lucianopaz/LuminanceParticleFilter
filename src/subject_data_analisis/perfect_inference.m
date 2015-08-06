@@ -30,12 +30,12 @@ prior_sigma_d = 15*ones(size(distractor));
 sigma = 5;
 n = repmat(1:size(target,2),size(target,1),1);
 
-post_sigma_t = 1./(1./prior_sigma_t.^2+n./sigma.^2);
-post_sigma_d = 1./(1./prior_sigma_d.^2+n./sigma.^2);
-post_mu_t = (prior_mu_t./prior_sigma_t.^2+cumsum(target,2)/sigma.^2).*post_sigma_t;
-post_mu_d = (prior_mu_d./prior_sigma_d.^2+cumsum(distractor,2)/sigma.^2).*post_sigma_d;
+post_va_t = 1./(1./prior_sigma_t.^2+n./sigma.^2);
+post_va_d = 1./(1./prior_sigma_d.^2+n./sigma.^2);
+post_mu_t = (prior_mu_t./prior_sigma_t.^2+cumsum(target,2)/sigma.^2).*post_va_t;
+post_mu_d = (prior_mu_d./prior_sigma_d.^2+cumsum(distractor,2)/sigma.^2).*post_va_d;
 
-dprime = post_mu_t./post_sigma_t-post_mu_d./post_sigma_d;
+dprime = post_mu_t./sqrt(post_va_t)-post_mu_d./sqrt(post_va_d);
 
 T = (0:size(target,2))*40;
 RT = data(:,2);
@@ -66,7 +66,7 @@ set(findall(gcf,'type','line'),'linewidth',2)
 
 prob_acierto = zeros(size(RT));
 for j = 1:length(RT)
-    prob_acierto(j) = 1-normcdf(0,post_mu_t(s_tdec_ind(j))-post_mu_d(s_tdec_ind(j)),post_sigma_t(s_tdec_ind(j)),post_sigma_d(s_tdec_ind(j)));
+    prob_acierto(j) = 1-normcdf(0,post_mu_t(s_tdec_ind(j))-post_mu_d(s_tdec_ind(j)),sqrt(post_va_t(s_tdec_ind(j))+post_va_d(s_tdec_ind(j))));
 end
 % sim_confidence = prob_acierto;
 % sim_confidence = 1./(1+exp(-5*(prob_acierto-median(prob_acierto))));
