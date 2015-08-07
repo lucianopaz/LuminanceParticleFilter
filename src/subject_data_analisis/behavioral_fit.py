@@ -24,20 +24,48 @@ def normcdf(x,mu=0.,sigma=1.):
 		new_x = np.sign(x-mu)*np.inf
 	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
-def fit_rt_distribution(subject,synthetic_trials=None,initial_parameters=[1.6,400.],knownVariance=25.,priors=(0.,0.,1.,1.),ISI=40.):
-	# Startup the model used to perform the inference depending on whether
-	# variance is known or not
-	if knownVariance:
-		if not isinstance(priors,dict):
-			model = pe.KnownVarPerfectInference(knownVariance,np.sqrt(knownVariance),*priors,ISI=ISI)
-		else:
-			model = pe.KnownVarPerfectInference(knownVariance,np.sqrt(knownVariance),ISI=ISI,**priors)
-	else:
-		if not isinstance(priors,dict):
-			model = pe.UnknownVarPerfectInference(*priors,ISI=ISI)
-		else:
-			model = pe.UnknownVarPerfectInference(ISI=ISI,**priors)
+def dprime_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	return post_mu_t/np.sqrt(post_va_t)-post_mu_d/np.sqrt(post_va_d)
+
+def var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	return (post_mu_t-post_mu_d)/(post_va_t+post_va_d)
+
+def dprime_var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	return post_mu_t/post_va_t-post_mu_d/post_va_d
+
+def fit_rt(subject,model,initial_parameters=[1.6,400.],ISI=40.):
+	# The parameters that will be fitted are the decision threshold and
+	# the dead time in ms after decision
 	
+	# Load the subject data and compute the subject's RT distribution
+	dat,t,d = subject.load_data()
+	t = np.mean(t,axis=2)
+	d = np.mean(d,axis=2)
+	max_rt_ind = int(math.ceil(max(dat[:,1])/ISI))
+	subject_rt = dat[:,1]
+	
+	# Prepare to compute the model RT distribution for a set of
+	# syntethic trials
+	sigma = 5.
+	target = np.zeros((len(dat),max_rt_ind+1))
+	distractor = np.zeros((len(dat),max_rt_ind+1))
+	target[:,:t.shape[1]] = t
+	distractor[:,:d.shape[1]] = d
+	target[:,t.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-t.shape[1],len(dat))+dat[:,0]).T
+	distractor[:,d.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-d.shape[1],len(dat))+50).T
+	
+	merit = rt_merit
+	ubound = np.array([20.,max_rt_ind*ISI])
+	# Initial search width
+	sigma0 = 1/3
+	# Additional cma options
+	cma_options = cma.CMAOptions()
+	cma_options.set('bounds',[np.zeros(len(ubound)),ubound])
+	cma_options.set('scaling_of_variables',ubound)
+	return cma.fmin(merit,initial_parameters,sigma0,options=cma_options,args=(subject_rt,model,target,distractor,ISI),restarts=0),np.arange(len(target)),target,distractor,model
+	#~ return [initial_parameters],np.arange(len(target)),target,distractor,model
+
+def fit_rt_distribution(subject,model,synthetic_trials=None,initial_parameters=[1.6,400.],ISI=40.):
 	# The parameters that will be fitted are the decision threshold and
 	# the dead time in ms after decision
 	
@@ -45,7 +73,8 @@ def fit_rt_distribution(subject,synthetic_trials=None,initial_parameters=[1.6,40
 	dat,t,d = subject.load_data()
 	max_rt_ind = int(math.ceil(max(dat[:,1])/ISI))
 	bin_edges = np.array(range(max_rt_ind+1))*ISI
-	subject_rt,_ = np.histogram(dat[:,1],bin_edges,density=True)
+	subject_rt = dat[:,1]
+	subject_rt_histogram,_ = np.histogram(subject_rt,bin_edges,density=True)
 	
 	# Prepare to compute the model RT distribution for a set of
 	# syntethic trials
@@ -61,10 +90,10 @@ def fit_rt_distribution(subject,synthetic_trials=None,initial_parameters=[1.6,40
 	
 	# Upper bound of parameter search space (lower bound is [0,0])
 	if len(initial_parameters)==2:
-		merit = rt_merit
+		merit = rt_histogram_merit
 		ubound = np.array([20.,bin_edges[-1]])
 	elif len(initial_parameters)==3:
-		merit = rt_merit_variable_deadtime
+		merit = rt_histogram_merit_variable_deadtime
 		ubound = np.array([20.,bin_edges[-1],200.])
 	else:
 		raise(ValueError("Initial parameters can have length 2 or 3 depending on whether a variable dead time is being fit."))
@@ -74,19 +103,25 @@ def fit_rt_distribution(subject,synthetic_trials=None,initial_parameters=[1.6,40
 	cma_options = cma.CMAOptions()
 	cma_options.set('bounds',[np.zeros(len(ubound)),ubound])
 	cma_options.set('scaling_of_variables',ubound)
-	#~ return cma.fmin(merit,initial_parameters,sigma0,options=cma_options,args=(subject_rt,bin_edges,model,target,distractor),restarts=0),indeces,target,distractor,model
+	#~ return cma.fmin(merit,initial_parameters,sigma0,options=cma_options,args=(subject_rt_histogram,bin_edges,model,target,distractor),restarts=0),indeces,target,distractor,model
 	return [initial_parameters],indeces,target,distractor,model
 
-def rt_merit(params,subject_rt,bin_edges,model,target,distractor):
+def rt_merit(params,subject_rt,model,target,distractor,ISI):
 	model.threshold = params[0]
 	simulation = model.batchInference(target,distractor)
-	simulated_rt,_ = np.histogram(simulation[:,4]+params[1],bin_edges,density=True)
-	return np.sum((subject_rt-simulated_rt)**2)#/(len(bin_edges)-1)
+	simulated_rt = simulation[:,3]+params[1]
+	return np.sum((subject_rt-simulated_rt)**2)
 
-def rt_merit_variable_deadtime(params,subject_rt,bin_edges,model,target,distractor):
+def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
 	model.threshold = params[0]
 	simulation = model.batchInference(target,distractor)
-	simulated_rt,_ = np.histogram(simulation[:,4]+params[1],bin_edges,density=True)
+	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
+	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)#/(len(bin_edges)-1)
+
+def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,model,target,distractor):
+	model.threshold = params[0]
+	simulation = model.batchInference(target,distractor)
+	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	# Include a normal fluctuation to the simulated_rt with width params[2]
 	# by convolving the simulated rt with a gaussian pdf
 	conv_window = np.linspace(-params[2]*6,params[2]*6,int(math.ceil(params[2]*12/model.ISI))+1)
@@ -94,19 +129,29 @@ def rt_merit_variable_deadtime(params,subject_rt,bin_edges,model,target,distract
 	conv_val[1:-1] = np.diff(normcdf(conv_window[:-1],0,params[2]))
 	conv_val[0] = normcdf(conv_window[0],0,params[2])
 	conv_val[-1] = 1-normcdf(conv_window[-2],0,params[2])
-	simulated_rt = np.convolve(simulated_rt,conv_val,mode='same')
-	return np.sum((subject_rt-simulated_rt)**2)#/(len(bin_edges)-1)
+	simulated_rt_histogram = np.convolve(simulated_rt_histogram,conv_val,mode='same')
+	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)#/(len(bin_edges)-1)
 
 def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
 	# Load subject data
 	subjects = io.unique_subjects(data_dir)
 	ms = io.merge_subjects(subjects)
 	dat,t,d = ms.load_data()
+	ISI = 40.
+	
+	# Set model to fit the data
+	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
+	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
+	# By defaul, model criteria is the optimum criteria
+	model.criteria = dprime_var_criteria
 	
 	# Fit model parameters
-	initial_parameters = [1.9678714549600138, 621.71742870406183, 75.978678076060476] # Obtained with a great fit
-	fit_output,indeces,target,distractor,model = fit_rt_distribution(ms,10000,initial_parameters=initial_parameters,\
-			priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2})
+	# Best fit for variable dead time with optimum criteria [1.9678714549600138, 621.71742870406183, 75.978678076060476]
+	# Best fit of rt values with optimum criteria [0.0020047699075050967, 1127.5089122768973]
+	# Best fit of rt values with dprime criteria [0.0069443615567393365, 1127.3789676635531]
+	initial_parameters = [1.6, 409.2358]
+	#~ fit_output,indeces,target,distractor,model = fit_rt(ms,model,initial_parameters=initial_parameters,ISI=ISI)
+	fit_output,indeces,target,distractor,model = fit_rt_distribution(ms,model,10000,initial_parameters=initial_parameters,ISI=ISI)
 	if len(fit_output[0])==3:
 		var_dead_time=fit_output[0][2]
 	else:
@@ -114,7 +159,6 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	
 	# Compute subject rt distribution (only for plotting purposes)
 	
-	ISI = 40.
 	max_rt_ind = int(math.ceil(max(dat[:,1])/ISI))
 	bin_edges = np.array(range(max_rt_ind+1))*ISI
 	subject_rt,bin_edges = np.histogram(dat[:,1],bin_edges,density=True)
@@ -128,7 +172,8 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	# Compute fitted model's rt distribution
 	model.threshold = fit_output[0][0]
 	simulation = model.batchInference(target,distractor)
-	simulated_rt,_ = np.histogram(simulation[:,4]+fit_output[0][1],bin_edges,density=True)
+	print simulation
+	simulated_rt,_ = np.histogram(simulation[:,3]+fit_output[0][1],bin_edges,density=True)
 	if var_dead_time:
 		conv_window = np.linspace(-var_dead_time*6,var_dead_time*6,int(math.ceil(var_dead_time*12/model.ISI))+1)
 		conv_val = np.zeros_like(conv_window)

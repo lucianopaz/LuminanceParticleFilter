@@ -35,7 +35,7 @@ post_va_d = 1./(1./prior_sigma_d.^2+n./sigma.^2);
 post_mu_t = (prior_mu_t./prior_sigma_t.^2+cumsum(target,2)/sigma.^2).*post_va_t;
 post_mu_d = (prior_mu_d./prior_sigma_d.^2+cumsum(distractor,2)/sigma.^2).*post_va_d;
 
-dprime = post_mu_t./sqrt(post_va_t)-post_mu_d./sqrt(post_va_d);
+dprime = post_mu_t./post_va_t-post_mu_d./post_va_d;
 
 T = (0:size(target,2))*40;
 RT = data(:,2);
@@ -164,7 +164,7 @@ function [sim_dec,sim_RT,tdec_ind] = simulate_decision(t,b)
         if ~isempty(ind)
             tdec_ind(i) = ind;
             sim_RT(i) = T(ind)+b;
-            if dprime(ind)>0
+            if dprime(i,ind)>0
                 sim_dec(i) = 1;
             else
                 sim_dec(i) = 2;

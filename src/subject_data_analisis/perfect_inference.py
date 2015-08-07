@@ -6,62 +6,6 @@ from __future__ import division
 import numpy as np
 import itertools, math
 
-def find(a, predicate=lambda x: x, chunk_size=1024):
-	"""
-	Find the indices of array elements that match the predicate.
-	
-	Parameters
-	----------
-	a : array_like
-		Input data, must be 1D.
-	
-	predicate : function
-		A function which operates on sections of the given array, returning
-		element-wise True or False for each data value.
-	
-	chunk_size : integer
-		The length of the chunks to use when searching for matching indices.
-		For high probability predicates, a smaller number will make this
-		function quicker, similarly choose a larger number for low
-		probabilities.
-	
-	Returns
-	-------
-	index_generator : generator
-		A generator of (indices, data value) tuples which make the predicate
-		True.
-	
-	See Also
-	--------
-	where, nonzero
-	
-	Notes
-	-----
-	This function is best used for finding the first, or first few, data values
-	which match the predicate.
-	
-	Examples
-	--------
-	>>> a = np.sin(np.linspace(0, np.pi, 200))
-	>>> result = find(a, lambda arr: arr > 0.9)
-	>>> next(result)
-	((71, ), 0.900479032457)
-	>>> np.where(a > 0.9)[0][0]
-	71
-	"""
-	if a.ndim != 1:
-		raise ValueError('The array must be 1D, not {}.'.format(a.ndim))
-	
-	i0 = 0
-	chunk_inds = itertools.chain(xrange(chunk_size, a.size, chunk_size), 
-				 [None])
-	
-	for i1 in chunk_inds:
-		chunk = a[i0:i1]
-		for inds in itertools.izip(*predicate(chunk).nonzero()):
-			yield inds[0] + i0, chunk[inds]
-		i0 = i1
-
 class onlineMeanVar():
 	def __init__(self):
 		self.reset()
@@ -139,6 +83,9 @@ class KnownVarPerfectInference(PerfectInference):
 		self.ISI = ISI
 		self.signals = []
 	
+	def criteria(self,post_mu_t,post_mu_d,post_va_t,post_va_d):
+		return (post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d)
+	
 	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
 		n = 0
 		ct = 0.
@@ -158,20 +105,19 @@ class KnownVarPerfectInference(PerfectInference):
 			post_mu_t = (self.prior_mu_t/self.prior_va_t+ct/self.var_t)*post_va_t
 			post_mu_d = (self.prior_mu_d/self.prior_va_d+cd/self.var_d)*post_va_d
 			
-			dif_mu = post_mu_t-post_mu_d
-			dif_si = np.sqrt(post_va_t+post_va_d)
-			if abs(dif_mu)/dif_si>=self.threshold:
+			criterium = self.criteria(post_mu_t,post_mu_d,post_va_t,post_va_d)
+			if abs(criterium)>=self.threshold:
 				decided = True
 			if storeSignals:
 				self.signals.append([t,d])
 		if not decided:
 			ret = decided,np.nan,np.nan,np.nan,n*self.ISI
 		else:
-			performance = 1 if dif_mu>0 else 0
-			ret = decided,performance,dif_mu,dif_si,n*self.ISI
+			performance = 1 if criterium>0 else 0
+			ret = decided,performance,criterium,n*self.ISI
 		return ret
 	
-	def batchInference(self,targetSignalArr,distractorSignalArr,returnCriteria=False):
+	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
 		s = list(targetSignalArr.shape)
@@ -187,19 +133,29 @@ class KnownVarPerfectInference(PerfectInference):
 		post_mu_t[:,1:] = (self.prior_mu_t/self.prior_va_t+np.cumsum(targetSignalArr,axis=1)/self.var_t)*post_va_t[:,1:]
 		post_mu_d[:,1:] = (self.prior_mu_d/self.prior_va_d+np.cumsum(distractorSignalArr,axis=1)/self.var_d)*post_va_d[:,1:]
 		
-		dif_mu = post_mu_t-post_mu_d
-		dif_si = np.sqrt(post_va_t+post_va_d)
-		ret = np.zeros((s[0],5))
-		for trial,(dm,ds) in enumerate(itertools.izip(dif_mu,dif_si)):
-			threshold_crossed = find(np.abs(dm)/ds>=self.threshold)
+		criterium = self.criteria(post_mu_t,post_mu_d,post_va_t,post_va_d)
+		ret = np.zeros((s[0],4))
+		if returnPosterior:
+			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'var_t':np.nan*np.zeros(s[0]),'var_d':np.nan*np.zeros(s[0])}
+		for trial,cr in enumerate(criterium):
 			try:
-				dt,_ = next(threshold_crossed)
-				performance = 1 if dm[dt]>0 else 0
-				ret[trial] = np.array([True,performance,dm[dt],ds[dt],dt*self.ISI])
-			except:
-				ret[trial] = np.array([False,np.nan,np.nan,np.nan,(s[1]-1)*self.ISI])
+				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
+				performance = 1 if cr[dt]>0 else 0
+				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+				if returnPosterior:
+					posterior['mu_t'][trial] = post_mu_t[trial,dt]
+					posterior['mu_d'][trial] = post_mu_d[trial,dt]
+					posterior['var_t'][trial] = post_va_t[trial,dt]
+					posterior['var_d'][trial] = post_va_t[trial,dt]
+			except IndexError:
+				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+		ret = (ret,)
+		if returnPosterior:
+			ret+= (posterior,)
 		if returnCriteria:
-			ret = (ret,(post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d))
+			ret+= (criterium,)
+		if len(ret)==1:
+			ret = ret[0]
 		return ret
 
 class UnknownVarPerfectInference(PerfectInference):
@@ -244,6 +200,22 @@ class UnknownVarPerfectInference(PerfectInference):
 		self.threshold = threshold
 		self.signals = []
 	
+	def criteria(self,post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d):
+		# The distribution mean, mu, follows a student's t-distribution
+		# with parameter 2 post_a. The distribution is scaled and
+		# shifted, and is written in terms of variable x that reads
+		# x = (mu-post_mu)**2*(post_nu*post_a/post_b)
+		dif_mu = post_mu_t-post_mu_d
+		if isinstance(dif_mu,np.ndarray):
+			dif_si = np.inf*np.ones_like(dif_mu)
+			dif_si[:,2:] = np.sqrt((post_b_t[:,2:]/post_nu_t[:,2:]/post_a_t[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2)+(post_b_d[:,2:]/post_nu_d[:,2:]/post_a_d[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2))
+		else:
+			if post_nu_d>2:
+				dif_si = np.sqrt((post_b_t/post_nu_t/post_a_t)**2*post_nu_d/(post_nu_d-2)+(post_b_d/post_nu_d/post_a_d)**2*post_nu_d/(post_nu_d-2))
+			else:
+				dif_si = np.inf
+		return dif_mu/dif_si
+	
 	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
 		# The probability hyperparameters are updated with sample means
 		# and variances. These must be computed online in a single pass.
@@ -273,27 +245,19 @@ class UnknownVarPerfectInference(PerfectInference):
 			post_mu_d = (self.prior_nu_d*self.prior_mu_d+n*d_mean)/(self.prior_nu_d+n)
 			post_b_d =  self.prior_b_d+0.5*d_var+0.5*n*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n)
 			
-			# The distribution mean, mu, follows a student's t-distribution
-			# with parameter 2 post_a. The distribution is scaled and
-			# shifted, and is written in terms of variable x that reads
-			# x = (mu-post_mu)**2*(post_nu*post_a/post_b)
-			dif_mu = post_mu_t-post_mu_d
-			if n>2:
-				dif_si = np.sqrt((post_b_t/post_nu_t/post_a_t)**2*post_nu_d/(post_nu_d-2)+(post_b_d/post_nu_d/post_a_d)**2*post_nu_d/(post_nu_d-2))
-			else:
-				dif_si = np.inf
-			if abs(dif_mu)/dif_si>=self.threshold:
+			criterium = self.criteria(post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d)
+			if abs(criterium)>=self.threshold:
 				decided = True
 			if storeSignals:
 				self.signals.append([t,d])
 		if not decided:
-			ret = decided,np.nan,np.nan,np.nan,n*self.ISI
+			ret = decided,np.nan,np.nan,n*self.ISI
 		else:
-			performance = 1 if dif_mu>0 else 0
-			ret = decided,performance,dif_mu,dif_si,n*self.ISI
+			performance = 1 if criterium>0 else 0
+			ret = decided,performance,criterium,n*self.ISI
 		return ret
 	
-	def batchInference(self,targetSignalArr,distractorSignalArr,returnCriteria=False):
+	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
 		s = list(targetSignalArr.shape)
@@ -325,25 +289,33 @@ class UnknownVarPerfectInference(PerfectInference):
 		post_mu_d[:,1:] = (self.prior_nu_d*self.prior_mu_d+n[:,1:]*d_mean)/(self.prior_nu_d+n[:,1:])
 		post_b_d[:,1:] = self.prior_b_d+0.5*d_var+0.5*n[:,1:]*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n[:,1:])
 		
-		
-		# The distribution mean, mu, follows a student's t-distribution
-		# with parameter 2 post_a. The distribution is scaled and
-		# shifted, and is written in terms of variable x that reads
-		# x = (mu-post_mu)**2*(post_nu*post_a/post_b)
-		dif_mu = post_mu_t-post_mu_d
-		dif_si = np.inf*np.ones_like(dif_mu)
-		dif_si[:,2:] = np.sqrt((post_b_t[:,2:]/post_nu_t[:,2:]/post_a_t[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2)+(post_b_d[:,2:]/post_nu_d[:,2:]/post_a_d[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2))
-		ret = np.zeros((s[0],5))
-		for trial,(dm,ds) in enumerate(itertools.izip(dif_mu,dif_si)):
-			threshold_crossed = find(np.abs(dm)/ds>=self.threshold)
+		criterium = self.criteria(post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d)
+		ret = np.zeros((s[0],4))
+		if returnPosterior:
+			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'nu_t':np.nan*np.zeros(s[0]),'nu_d':np.nan*np.zeros(s[0]),'b_t':np.nan*np.zeros(s[0]),'b_d':np.nan*np.zeros(s[0]),'a_t':np.nan*np.zeros(s[0]),'a_d':np.nan*np.zeros(s[0])}
+		for trial,cr in enumerate(criterium):
 			try:
-				dt,_ = next(threshold_crossed)
-				performance = 1 if dm[dt]>0 else 0
-				ret[trial] = np.array([True,performance,dm[dt],ds[dt],dt*self.ISI])
-			except:
-				ret[trial] = np.array([False,np.nan,np.nan,np.nan,(s[1]-1)*self.ISI])
+				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
+				performance = 1 if cr[dt]>0 else 0
+				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+				if returnPosterior:
+					posterior['mu_t'][trial] = post_mu_t[trial,dt]
+					posterior['mu_d'][trial] = post_mu_d[trial,dt]
+					posterior['nu_t'][trial] = post_nu_t[trial,dt]
+					posterior['nu_d'][trial] = post_nu_d[trial,dt]
+					posterior['a_t'][trial] = post_a_t[trial,dt]
+					posterior['a_d'][trial] = post_a_t[trial,dt]
+					posterior['b_t'][trial] = post_b_t[trial,dt]
+					posterior['b_d'][trial] = post_b_t[trial,dt]
+			except IndexError:
+				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+		ret = (ret,)
+		if returnPosterior:
+			ret+= (posterior,)
 		if returnCriteria:
-			ret = (ret,(post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d))
+			ret+= (criterium,)
+		if len(ret)==1:
+			ret = ret[0]
 		return ret
 
 def test():
@@ -358,17 +330,17 @@ def test():
 	
 	kmodel = KnownVarPerfectInference(model_var_t=var_t,model_var_d=var_d)
 	umodel = UnknownVarPerfectInference()
-	onlinekRes = np.zeros((trials,5))
-	onlineuRes = np.zeros((trials,5))
+	onlinekRes = np.zeros((trials,4))
+	onlineuRes = np.zeros((trials,4))
 	for trial,(t,d) in enumerate(itertools.izip(target,distractor)):
 		# Known variance inference
-		decided,performance,dif_mu,dif_si,rt = kmodel.onlineInference(t,d)
-		onlinekRes[trial] = np.array([decided,performance,dif_mu,dif_si,rt])
+		decided,performance,criter,rt = kmodel.onlineInference(t,d)
+		onlinekRes[trial] = np.array([decided,performance,criter,rt])
 		# Unknown variance inference
-		decided,performance,dif_mu,dif_si,rt = umodel.onlineInference(t,d)
-		onlineuRes[trial] = np.array([decided,performance,dif_mu,dif_si,rt])
-	batchkRes = kmodel.batchInference(target,distractor)
-	batchuRes = umodel.batchInference(target,distractor)
+		decided,performance,criter,rt = umodel.onlineInference(t,d)
+		onlineuRes[trial] = np.array([decided,performance,criter,rt])
+	batchkRes,kposterior = kmodel.batchInference(target,distractor,returnPosterior=True)
+	batchuRes,uposterior = umodel.batchInference(target,distractor,returnPosterior=True)
 	
 	kequal = False
 	if np.all(np.isnan(onlinekRes)==np.isnan(onlinekRes)):
@@ -390,6 +362,41 @@ def test():
 	print onlineuRes
 	if not uequal:
 		print batchuRes
+	print "Known variance posteriors"
+	print kposterior
+	print "Unknown variance posteriors"
+	print uposterior
+	
+	matlab_comparison()
+
+def matlab_comparison():
+	from scipy import io as io
+	from matplotlib import pyplot as plt
+	aux = io.loadmat('mat_py_comp.mat')
+	model = KnownVarPerfectInference(model_var_t=aux['sigma'][0][0]**2,model_var_d=aux['sigma'][0][0]**2,\
+				prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
+				threshold=aux['threshold'][0][0],ISI=aux['ISI'][0][0])
+	target = aux['target']
+	distractor = aux['distractor']
+	mat_ret = aux['ret']
+	py_ret,criterium = model.batchInference(target,distractor,returnCriteria=True)
+	equal = False
+	if np.all(np.isnan(mat_ret)==np.isnan(py_ret)):
+		mat_temp = mat_ret[np.logical_not(np.isnan(mat_ret))]
+		py_temp = py_ret[np.logical_not(np.isnan(py_ret))]
+		if np.all(np.abs(py_temp-mat_temp)<1e-12):
+			equal = True
+	print "Got equal results in python and matlab? ",equal
+	
+	plt.subplot(211)
+	plt.imshow(criterium[:,1:]-aux['dprime'],aspect='auto',interpolation='none')
+	plt.title("Difference between the criteria for every trial and time step")
+	plt.colorbar()
+	plt.subplot(212)
+	plt.imshow(py_ret-mat_ret,aspect='auto',interpolation='none')
+	plt.title("Difference between the python and matlab result matrices for every trial")
+	plt.colorbar()
+	plt.show()
 
 if __name__=="__main__":
 	test()
