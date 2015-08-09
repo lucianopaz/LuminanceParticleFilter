@@ -372,6 +372,7 @@ def test():
 def matlab_comparison():
 	from scipy import io as io
 	from matplotlib import pyplot as plt
+	import kernels as ke
 	aux = io.loadmat('mat_py_comp.mat')
 	model = KnownVarPerfectInference(model_var_t=aux['sigma'][0][0]**2,model_var_d=aux['sigma'][0][0]**2,\
 				prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
@@ -379,6 +380,13 @@ def matlab_comparison():
 	target = aux['target']
 	distractor = aux['distractor']
 	mat_ret = aux['ret']
+	
+	#~ def dprime_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+		#~ return post_mu_t/np.sqrt(post_va_t)-post_mu_d/np.sqrt(post_va_d)
+	#~ 
+	#~ def dprime_var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+		#~ return post_mu_t/post_va_t-post_mu_d/post_va_d
+	#~ model.criteria = dprime_criteria
 	py_ret,criterium = model.batchInference(target,distractor,returnCriteria=True)
 	equal = False
 	if np.all(np.isnan(mat_ret)==np.isnan(py_ret)):
@@ -388,6 +396,14 @@ def matlab_comparison():
 			equal = True
 	print "Got equal results in python and matlab? ",equal
 	
+	fluctuations = np.transpose(np.array([aux['tfluct'],aux['dfluct']]),(1,0,2))
+	selection = 1-py_ret[:,1]
+	#~ selection[np.isnan(selection)] = 1
+	py_dk,_,py_dks,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
+	
+	print "Got equal kernels in python and matlab? ",True if (np.sum(np.abs(py_dk-aux['dk']))<1e-12 and np.sum(np.abs(py_dks-aux['dks']))<1e-12) else False
+	
+	plt.figure
 	plt.subplot(211)
 	plt.imshow(criterium[:,1:]-aux['dprime'],aspect='auto',interpolation='none')
 	plt.title("Difference between the criteria for every trial and time step")
@@ -396,6 +412,14 @@ def matlab_comparison():
 	plt.imshow(py_ret-mat_ret,aspect='auto',interpolation='none')
 	plt.title("Difference between the python and matlab result matrices for every trial")
 	plt.colorbar()
+	
+	plt.figure()
+	plt.subplot(211)
+	plt.plot(py_dk.T-aux['dk'].T)
+	plt.title('Decision kernel difference')
+	plt.subplot(212)
+	plt.plot(py_dks.T-aux['dks'].T)
+	plt.title('Decision kernel std difference')
 	plt.show()
 
 if __name__=="__main__":
