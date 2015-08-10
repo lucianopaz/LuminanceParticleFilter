@@ -3,8 +3,8 @@ ISI = 40;
 
 subjects = unique_subjects(datadir);
 [data,target,distractor] = load_stim_and_trial(subjects,6);
-tfluct = nan(size(tfluct,1),125); tfluct(:,1:size(target,2)) = squeeze(mean(target,3))-repmat(data(:,1),1,size(target,2));
-dfluct = nan(size(dfluct,1),125); dfluct(:,1:size(target,2)) = squeeze(mean(distractor,3))-50;
+tfluct = nan(size(target,1),125); tfluct(:,1:size(target,2)) = squeeze(mean(target,3))-repmat(data(:,1),1,size(target,2));
+dfluct = nan(size(target,1),125); dfluct(:,1:size(target,2)) = squeeze(mean(distractor,3))-50;
 
 target = repmat(squeeze(mean(target,3)),1,5);
 tfluct(:,26:end) = randn(size(target,1),size(target,2)-25)*5;
@@ -64,4 +64,6 @@ ret = [decided,performance,criterium,rt];
 selection = performance;
 selection(performance==0) = 2;
 [dk,ck,dks,cks] = kernels(tfluct,dfluct,selection,ones(size(selection)));
-save('mat_py_comp.mat','ISI','sigma','target','distractor','threshold','pr_mu_t','pr_mu_d','pr_va_t','pr_va_d','ret','dprime','tfluct','dfluct','dk','dks');
+% save('mat_py_comp.mat','ISI','sigma','target','distractor','threshold','pr_mu_t','pr_mu_d','pr_va_t','pr_va_d','ret','dprime','tfluct','dfluct','dk','dks');
+%%
+errorzone(dk(:,1:25)',dks(:,1:25)','edgealpha',0,'facealpha',0.3)

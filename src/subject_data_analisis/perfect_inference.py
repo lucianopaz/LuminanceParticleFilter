@@ -86,6 +86,13 @@ class KnownVarPerfectInference(PerfectInference):
 	def criteria(self,post_mu_t,post_mu_d,post_va_t,post_va_d):
 		return (post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d)
 	
+	def copy(self):
+		output = KnownVarPerfectInference(model_var_t=self.var_t,model_var_d=self.var_d,\
+				prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,prior_va_t=self.prior_va_t,\
+				prior_va_d=self.prior_va_d,threshold=self.threshold,ISI=self.ISI)
+		output.signals = self.signals.copy()
+		return output
+	
 	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
 		n = 0
 		ct = 0.
@@ -215,6 +222,22 @@ class UnknownVarPerfectInference(PerfectInference):
 			else:
 				dif_si = np.inf
 		return dif_mu/dif_si
+	
+	def copy(self):
+		self.prior_mu_t = prior_mu_t
+		self.prior_mu_d = prior_mu_d
+		self.prior_nu_t = prior_nu_t
+		self.prior_nu_d = prior_nu_d
+		self.prior_a_t = prior_a_t
+		self.prior_a_d = prior_a_d
+		self.prior_b_t = prior_b_t
+		self.prior_b_d = prior_b_d
+		output = KnownVarPerfectInference(prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,\
+				prior_nu_t=self.prior_nu_t,prior_nu_d=self.prior_nu_d,prior_a_t=self.prior_a_t,\
+				prior_a_d=self.prior_a_d,prior_b_t=self.prior_b_t,prior_b_d=self.prior_b_d,\
+				threshold=self.threshold,ISI=self.ISI)
+		output.signals = self.signals.copy()
+		return output
 	
 	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
 		# The probability hyperparameters are updated with sample means

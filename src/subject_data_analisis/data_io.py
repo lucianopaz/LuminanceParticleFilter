@@ -47,6 +47,8 @@ class subject:
 				all_distractor = np.concatenate((all_distractor,distractor),axis=0)
 			first_element = False
 		return all_data,all_target,all_distractor
+	def copy(self):
+		return subject(self.name,self.id,self.blocks.copy(),self.data_files.copy(),self.nsessions)
 
 def column_description():
 	out = ['mean target lum','RT','performance','confidence','selected side','subject id','experiment block']
