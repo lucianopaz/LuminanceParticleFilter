@@ -173,6 +173,34 @@ class Fitter():
 		self.fit_output = (self.initial_parameters,)
 		return self.fit_output
 	
+	def __getinitargs__(self):
+		objective = 'rt distribution' if self.fitype==0 else 'rt'
+		if self.model.criteria== optimal_criteria:
+			criteria = 'optimal'
+		elif self.model.criteria == dprime_criteria:
+			criteria = 'dprime'
+		elif self.model.criteria == dprime_var_criteria:
+			criteria = 'dprime_var'
+		elif self.model.criteria == var_criteria:
+			criteria = 'var'
+		else:
+			criteria = None
+		return (self.subject,self.model,objective,self.initial_parameters,self.cma_options['bounds'][1],\
+			criteria,self.synthetic_trials,self.cma_sigma,self.cma_options,self.use_subject_signals)
+	
+	def __setstate__(self,state):
+		self.subject = state['subject']
+		self.model = state['model']
+		self.use_subject_signals = state['use_subject_signals']
+		self.fittype = state['fittype']
+		self.synthetic_trials = state['synthetic_trials']
+		self.initial_parameters = state['initial_parameters']
+		self.merit = state['merit']
+		self.cma_sigma = state['cma_sigma']
+		self.cma_options = state['cma_options']
+		self.synthetic_data = state['synthetic_data']
+		self.fit_ouput = state['fit_ouput']
+	
 	def __dict__(self):
 		return {'subject':self.subject,'model':self.model,'use_subject_signals':self.use_subject_signals,\
 				'fittype':self.fittype,'synthetic_trials':self.synthetic_trials,'initial_parameters':self.initial_parameters,\
@@ -184,8 +212,8 @@ class Fitter():
 			filename+='.pkl'
 		if os.path.isfile(filename) and not overwrite:
 			raise(IOError("Supplied file %s already exits. If use wish to overwrite it, call save(...,overwrite=True) instead",filename))
-		f = open(filename,'w')
-		pickle.dump(self,f)
+		f = open(filename,'wb')
+		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
 
 def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
