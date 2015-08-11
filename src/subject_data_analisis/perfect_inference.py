@@ -84,6 +84,10 @@ class KnownVarPerfectInference(PerfectInference):
 		self.signals = []
 	
 	def criteria(self,post_mu_t,post_mu_d,post_va_t,post_va_d):
+		"""
+		Optimal decision criteria for discriminating which of two gaussians
+		has higher mean. (mu_t-mu_d)/sqrt(var_t+var_d)
+		"""
 		return (post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d)
 	
 	def copy(self):

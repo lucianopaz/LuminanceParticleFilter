@@ -18,6 +18,10 @@ import sys, itertools, math, cma, os, pickle
 
 _vectErf = np.vectorize(math.erf,otypes=[np.float])
 def normcdf(x,mu=0.,sigma=1.):
+	"""
+	Compute normal cummulative distribution with mean mu and standard
+	deviation sigma. x can be a numpy array.
+	"""
 	try:
 		new_x = (x-mu)/sigma
 	except ZeroDivisionError:
@@ -25,30 +29,62 @@ def normcdf(x,mu=0.,sigma=1.):
 	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
 def optimal_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	"""
+	Optimal decision criteria for discriminating which of two gaussians
+	has higher mean. (mu_t-mu_d)/sqrt(var_t+var_d)
+	"""
 	return (post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d)
 
 def dprime_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	"""
+	Dprime decision criteria for discriminating which of two gaussians
+	has higher mean. mu_t/sqrt(var_t)-mu_d/sqrt(var_d)
+	"""
 	return post_mu_t/np.sqrt(post_va_t)-post_mu_d/np.sqrt(post_va_d)
 
 def var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	"""
+	Modification of optimal decision criteria for discriminating which
+	of two gaussians has higher mean. (mu_t-mu_d)/(var_t+var_d)
+	"""
 	return (post_mu_t-post_mu_d)/(post_va_t+post_va_d)
 
 def dprime_var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+	"""
+	Modification of dprime decision criteria for discriminating which of
+	two gaussians has higher mean. mu_t/var_t-mu_d/var_d
+	"""
 	return post_mu_t/post_va_t-post_mu_d/post_va_d
 
 def rt_merit(params,subject_rt,model,target,distractor,ISI):
+	"""
+	Compute least square difference between subject and simulation
+	response times. This assumes that the subject and the model viewed
+	exactly the same stimuli, allowing trial to trial comparison of RT.
+	"""
 	model.threshold = params[0]
 	simulation = model.batchInference(target,distractor)
 	simulated_rt = simulation[:,3]+params[1]
 	return np.sum((subject_rt-simulated_rt)**2)
 
 def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
+	"""
+	Compute least square difference between subject and simulation
+	response time histograms. This only compares the histograms of RT's
+	for the model and the subjects, it does not compare differences
+	between response time pairs as rt_merit. This function can be used
+	even when the model and the subject did not see the same stimuli.
+	"""
 	model.threshold = params[0]
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
 
 def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,model,target,distractor):
+	"""
+	The same as rt_histogram but allowing for random time shifts added
+	to the model decision times.
+	"""
 	model.threshold = params[0]
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
@@ -82,7 +118,7 @@ class Fitter():
 		else:
 			self.model = pe.UnknownVarPerfectInference()
 			self.model.ISI = 40.
-		if criteria:
+		if criteria is not None:
 			if criteria.lower()=='optimal':
 				self.model.criteria = optimal_criteria
 			elif criteria.lower()=='dprime':
@@ -99,7 +135,7 @@ class Fitter():
 		# Objective function (merit)
 		if objective.lower() in ('rt distribution','rt histogram','rt_distribution','rt_histogram'):
 			self.fittype = 0
-			if initial_parameters:
+			if initial_parameters is not None:
 				self.initial_parameters = initial_parameters
 			else:
 				self.initial_parameters = np.random.random(2)
@@ -107,7 +143,7 @@ class Fitter():
 				self.merit = rt_histogram_merit
 			else:
 				self.merit = rt_histogram_merit_variable_deadtime
-			if self.use_subject_signals and synthetic_trials:
+			if self.use_subject_signals and (synthetic_trials is not None):
 				raise(Warning("Variable synthetic_trials is not used when use_subject_signals is True"))
 				self.synthetic_trials = None
 			else:
@@ -117,7 +153,7 @@ class Fitter():
 				raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
 			self.fittype = 1
 			self.synthetic_trials = None
-			if synthetic_trials:
+			if synthetic_trials is not None:
 				raise(Warning("Variable synthetic_trials is not used when the objective is to fit the RT values"))
 			self.initial_parameters = initial_parameters
 			self.merit = rt_merit
@@ -126,7 +162,7 @@ class Fitter():
 		# CMA parameters
 		self.cma_sigma = cma_sigma
 		self.cma_options = cma_options
-		if ubounds:
+		if ubounds is not None:
 			if len(ubounds)!=len(initial_parameters):
 				raise(ValueError("Parameter upper boundary must be an array with the same length as the supplied initial_parameters"))
 			self.cma_options.set('bounds',[np.zeros(len(initial_parameters)),ubounds])
@@ -134,7 +170,7 @@ class Fitter():
 		
 		# Fitting output
 		self.synthetic_data = {}
-		self.fit_ouput = {}
+		self.fit_output = {}
 	
 	def fit(self,restarts=0,**kwargs):
 		# Load subject data
@@ -173,21 +209,6 @@ class Fitter():
 		self.fit_output = (self.initial_parameters,)
 		return self.fit_output
 	
-	def __getinitargs__(self):
-		objective = 'rt distribution' if self.fitype==0 else 'rt'
-		if self.model.criteria== optimal_criteria:
-			criteria = 'optimal'
-		elif self.model.criteria == dprime_criteria:
-			criteria = 'dprime'
-		elif self.model.criteria == dprime_var_criteria:
-			criteria = 'dprime_var'
-		elif self.model.criteria == var_criteria:
-			criteria = 'var'
-		else:
-			criteria = None
-		return (self.subject,self.model,objective,self.initial_parameters,self.cma_options['bounds'][1],\
-			criteria,self.synthetic_trials,self.cma_sigma,self.cma_options,self.use_subject_signals)
-	
 	def __setstate__(self,state):
 		self.subject = state['subject']
 		self.model = state['model']
@@ -199,13 +220,13 @@ class Fitter():
 		self.cma_sigma = state['cma_sigma']
 		self.cma_options = state['cma_options']
 		self.synthetic_data = state['synthetic_data']
-		self.fit_ouput = state['fit_ouput']
+		self.fit_output = state['fit_output']
 	
-	def __dict__(self):
+	def __getstate__(self):
 		return {'subject':self.subject,'model':self.model,'use_subject_signals':self.use_subject_signals,\
 				'fittype':self.fittype,'synthetic_trials':self.synthetic_trials,'initial_parameters':self.initial_parameters,\
 				'merit':self.merit,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
-				'synthetic_data':self.synthetic_data,'fit_ouput':self.fit_ouput}
+				'synthetic_data':self.synthetic_data,'fit_output':self.fit_output}
 	
 	def save(self,filename,overwrite=False):
 		if not filename.endswith('.pkl'):
@@ -228,14 +249,27 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
 	initial_parameters = [1.9678714549600138, 621.71742870406183, 75.978678076060476]
 	ubounds = [20.,max(dat[:,1]),200.]
+	
 	fitter = Fitter(ms,model,objective=u'rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
 				criteria=None,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
-	fitter.save('Fit_test')
 	
+	#~ if os.path.isfile('Fit_test.pkl'):
+		#~ fitter = load_fitter('Fit_test')
+		#~ fit_output = fitter.fit_output
+	#~ else:
 	fit_output = fitter.fit(restarts=0)
+	fitter.save('Fit_test',overwrite=True)
 	target = fitter.synthetic_data['target']
 	distractor = fitter.synthetic_data['distractor']
 	indeces = fitter.synthetic_data['indeces']
+	
+	#~ fitter2 = load_fitter('Fit_test')
+	#~ target2 = fitter2.synthetic_data['target']
+	#~ distractor2 = fitter2.synthetic_data['distractor']
+	#~ indeces2 = fitter2.synthetic_data['indeces']
+	#~ print target-target2
+	#~ print distractor-distractor2
+	#~ print indeces-indeces2
 	
 	if len(fit_output[0])==3:
 		var_dead_time=fit_output[0][2]
