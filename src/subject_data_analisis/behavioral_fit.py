@@ -80,6 +80,25 @@ def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
 
+def conv_hist(h,p,ISI,mode='full'):
+	conv_window = np.linspace(-p*6,p*6,int(math.ceil(p*12/ISI))+1)
+	conv_val = np.zeros_like(conv_window)
+	conv_val[1:-1] = np.diff(normcdf(conv_window[:-1],0,p))
+	conv_val[0] = normcdf(conv_window[0],0,p)
+	conv_val[-1] = 1-normcdf(conv_window[-2],0,p)
+	ch = np.convolve(h,conv_val,mode=mode)
+	a = int(0.5*(ch.shape[0]-h.shape[0]))
+	if a==0:
+		if 0.5*(ch.shape[0]-h.shape[0])==0:
+			ret = ch
+		else:
+			ret = ch[:-1]
+	elif a==0.5*(ch.shape[0]-h.shape[0]):
+		ret = ch[a:-a]
+	else:
+		ret = ch[a:-a-1]
+	return ret
+
 def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,model,target,distractor):
 	"""
 	The same as rt_histogram but allowing for random time shifts added
@@ -90,12 +109,7 @@ def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,m
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	# Include a normal fluctuation to the simulated_rt with width params[2]
 	# by convolving the simulated rt with a gaussian pdf
-	conv_window = np.linspace(-params[2]*6,params[2]*6,int(math.ceil(params[2]*12/model.ISI))+1)
-	conv_val = np.zeros_like(conv_window)
-	conv_val[1:-1] = np.diff(normcdf(conv_window[:-1],0,params[2]))
-	conv_val[0] = normcdf(conv_window[0],0,params[2])
-	conv_val[-1] = 1-normcdf(conv_window[-2],0,params[2])
-	simulated_rt_histogram = np.convolve(simulated_rt_histogram,conv_val,mode='same')
+	simulated_rt_histogram = conv_hist(simulated_rt_histogram,params[2],model.ISI)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
 
 def load_fitter(filename):
@@ -123,7 +137,7 @@ class Fitter():
 				self.model.criteria = optimal_criteria
 			elif criteria.lower()=='dprime':
 				self.model.criteria = dprime_criteria
-			elif criteria.lower()=='dprime_var':
+			elif criteria.lower()=='dprime-var':
 				self.model.criteria = dprime_var_criteria
 			elif criteria.lower()=='var':
 				self.model.criteria = var_criteria
@@ -169,8 +183,8 @@ class Fitter():
 			self.cma_options.set('scaling_of_variables',ubounds)
 		
 		# Fitting output
-		self.synthetic_data = {}
-		self.fit_output = {}
+		self.synthetic_data = {'target':None,'distractor':None,'indeces':None}
+		self.fit_output = (None,None,None,None,None,None,None,None)
 	
 	def fit(self,restarts=0,**kwargs):
 		# Load subject data
@@ -205,8 +219,13 @@ class Fitter():
 			args = (subject_rt,self.model,target,distractor,self.model.ISI)
 		else:
 			args = (None,)
-		#~ self.fit_output = cma.fmin(self.merit,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
-		self.fit_output = (self.initial_parameters,)
+		cma_fmin_output = cma.fmin(self.merit,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
+		stop_cond = {}
+		for key in cma_fmin_output[7].keys():
+			stop_cond[key] = cma_fmin_output[7][key]
+		self.fit_output = {'xopt':cma_fmin_output[0],'fopt':cma_fmin_output[1],'evalsopt':cma_fmin_output[2],\
+						   'evals':cma_fmin_output[3],'iterations':cma_fmin_output[4],'xmean':cma_fmin_output[5],\
+						   'stds':cma_fmin_output[6],'stop':stop_cond}
 		return self.fit_output
 	
 	def __setstate__(self,state):
@@ -228,6 +247,21 @@ class Fitter():
 				'merit':self.merit,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
 				'synthetic_data':self.synthetic_data,'fit_output':self.fit_output}
 	
+	def get_criteria(self):
+		cri_name = self.model.criteria.func_name
+		if cri_name not in ('criteria','optimal_criteria','dprime_criteria','var_criteria','dprime_var_criteria'):
+			criteria = cri_name
+		else:
+			if cri_name in ('criteria','optimal_criteria'):
+				criteria = 'optimal'
+			elif cri_name=='dprime_criteria':
+				criteria = 'dprime'
+			elif cri_name=='dprime_var_criteria':
+				criteria = 'dprime-var'
+			elif cri_name=='var_criteria':
+				criteria = 'var'
+		return criteria
+	
 	def save(self,filename,overwrite=False):
 		if not filename.endswith('.pkl'):
 			filename+='.pkl'
@@ -236,6 +270,117 @@ class Fitter():
 		f = open(filename,'wb')
 		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
+
+def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
+	# Fit parameters for each subject and then for all subjects
+	subjects = io.unique_subjects(data_dir)
+	subjects.append(io.merge_subjects(subjects))
+	ISI = 40.
+	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
+	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
+	initial_parameters = [1.9678714549600138, 621.71742870406183, 75.978678076060476]
+	ubounds = [20.,5000.,200.]
+	counter = 0
+	for s in subjects:
+		for criteria in ['optimal','dprime','dprime-var','var']:
+			counter+=1
+			print counter
+			fitter = Fitter(s,model,objective='rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
+					criteria=criteria,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
+			fitter.fit(restarts=0)
+			filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_rtd'
+			fitter.save(filename,overwrite=True)
+
+def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=True):
+	files = [f for f in os.listdir(fit_dir) if f.endswith(".pkl")]
+	figures = []
+	ids = []
+	for f in files:
+		temp = f.split("_")
+		sid = temp[2]
+		ids.append(sid)
+		cri = temp[4]
+		obj = temp[6][:-4]
+		if sid not in subject_id:
+			if subject_id!='all':
+				continue
+		sname = 'all' if sid=='0' else str(sid)
+		if cri not in criteria:
+			if criteria!='all':
+				continue
+		if obj not in objective:
+			if objective!='all':
+				continue
+		
+		fitter = load_fitter(fit_dir+f)
+		subject = fitter.subject
+		model = fitter.model
+		target = fitter
+		# Load subject data and compute RT distribution and kernels
+		dat,t,d = subject.load_data()
+		max_rt_ind = int(math.ceil(max(dat[:,1])/model.ISI))
+		bin_edges = np.array(range(max_rt_ind+1))*model.ISI
+		subject_rt,_ = np.histogram(dat[:,1],bin_edges,density=True)
+		t = (np.mean(t,axis=2,keepdims=False).T-dat[:,0]).T
+		d = np.mean(d,axis=2,keepdims=False)-50
+		fluctuations = np.transpose(np.array([t,d]),(1,0,2))
+		sdk,sck,sdk_std,sck_std = ke.kernels(fluctuations,1-dat[:,2],dat[:,3]-1)
+		sT = np.array(range(sdk.shape[1]),dtype=float)*model.ISI
+		
+		target = fitter.synthetic_data['target']
+		distractor = fitter.synthetic_data['distractor']
+		indeces = fitter.synthetic_data['indeces']
+		model.threshold = fitter.fit_output['xopt'][0]
+		dead_time = fitter.fit_output['xopt'][1]
+		if len(fitter.fit_output['xopt'])>2:
+			var_dead_time = fitter.fit_output['xopt'][2]
+		else:
+			var_dead_time = None
+		simulation = model.batchInference(target,distractor)
+		simulated_rt,_ = np.histogram(simulation[:,3]+dead_time,bin_edges,density=True)
+		if var_dead_time:
+			simulated_rt = conv_hist(simulated_rt,var_dead_time,model.ISI)
+		simulated_sel = 1-simulation[:,1]
+		simulated_sel[np.isnan(simulated_sel)] = 1
+		sim_fluctuations = np.transpose(np.array([target.T-dat[indeces,0],distractor.T-50]),(2,0,1))
+		sim_sdk,sim_sck,sim_sdk_std,sim_sck_std = ke.kernels(sim_fluctuations,simulated_sel,np.ones_like(simulated_sel))
+		sim_sT = np.array(range(sim_sdk.shape[1]),dtype=float)*model.ISI
+		sim_sT[sdk.shape[1]:] = np.nan
+		sim_sdk[:,sdk.shape[1]:] = np.nan
+		sim_sck[:,sdk.shape[1]:] = np.nan
+		sim_sdk_std[:,sdk.shape[1]:] = np.nan
+		sim_sck_std[:,sdk.shape[1]:] = np.nan
+		
+		if not interactive_pyplot:
+			plt.ioff() # cma overrides original pyplot settings and if interactive mode was off, the plot is never displayed!
+		figures.append(plt.figure(figsize=(13,10)))
+		plt.subplot(121)
+		plt.plot(bin_edges[:-1],subject_rt,'k')
+		plt.plot(bin_edges[:-1],simulated_rt,'r')
+		plt.legend(['Subject','Simulation'])
+		plt.xlabel('Response time [ms]')
+		plt.ylabel('Prob density [1/ms]')
+		plt.subplot(122)
+		plt.plot(sT,sdk[0],color='b',linestyle='--')
+		plt.plot(sT,sdk[1],color='r',linestyle='--')
+		plt.plot(sim_sT,sim_sdk[0],color='b')
+		plt.plot(sim_sT,sim_sdk[1],color='r')
+		plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.fill_between(sim_sT,sim_sdk[0]-sim_sdk_std[0],sim_sdk[0]+sim_sdk_std[0],color='b',alpha=0.3,edgecolor=None)
+		plt.fill_between(sim_sT,sim_sdk[1]-sim_sdk_std[1],sim_sdk[1]+sim_sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
+		plt.xlabel('Time [ms]')
+		plt.ylabel('Fluctuation [$cd/m^{2}$]')
+		plt.legend(['Subject $D_{S}$','Subject $D_{N}$','Simulated $D_{S}$','Simulated $D_{N}$'])
+		plt.suptitle('Subject='+sname+'; criteria='+cri+'; objective='+obj)
+	if save:
+		from matplotlib.backends.backend_pdf import PdfPages
+		with PdfPages('../../figs/fits.pdf') as pdf:
+			for fig in [f for (i,f) in sorted(zip(ids,figures), key=lambda pair: pair[0])]:
+				pdf.savefig(fig)
+	else:
+		plt.show()
 
 def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
 	# Load subject data
@@ -250,7 +395,7 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	initial_parameters = [1.9678714549600138, 621.71742870406183, 75.978678076060476]
 	ubounds = [20.,max(dat[:,1]),200.]
 	
-	fitter = Fitter(ms,model,objective=u'rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
+	fitter = Fitter(ms,model,objective='rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
 				criteria=None,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
 	
 	#~ if os.path.isfile('Fit_test.pkl'):
@@ -343,6 +488,6 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
-		test(sys.argv[1])
+		fit_all_subjects(sys.argv[1])
 	else:
-		test()
+		fit_all_subjects()
