@@ -14,7 +14,7 @@ try:
 	loaded_plot_libs = True
 except:
 	loaded_plot_libs = False
-import sys, itertools, math, cma, os, pickle
+import sys, itertools, math, cma, os, pickle, warnings
 
 _vectErf = np.vectorize(math.erf,otypes=[np.float])
 def normcdf(x,mu=0.,sigma=1.):
@@ -125,7 +125,6 @@ class Fitter():
 				criteria=None,synthetic_trials=None,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False):
 		# Subject data
 		self.subject = subject
-		self.use_subject_signals = use_subject_signals
 		# Model
 		if model:
 			self.model = model
@@ -147,7 +146,8 @@ class Fitter():
 			# Use the supplied model's criteria
 			pass
 		# Objective function (merit)
-		if objective.lower() in ('rt distribution','rt histogram','rt_distribution','rt_histogram'):
+		if objective.lower() in ('rtd','rt distribution','rt histogram','rt_distribution','rt_histogram'):
+			self.use_subject_signals = use_subject_signals
 			self.fittype = 0
 			if initial_parameters is not None:
 				self.initial_parameters = initial_parameters
@@ -158,17 +158,20 @@ class Fitter():
 			else:
 				self.merit = rt_histogram_merit_variable_deadtime
 			if self.use_subject_signals and (synthetic_trials is not None):
-				raise(Warning("Variable synthetic_trials is not used when use_subject_signals is True"))
+				warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 				self.synthetic_trials = None
 			else:
 				self.synthetic_trials = synthetic_trials
 		elif objective.lower()=='rt':
+			if not use_subject_signals:
+				warnings.warn("When the objective is to fit subject RT values (not the distribution), use_subject_values is always set as True",RuntimeWarning)
+			self.use_subject_signals = True
 			if len(initial_parameters)!=2:
 				raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
 			self.fittype = 1
 			self.synthetic_trials = None
 			if synthetic_trials is not None:
-				raise(Warning("Variable synthetic_trials is not used when the objective is to fit the RT values"))
+				warnings.warn("Variable synthetic_trials is not used when the objective is to fit the RT values",RuntimeWarning)
 			self.initial_parameters = initial_parameters
 			self.merit = rt_merit
 		else:
@@ -204,8 +207,8 @@ class Fitter():
 		target = np.zeros((n_trials,max_rt_ind+1))
 		distractor = np.zeros((n_trials,max_rt_ind+1))
 		if self.use_subject_signals:
-			target[:,:t.shape[1]] = t
-			distractor[:,:d.shape[1]] = d
+			target[:,:t.shape[1]] = np.mean(t,axis=2)
+			distractor[:,:d.shape[1]] = np.mean(d,axis=2)
 			target[:,t.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-t.shape[1],n_trials)+dat[:,0]).T
 			distractor[:,d.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-d.shape[1],n_trials)+50).T
 		else:
@@ -271,10 +274,18 @@ class Fitter():
 		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
 
-def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
+def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles',subject_id='all',criteria='all',objective='all'):
 	# Fit parameters for each subject and then for all subjects
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
+	criterias = ['optimal','dprime','dprime-var','var']
+	objectives = ['rt','rtd']
+	if subject_id!='all':
+		subjects = itertools.ifilter(lambda s: s.id==subject_id,subjects)
+	if criteria!='all':
+		criterias = itertools.ifilter(lambda c: c==criteria, criterias)
+	if objective!='all':
+		objectives = itertools.ifilter(lambda c: c==objective, objectives)
 	ISI = 40.
 	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
 	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
@@ -282,19 +293,27 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 	ubounds = [20.,5000.,200.]
 	counter = 0
 	for s in subjects:
-		for criteria in ['optimal','dprime','dprime-var','var']:
-			counter+=1
-			print counter
-			fitter = Fitter(s,model,objective='rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
-					criteria=criteria,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
-			fitter.fit(restarts=0)
-			filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_rtd'
-			fitter.save(filename,overwrite=True)
+		for criteria in criterias:
+			for objective in objectives:
+				counter+=1
+				print counter
+				if objective=='rt':
+					init_pars = initial_parameters[:2]
+					ub = ubounds[:2]
+				else:
+					init_pars = initial_parameters
+					ub = ubounds
+				fitter = Fitter(s,model,objective=objective,initial_parameters=init_pars,ubounds=ub,\
+						criteria=criteria,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
+				fitter.fit(restarts=0)
+				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+objective
+				fitter.save(filename,overwrite=True)
 
 def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=True):
 	files = [f for f in os.listdir(fit_dir) if f.endswith(".pkl")]
 	figures = []
 	ids = []
+	counter = 0
 	for f in files:
 		temp = f.split("_")
 		sid = temp[2]
@@ -311,6 +330,7 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		if obj not in objective:
 			if objective!='all':
 				continue
+		counter+=1
 		
 		fitter = load_fitter(fit_dir+f)
 		subject = fitter.subject
@@ -381,6 +401,8 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 				pdf.savefig(fig)
 	else:
 		plt.show()
+	if counter==0:
+		print "No fit exists with the desired subject_id, criteria and objective"
 
 def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'):
 	# Load subject data
@@ -398,23 +420,12 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	fitter = Fitter(ms,model,objective='rt distribution',initial_parameters=initial_parameters,ubounds=ubounds,\
 				criteria=None,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
 	
-	#~ if os.path.isfile('Fit_test.pkl'):
-		#~ fitter = load_fitter('Fit_test')
-		#~ fit_output = fitter.fit_output
-	#~ else:
 	fit_output = fitter.fit(restarts=0)
 	fitter.save('Fit_test',overwrite=True)
+	fitter = load_fitter('Fit_test')
 	target = fitter.synthetic_data['target']
 	distractor = fitter.synthetic_data['distractor']
 	indeces = fitter.synthetic_data['indeces']
-	
-	#~ fitter2 = load_fitter('Fit_test')
-	#~ target2 = fitter2.synthetic_data['target']
-	#~ distractor2 = fitter2.synthetic_data['distractor']
-	#~ indeces2 = fitter2.synthetic_data['indeces']
-	#~ print target-target2
-	#~ print distractor-distractor2
-	#~ print indeces-indeces2
 	
 	if len(fit_output[0])==3:
 		var_dead_time=fit_output[0][2]
@@ -486,8 +497,121 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 		plt.show()
 	return 0
 
+def parse_args():
+	""" Parse arguments passed from the command line """
+	arg_list = ['program','dir','subject','criteria','objective','save']
+	options = {'program':'test','dir':None,'subject':'all','criteria':'all','objective':'all','save':True}
+	kwarg_flag = False
+	skip_arg = True
+	arg_n = 0
+	for c,arg in enumerate(sys.argv):
+		if skip_arg:
+			skip_arg = False
+			continue
+		if not kwarg_flag and arg.startswith('-'):
+			kwarg_flag = True
+		elif not kwarg_flag:
+			if c==1:
+				if arg.lower() not in ['test','fit','analyze']:
+					raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (arg))
+				arg = arg.lower()
+			elif c==3:
+				if arg.lower()!='all':
+					try:
+						int(arg)
+					except ValueError:
+						raise ValueError("Supplied subject must be either 'all' or a subject id. User supplied '%s' instead" % (arg))
+				arg = arg.lower()
+			elif c==4:
+				if arg.lower() not in ['all','optimal','dprime','dprime-var','var']:
+					raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (arg))
+				arg = arg.lower()
+			elif c==5:
+				if arg.lower() not in ['all','rt','rtd']:
+					raise ValueError("Supplied objective must be either 'all', 'rt' or 'rtd'. User supplied '%s' instead" % (arg))
+				arg = arg.lower()
+			elif c==6:
+				if arg.lower not in ['true','false']:
+					raise ValueError("Save must be either 'true' or 'false'. User supplied '%s' instead" % (arg))
+				arg = arg=='true'
+			elif c>6:
+				raise Exception("Unknown sixth option supplied '%s'" %s)
+			options[arg_list[arg_n]] = arg
+			arg_n+=1
+		if kwarg_flag:
+			skip_arg = True
+			if not arg.startswith('-'):
+				raise ValueError("Expected -key value pair options and found a positional argument instead")
+			key = arg[1:].lower()
+			if key in ['program','subject','criteria','objective']:
+				val = sys.argv[c+1].lower()
+				if key=='program':
+					if val not in ['test','fit','analyze']:
+						raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (val))
+				elif key=='subject':
+					if arg!='all':
+						try:
+							int(val)
+						except ValueError:
+							raise ValueError("Supplied subject must be either 'all' or a subject id. User supplied '%s' instead" % (val))
+				elif key=='criteria':
+					if val not in ['all','optimal','dprime','dprime-var','var']:
+						raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (val))
+				elif key=='objective':
+					if val not in ['all','rt','rtd']:
+						raise ValueError("Supplied objective must be either 'all', 'rt' or 'rtd'. User supplied '%s' instead" % (val))
+			elif key=='dir':
+				val = sys.argv[c+1]
+			elif key=='save':
+				val = sys.argv[c+1].lower()
+				if val not in ['true','false']:
+					raise ValueError("Save must be either 'true' or 'false'. User supplied '%s' instead" % (val))
+				val = val=='true'
+			elif key in ['h','-help']:
+				display_help()
+			else:
+				raise Exception("Unknown option '%s' supplied" %s)
+			options[key] = val
+	print options
+	return options
+
+def display_help():
+	h = """ order_effects.py help
+ Sintax:
+ behavioral_fit.py [optional arguments]
+ 
+ behavioral_fit.py -h [or --help] displays help
+ 
+ Optional arguments are:
+ 'program': Can be 'test', 'fit' or 'analyze'. Determines whether to run the test suite, run the fit_all_subjects function or analyze_all_fits function. [default 'test']
+ 'dir': The directory from which to fetch the data. If the program is test or fit, it must be the path to the behavioral data files. If program is analyze, dir must be the path to the fit files. [default 'None' and fall to each function's default]
+ 'subject': The subject you with to fit or analyze. Can be 'all' saying you with to analyze all subjects (including the merge of all subjects that has id=0) or an integer id 0(represents the merge of all subjects), 1, 2, etc. [default 'all']
+ 'criteria': The criteria to implement. Posible values are 'optimal', 'dprime', 'var' and 'dprime-var'. [default 'optimal']
+ 'objective': The objective function to fit or analyze. Can be 'all', 'rt' or 'rtd'. [default 'all']
+ 'save': Only used with the analyze program. Can be 'false' or 'true' and determines whether the graphs are shown or saved to ../../figs/fits.pdf respectively.
+ 
+ Argument can be supplied as positional arguments or as -key value pairs.
+ 
+ Example:
+ python behavioral_fit.py fit -subject 0 """
+	print h
+	exit()
+
+
 if __name__=="__main__":
-	if len(sys.argv)>1:
-		fit_all_subjects(sys.argv[1])
-	else:
-		fit_all_subjects()
+	args = parse_args()
+	if args['program']=='test':
+		if args['dir'] is not None:
+			test(args['dir'])
+		else:
+			test()
+	elif args['program']=='fit':
+		if args['dir'] is not None:
+			fit_all_subjects(data_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'])
+		else:
+			fit_all_subjects(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'])
+	elif args['program']=='analyze':
+		if args['dir'] is not None:
+			analyze_all_fits(fit_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'])
+		else:
+			analyze_all_fits(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'])
