@@ -1,37 +1,109 @@
 #!/usr/bin/python
 #-*- coding: UTF-8 -*-
-""" Package for fitting perfect inference behavior """
+""" Package that implements perfect inference behavior """
 
 from __future__ import division
 import numpy as np
-import data_io as io
-import kernels as ke
-import os, itertools, sys, random
+import itertools, math
 
-class PerfectInference():
+class onlineMeanVar():
+	def __init__(self):
+		self.reset()
+	def reset(self):
+		self.n = 0
+		self.delta = 0.
+		self.mean = 0.
+		self.M2 = 0.
+		self.var = 0.
+	def update(self,v):
+		self.n+=1
+		self.delta = v-self.mean
+		self.mean+= self.delta/self.n
+		self.M2+= self.delta*(v-self.mean)
+		self.var = self.M2/(self.n-1) if self.n>1 else (0. if not isinstance(self.mean,np.ndarray) else np.zeros_like(self.mean))
+	def val(self):
+		return (self.mean,self.var)
+	def add_value(self,value):
+		self.update(value)
+		return self.val()
+	def arr_add_value(self,val_arr,axis=0):
+		mean = np.zeros_like(val_arr)
+		var =  np.zeros_like(val_arr)
+		indeces = [range(l) for l in list(val_arr.shape)]
+		ix = indeces
+		for i in indeces[axis]:
+			ix[axis] = [i]
+			mean[np.ix_(*ix)],var[np.ix_(*ix)] = self.add_value(val_arr[np.ix_(*ix)])
+		return mean,var
+
+class PerfectInference(object):
+	"""
+	Virtual base class for perfect inference methods. Subclasses
+	implement perfect inference with different known distribution
+	variables
+	"""
+	def onlineInference(self,targetSignal,distractorSignal):
+		pass
+	def batchInference(self,targetSignalArr,distractorSignalArr):
+		pass
+
+class KnownVarPerfectInference(PerfectInference):
 	"""
 	Class that implements perfect bayes inference on the mean luminance
 	classification task with known model variance
 	"""
-	def __init__(self,model_sigma_t=1.,model_sigma_d=1.,prior_mu_t=0.,prior_mu_d=0.,prior_si_t=1.,prior_si_d=1.,\
-				threshold=5.):
-		self.sigma_t = model_sigma_t
-		self.sigma_d = model_sigma_d
+	def __init__(self,model_var_t=1.,model_var_d=1.,prior_mu_t=0.,prior_mu_d=0.,prior_va_t=1.,prior_va_d=1.,\
+				threshold=5.,ISI=1.):
+		"""
+		Known variance perfect inference constructor
+		Syntax:
+		instance = KnownVarPerfectInference(model_var_t=1.,model_var_d=1.,prior_mu_t=0.,prior_mu_d=0.,prior_va_t=1.,prior_va_d=1.,\
+				threshold=5.,ISI=1.)
+		
+		Input:
+		 - model_var_t: Known variance of the target stimulus
+		 - model_var_d: Known variance of the distractor stimulus
+		 - prior_mu_t:  Mean of the target prior distribution
+		 - prior_mu_d:  Mean of the distractor prior distribution
+		 - prior_va_t:  Variance of the target prior distribution
+		 - prior_va_d:  Variance of the distractor prior distribution
+		 - threshold:   Decision threshold
+		 - ISI:         Inter stimulus interval (ISI). Represents the
+		                time between changes of the target and distractor
+		                stimuli.
+		"""
+		self.var_t = model_var_t
+		self.var_d = model_var_d
 		self.prior_mu_t = prior_mu_t
 		self.prior_mu_d = prior_mu_d
-		self.prior_si_t = prior_si_t
-		self.prior_si_d = prior_si_d
+		self.prior_va_t = prior_va_t
+		self.prior_va_d = prior_va_d
 		
 		self.threshold = threshold
+		self.ISI = ISI
 		self.signals = []
 	
-	def onlineInference(self,targetSignal,distractorSignal,storeSignal=False):
+	def criteria(self,post_mu_t,post_mu_d,post_va_t,post_va_d):
+		"""
+		Optimal decision criteria for discriminating which of two gaussians
+		has higher mean. (mu_t-mu_d)/sqrt(var_t+var_d)
+		"""
+		return (post_mu_t-post_mu_d)/np.sqrt(post_va_t+post_va_d)
+	
+	def copy(self):
+		output = KnownVarPerfectInference(model_var_t=self.var_t,model_var_d=self.var_d,\
+				prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,prior_va_t=self.prior_va_t,\
+				prior_va_d=self.prior_va_d,threshold=self.threshold,ISI=self.ISI)
+		output.signals = self.signals.copy()
+		return output
+	
+	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
 		n = 0
 		ct = 0.
 		cd = 0.
 		decided = False
 		it = itertools.izip(targetSignal,distractorSignal)
-		while not decided:
+		while not decided and n<timeout:
 			try:
 				t,d = it.next()
 			except (GeneratorExit,StopIteration):
@@ -39,215 +111,343 @@ class PerfectInference():
 			n+=1
 			ct+=t
 			cd+=d
-			post_si_t = 1./(1./self.prior_si_t.**2+n/self.sigma_t**2)
-			post_si_d = 1./(1./self.prior_si_d.**2+n/self.sigma_d**2)
-			post_mu_t = (self.prior_mu_t/self.prior_si_t**2+ct/sigma_t**2)*post_si_t
-			post_mu_d = (self.prior_mu_d/self.prior_si_d**2+cd/sigma_d**2)*post_si_d
+			post_va_t = 1./(1./self.prior_va_t+n/self.var_t)
+			post_va_d = 1./(1./self.prior_va_d+n/self.var_d)
+			post_mu_t = (self.prior_mu_t/self.prior_va_t+ct/self.var_t)*post_va_t
+			post_mu_d = (self.prior_mu_d/self.prior_va_d+cd/self.var_d)*post_va_d
 			
-			dif_mu = post_si_t-post_si_d
-			dif_si = np.sqrt(post_si_t**2+post_si_d**2)
-			if abs(dif_mu)/dif_si>=self.threshold:
+			criterium = self.criteria(post_mu_t,post_mu_d,post_va_t,post_va_d)
+			if abs(criterium)>=self.threshold:
 				decided = True
-			if storeSignal:
+			if storeSignals:
 				self.signals.append([t,d])
-		if decided:
-			ret = decided,None,None,None,n
+		if not decided:
+			ret = decided,np.nan,np.nan,np.nan,n*self.ISI
 		else:
-			performance = 1 if dif_mu>0 else 0
-			ret = decided,performance,dif_mu,dif_si,n
+			performance = 1 if criterium>0 else 0
+			ret = decided,performance,criterium,n*self.ISI
 		return ret
 	
-	def batchInference(self,targetSignalArr,distractorSignalArr):
-		if any(targetSignalArr.shape!=distractorSignalArr):
+	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
+		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
-		s = targetSignalArr.shape
-		post_mu_t = self.prior_mu_t*np.ones(targetSignalArr.shape)
-		post_mu_d = self.prior_mu_d*np.ones(targetSignalArr.shape)
-		post_mu_t = self.prior_si_t*np.ones(targetSignalArr.shape)
-		post_si_d = self.prior_si_d*np.ones(targetSignalArr.shape)
+		s = list(targetSignalArr.shape)
+		s[1]+=1
+		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
+		post_mu_d = self.prior_mu_d*np.ones(tuple(s))
+		post_va_t = self.prior_va_t*np.ones(tuple(s))
+		post_va_d = self.prior_va_d*np.ones(tuple(s))
 		n = np.tile(np.reshape(np.arange(s[1]),(1,s[1])),(s[0],1))
 		
-		post_si_t = 1./(1./self.prior_si_t.**2+n/self.sigma_t**2)
-		post_si_d = 1./(1./self.prior_si_d.**2+n/self.sigma_d**2)
-		post_mu_t = (self.prior_mu_t/self.prior_si_t**2+np.cumsum(targetSignalArr,axis=1)/sigma_t**2)*post_si_t
-		post_mu_d = (self.prior_mu_d/self.prior_si_d**2+np.cumsum(distractorSignalArr,axis=1)/sigma_d**2)*post_si_d
+		post_va_t = 1./(1./self.prior_va_t+n/self.var_t)
+		post_va_d = 1./(1./self.prior_va_d+n/self.var_d)
+		post_mu_t[:,1:] = (self.prior_mu_t/self.prior_va_t+np.cumsum(targetSignalArr,axis=1)/self.var_t)*post_va_t[:,1:]
+		post_mu_d[:,1:] = (self.prior_mu_d/self.prior_va_d+np.cumsum(distractorSignalArr,axis=1)/self.var_d)*post_va_d[:,1:]
 		
-		dif_mu = post_si_t-post_si_d
-		dif_si = np.sqrt(post_si_t**2+post_si_d**2)
-		ret = np.zeros(s[0],5)
-		dec_time = np.argmax(np.abs(dif_mu)/dif_si>=self.threshold)
-		for trial,dt in enumerate(dec_time):
-			if dec_time==s[1]-1:
-				if np.abs(dif_mu[trial,-1])/dif_si[trial,-1]<self.threshold:
-					ret[trial] = False,None,None,None,s[1]
-					continue
-			
+		criterium = self.criteria(post_mu_t,post_mu_d,post_va_t,post_va_d)
+		ret = np.zeros((s[0],4))
+		if returnPosterior:
+			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'var_t':np.nan*np.zeros(s[0]),'var_d':np.nan*np.zeros(s[0])}
+		for trial,cr in enumerate(criterium):
+			try:
+				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
+				performance = 1 if cr[dt]>0 else 0
+				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+				if returnPosterior:
+					posterior['mu_t'][trial] = post_mu_t[trial,dt]
+					posterior['mu_d'][trial] = post_mu_d[trial,dt]
+					posterior['var_t'][trial] = post_va_t[trial,dt]
+					posterior['var_d'][trial] = post_va_t[trial,dt]
+			except IndexError:
+				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+		ret = (ret,)
+		if returnPosterior:
+			ret+= (posterior,)
+		if returnCriteria:
+			ret+= (criterium,)
+		if len(ret)==1:
+			ret = ret[0]
+		return ret
 
-def posterior(targetmean,targetstd,distractormean,distractorstd):
-	flucts = []
-	post_mu_t = []
-	post_mu_d = []
-	post_si_t = []
-	post_si_d = []
-	for trial,(tm,ts,dm,ds) in enumerate(np.nditer([targetmean,targetstd,distractormean,distractorstd])):
-		post_mu_t.append([prior_mu_t])
-		post_mu_t.append([prior_mu_d])
-		post_si_t.append([prior_si_t])
-		post_si_t.append([prior_si_d])
-		decided = False
+class UnknownVarPerfectInference(PerfectInference):
+	"""
+	Class that implements perfect bayes inference on the mean luminance
+	classification task with unknown model variance. The conjugate prior
+	is a Gamma-Normal distribution that yields the Gaussiana mean (mu)
+	and the precision (1/Var)
+	"""
+	def __init__(self,prior_mu_t=0.,prior_mu_d=0.,prior_nu_t=1.,prior_nu_d=1.,\
+				prior_a_t=1.,prior_a_d=1.,prior_b_t=1.,prior_b_d=1.,threshold=5.,ISI=1.):
+		"""
+		Unknown variance perfect inference constructor
+		Syntax:
+		instance = UnknownVarPerfectInference(prior_mu_t=0.,prior_mu_d=0.,prior_nu_t=1.,prior_nu_d=1.,\
+				prior_a_t=1.,prior_a_d=1.,prior_b_t=1.,prior_b_d=1.,threshold=5.,ISI=1.)
+		
+		Input:
+		 - prior_mu_t:  Mean of the target prior distribution
+		 - prior_mu_d:  Mean of the distractor prior distribution
+		 - prior_nu_t:  Nu (sometime lambda) of the target prior distribution
+		 - prior_nu_d:  Nu (sometime lambda) of the distractor prior distribution
+		 - prior_a_t:   Alpha of the target prior distribution
+		 - prior_a_d:   Alpha of the distractor prior distribution
+		 - prior_b_t:   Beta of the target prior distribution
+		 - prior_b_d:   Beta of the distractor prior distribution
+		 - threshold:   Decision threshold
+		 - ISI:         Inter stimulus interval (ISI). Represents the
+		                time between changes of the target and distractor
+		                stimuli.
+		"""
+		self.prior_mu_t = prior_mu_t
+		self.prior_mu_d = prior_mu_d
+		self.prior_nu_t = prior_nu_t
+		self.prior_nu_d = prior_nu_d
+		self.prior_a_t = prior_a_t
+		self.prior_a_d = prior_a_d
+		self.prior_b_t = prior_b_t
+		self.prior_b_d = prior_b_d
+		
+		self.ISI = ISI
+		self.threshold = threshold
+		self.signals = []
+	
+	def criteria(self,post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d):
+		# The distribution mean, mu, follows a student's t-distribution
+		# with parameter 2 post_a. The distribution is scaled and
+		# shifted, and is written in terms of variable x that reads
+		# x = (mu-post_mu)**2*(post_nu*post_a/post_b)
+		dif_mu = post_mu_t-post_mu_d
+		if isinstance(dif_mu,np.ndarray):
+			dif_si = np.inf*np.ones_like(dif_mu)
+			dif_si[:,2:] = np.sqrt((post_b_t[:,2:]/post_nu_t[:,2:]/post_a_t[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2)+(post_b_d[:,2:]/post_nu_d[:,2:]/post_a_d[:,2:])**2*post_nu_d[:,2:]/(post_nu_d[:,2:]-2))
+		else:
+			if post_nu_d>2:
+				dif_si = np.sqrt((post_b_t/post_nu_t/post_a_t)**2*post_nu_d/(post_nu_d-2)+(post_b_d/post_nu_d/post_a_d)**2*post_nu_d/(post_nu_d-2))
+			else:
+				dif_si = np.inf
+		return dif_mu/dif_si
+	
+	def copy(self):
+		self.prior_mu_t = prior_mu_t
+		self.prior_mu_d = prior_mu_d
+		self.prior_nu_t = prior_nu_t
+		self.prior_nu_d = prior_nu_d
+		self.prior_a_t = prior_a_t
+		self.prior_a_d = prior_a_d
+		self.prior_b_t = prior_b_t
+		self.prior_b_d = prior_b_d
+		output = KnownVarPerfectInference(prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,\
+				prior_nu_t=self.prior_nu_t,prior_nu_d=self.prior_nu_d,prior_a_t=self.prior_a_t,\
+				prior_a_d=self.prior_a_d,prior_b_t=self.prior_b_t,prior_b_d=self.prior_b_d,\
+				threshold=self.threshold,ISI=self.ISI)
+		output.signals = self.signals.copy()
+		return output
+	
+	def onlineInference(self,targetSignal,distractorSignal,storeSignals=False,timeout=np.inf):
+		# The probability hyperparameters are updated with sample means
+		# and variances. These must be computed online in a single pass.
+		# Therefore we use Welford-Knuth algorithm.
 		n = 0
-		ct = 0.
-		cd = 0.
-		while not decided:
-			target = random.gauss(tm,ts)
-			distractor = random.gauss(tm,ts)
-			ct+=target
-			cd+=distractor
+		t_mv = onlineMeanVar()
+		d_mv = onlineMeanVar()
+		decided = False
+		it = itertools.izip(targetSignal,distractorSignal)
+		while not decided and n<timeout:
+			try:
+				t,d = it.next()
+			except (GeneratorExit,StopIteration):
+				break
 			n+=1
-			post_si_t[-1].append(1./(1./prior_si_t.**2+n/sigma**2))
-			post_si_d[-1].append(1./(1./prior_si_d.**2+n/sigma**2))
-			post_mu_t[-1].append((prior_mu_t/prior_sigma_t**2+ct/sigma.^2).*post_si_t[-1][-1])
-			post_mu_d[-1].append((prior_mu_d/prior_sigma_d**2+cd/sigma.^2).*post_si_d[-1][-1])
+			t_mean,t_var = t_mv.add_value(t)
+			d_mean,d_var = d_mv.add_value(d)
+			# Target distribution hyperparameter update
+			post_nu_t = self.prior_nu_t+n
+			post_a_t =  self.prior_a_t+0.5*n
+			post_mu_t = (self.prior_nu_t*self.prior_mu_t+n*t_mean)/(self.prior_nu_t+n)
+			post_b_t =  self.prior_b_t+0.5*t_var+0.5*n*self.prior_nu_t*(t_mean-self.prior_mu_t)**2/(self.prior_nu_t+n)
 			
-			dec_var = 
-dprime = post_mu_t./post_sigma_t-post_mu_d./post_sigma_d;
+			# Distractor distribution hyperparameter update
+			post_nu_d = self.prior_nu_d+n
+			post_a_d =  self.prior_a_d+0.5*n
+			post_mu_d = (self.prior_nu_d*self.prior_mu_d+n*d_mean)/(self.prior_nu_d+n)
+			post_b_d =  self.prior_b_d+0.5*d_var+0.5*n*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n)
+			
+			criterium = self.criteria(post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d)
+			if abs(criterium)>=self.threshold:
+				decided = True
+			if storeSignals:
+				self.signals.append([t,d])
+		if not decided:
+			ret = decided,np.nan,np.nan,n*self.ISI
+		else:
+			performance = 1 if criterium>0 else 0
+			ret = decided,performance,criterium,n*self.ISI
+		return ret
+	
+	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
+		if targetSignalArr.shape!=distractorSignalArr.shape:
+			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		s = list(targetSignalArr.shape)
+		s[1]+=1
+		post_nu_t = self.prior_nu_t*np.ones(tuple(s))
+		post_a_t =  self.prior_a_t*np.ones(tuple(s))
+		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
+		post_b_t =  self.prior_b_t*np.ones(tuple(s))
+		post_nu_d = self.prior_nu_d*np.ones(tuple(s))
+		post_a_d =  self.prior_a_d*np.ones(tuple(s))
+		post_mu_d = self.prior_mu_d*np.ones(tuple(s))
+		post_b_d =  self.prior_b_d*np.ones(tuple(s))
+		n = np.tile(np.reshape(np.arange(s[1]),(1,s[1])),(s[0],1))
+		
+		mv = onlineMeanVar()
+		t_mean,t_var = mv.arr_add_value(targetSignalArr,axis=1)
+		mv.reset()
+		d_mean,d_var = mv.arr_add_value(distractorSignalArr,axis=1)
+		
+		# Target distribution hyperparameter update
+		post_nu_t = self.prior_nu_t+n
+		post_a_t =  self.prior_a_t+0.5*n
+		post_mu_t[:,1:] = (self.prior_nu_t*self.prior_mu_t+n[:,1:]*t_mean)/(self.prior_nu_t+n[:,1:])
+		post_b_t[:,1:] = self.prior_b_t+0.5*t_var+0.5*n[:,1:]*self.prior_nu_t*(t_mean-self.prior_mu_t)**2/(self.prior_nu_t+n[:,1:])
+		
+		# Distractor distribution hyperparameter update
+		post_nu_d = self.prior_nu_d+n
+		post_a_d =  self.prior_a_d+0.5*n
+		post_mu_d[:,1:] = (self.prior_nu_d*self.prior_mu_d+n[:,1:]*d_mean)/(self.prior_nu_d+n[:,1:])
+		post_b_d[:,1:] = self.prior_b_d+0.5*d_var+0.5*n[:,1:]*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n[:,1:])
+		
+		criterium = self.criteria(post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d)
+		ret = np.zeros((s[0],4))
+		if returnPosterior:
+			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'nu_t':np.nan*np.zeros(s[0]),'nu_d':np.nan*np.zeros(s[0]),'b_t':np.nan*np.zeros(s[0]),'b_d':np.nan*np.zeros(s[0]),'a_t':np.nan*np.zeros(s[0]),'a_d':np.nan*np.zeros(s[0])}
+		for trial,cr in enumerate(criterium):
+			try:
+				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
+				performance = 1 if cr[dt]>0 else 0
+				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+				if returnPosterior:
+					posterior['mu_t'][trial] = post_mu_t[trial,dt]
+					posterior['mu_d'][trial] = post_mu_d[trial,dt]
+					posterior['nu_t'][trial] = post_nu_t[trial,dt]
+					posterior['nu_d'][trial] = post_nu_d[trial,dt]
+					posterior['a_t'][trial] = post_a_t[trial,dt]
+					posterior['a_d'][trial] = post_a_t[trial,dt]
+					posterior['b_t'][trial] = post_b_t[trial,dt]
+					posterior['b_d'][trial] = post_b_t[trial,dt]
+			except IndexError:
+				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+		ret = (ret,)
+		if returnPosterior:
+			ret+= (posterior,)
+		if returnCriteria:
+			ret+= (criterium,)
+		if len(ret)==1:
+			ret = ret[0]
+		return ret
 
-T = (0:size(target,2))*40;
-RT = data(:,2);
+def test():
+	var_t = 0.3**2
+	var_d = 0.5**2
+	mean_t = 1.
+	mean_d = 0.7
+	stimlen = 1000
+	trials = 3
+	target = np.random.randn(trials,stimlen)*np.sqrt(var_t)+mean_t
+	distractor = np.random.randn(trials,stimlen)*np.sqrt(var_d)+mean_d
+	
+	kmodel = KnownVarPerfectInference(model_var_t=var_t,model_var_d=var_d)
+	umodel = UnknownVarPerfectInference()
+	onlinekRes = np.zeros((trials,4))
+	onlineuRes = np.zeros((trials,4))
+	for trial,(t,d) in enumerate(itertools.izip(target,distractor)):
+		# Known variance inference
+		decided,performance,criter,rt = kmodel.onlineInference(t,d)
+		onlinekRes[trial] = np.array([decided,performance,criter,rt])
+		# Unknown variance inference
+		decided,performance,criter,rt = umodel.onlineInference(t,d)
+		onlineuRes[trial] = np.array([decided,performance,criter,rt])
+	batchkRes,kposterior = kmodel.batchInference(target,distractor,returnPosterior=True)
+	batchuRes,uposterior = umodel.batchInference(target,distractor,returnPosterior=True)
+	
+	kequal = False
+	if np.all(np.isnan(onlinekRes)==np.isnan(onlinekRes)):
+		if np.all(onlinekRes[np.logical_not(np.isnan(onlinekRes))]==batchkRes[np.logical_not(np.isnan(batchkRes))]):
+			kequal = True
+	uequal = False
+	if np.all(np.isnan(onlineuRes)==np.isnan(onlineuRes)):
+		if np.all(onlineuRes[np.logical_not(np.isnan(onlineuRes))]==batchuRes[np.logical_not(np.isnan(batchuRes))]):
+			uequal = True
+	
+	print "Online and batch comparison"
+	print "Known variance comparison = ",kequal
+	print "Unknown variance comparison = ",uequal
+	print "Known variance results"
+	print onlinekRes
+	if not kequal:
+		print batchkRes
+	print "Unknown variance results"
+	print onlineuRes
+	if not uequal:
+		print batchuRes
+	print "Known variance posteriors"
+	print kposterior
+	print "Unknown variance posteriors"
+	print uposterior
+	
+	matlab_comparison()
 
-[fitted_vars,fval,exitflag,output,lambda,grad,hessian] = fmincon(@merit,[1.6,200],[],[],[],[],[0,0],[],[],optimset('tolfun',1e-10,'tolx',1e-10,'tolcon',1e-12));
-covariance = inv(hessian);
-disp(['Fitted threshold = ',num2str(fitted_vars(1)),'+-',num2str(sqrt(covariance(1,1)))])
-disp(['Fitted fixed delay = ',num2str(fitted_vars(2)),'+-',num2str(sqrt(covariance(2,2)))])
-disp(['Best fit objective function value = ',num2str(fval)])
+def matlab_comparison():
+	from scipy import io as io
+	from matplotlib import pyplot as plt
+	import kernels as ke
+	aux = io.loadmat('mat_py_comp.mat')
+	model = KnownVarPerfectInference(model_var_t=aux['sigma'][0][0]**2,model_var_d=aux['sigma'][0][0]**2,\
+				prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
+				threshold=aux['threshold'][0][0],ISI=aux['ISI'][0][0])
+	target = aux['target']
+	distractor = aux['distractor']
+	mat_ret = aux['ret']
+	
+	#~ def dprime_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+		#~ return post_mu_t/np.sqrt(post_va_t)-post_mu_d/np.sqrt(post_va_d)
+	#~ 
+	#~ def dprime_var_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
+		#~ return post_mu_t/post_va_t-post_mu_d/post_va_d
+	#~ model.criteria = dprime_criteria
+	py_ret,criterium = model.batchInference(target,distractor,returnCriteria=True)
+	equal = False
+	if np.all(np.isnan(mat_ret)==np.isnan(py_ret)):
+		mat_temp = mat_ret[np.logical_not(np.isnan(mat_ret))]
+		py_temp = py_ret[np.logical_not(np.isnan(py_ret))]
+		if np.all(np.abs(py_temp-mat_temp)<1e-12):
+			equal = True
+	print "Got equal results in python and matlab? ",equal
+	
+	fluctuations = np.transpose(np.array([aux['tfluct'],aux['dfluct']]),(1,0,2))
+	selection = 1-py_ret[:,1]
+	#~ selection[np.isnan(selection)] = 1
+	py_dk,_,py_dks,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
+	
+	print "Got equal kernels in python and matlab? ",True if (np.sum(np.abs(py_dk-aux['dk']))<1e-12 and np.sum(np.abs(py_dks-aux['dks']))<1e-12) else False
+	
+	plt.figure
+	plt.subplot(211)
+	plt.imshow(criterium[:,1:]-aux['dprime'],aspect='auto',interpolation='none')
+	plt.title("Difference between the criteria for every trial and time step")
+	plt.colorbar()
+	plt.subplot(212)
+	plt.imshow(py_ret-mat_ret,aspect='auto',interpolation='none')
+	plt.title("Difference between the python and matlab result matrices for every trial")
+	plt.colorbar()
+	
+	plt.figure()
+	plt.subplot(211)
+	plt.plot(py_dk.T-aux['dk'].T)
+	plt.title('Decision kernel difference')
+	plt.subplot(212)
+	plt.plot(py_dks.T-aux['dks'].T)
+	plt.title('Decision kernel std difference')
+	plt.show()
 
-[sdec,sRT,s_tdec_ind] = simulate_decision(fitted_vars(1),fitted_vars(2));
-hist_RT = histc(RT,T);
-hist_sRT = histc(sRT,T);
-cociente = size(target,1)*(T(2)-T(1));
-logn_params = lognfit(RT);
-logn_estim = lognpdf(T,logn_params(1),logn_params(2));
-figure
-% subplot(1,2,1)
-plot(T,hist_RT/cociente,'b')
-hold on
-plot(T,hist_sRT/cociente,'r')
-plot(T,logn_estim,'k')
-hold off
-xlabel('RT [ms]')
-ylabel('Prob density [1/ms]')
-legend({'Subject','Fitted simulation','Log normal'})
-set(findall(gcf,'type','line'),'linewidth',2)
-
-prob_acierto = zeros(size(RT));
-for j = 1:length(RT)
-    prob_acierto(j) = 1-normcdf(0,post_mu_t(s_tdec_ind(j))-post_mu_d(s_tdec_ind(j)),post_sigma_t(s_tdec_ind(j)),post_sigma_d(s_tdec_ind(j)));
-end
-% sim_confidence = prob_acierto;
-% sim_confidence = 1./(1+exp(-5*(prob_acierto-median(prob_acierto))));
-sim_confidence = 1./(1+exp(0.004*(T(s_tdec_ind)-median(T(s_tdec_ind)))))';
-
-
-[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
-    kernels(tfluct,dfluct,selection,confidence);
-
-[sim_decision_kernel,sim_confidence_kernel,sim_decision_kernel_std,sim_confidence_kernel_std] = ...
-    kernels(tfluct,dfluct,sdec,sim_confidence,false);
-
-figure
-T_kern = 0:40:960;
-subplot(1,2,1)
-errorzone(T_kern,decision_kernel(1,:),decision_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
-hold on
-errorzone(T_kern,decision_kernel(2,:),decision_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_decision_kernel(1,:),sim_decision_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
-hold off
-title('Decision kernel')
-xlabel('T [ms]')
-legend({'Subject D_{S}','Subject D_{N}','Simulation D_{S}','Simulation D_{N}'})
-
-subplot(1,2,2)
-errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
-hold on
-errorzone(T_kern,confidence_kernel(2,:),confidence_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_confidence_kernel(1,:),sim_confidence_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
-hold off
-title('Confidence kernel')
-xlabel('T [ms]')
-legend({'Subject C_{S}','Subject C_{N}','Simulation C_{S}','Simulation C_{N}'})
-
-
-sim_T_dec = sRT;
-[bla,sim_T_dec_ind] = histc(sim_T_dec,0:40:5000);
-sim_T_dec_ind(sim_T_dec_ind==126) = 125;
-target(sim_T_dec_ind==0,:) = nan;
-distractor(sim_T_dec_ind==0,:) = nan;
-sim_T_dec_ind(sim_T_dec_ind==0) = 125;
-
-[decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] = ...
-    kernels(tfluct_ext,dfluct_ext,selection,confidence,true,false,T_dec_ind);
-
-[sim_decision_kernel,sim_confidence_kernel,sim_decision_kernel_std,sim_confidence_kernel_std] = ...
-    kernels(target-repmat(data(:,1),1,size(target,2)),distractor-50,sdec,sim_confidence,false,false,sim_T_dec_ind);
-
-figure
-T_kern = -4960:40:4960;
-subplot(1,2,1)
-errorzone(T_kern,decision_kernel(1,:),decision_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
-hold on
-errorzone(T_kern,decision_kernel(2,:),decision_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_decision_kernel(1,:),sim_decision_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_decision_kernel(2,:),sim_decision_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
-hold off
-title('Decision kernel')
-xlabel('T - RT [ms]')
-legend({'Subject D_{S}','Subject D_{N}','Simulation D_{S}','Simulation D_{N}'})
-
-subplot(1,2,2)
-errorzone(T_kern,confidence_kernel(1,:),confidence_kernel_std(1,:),'--b','edgealpha',0,'facealpha',0.3);
-hold on
-errorzone(T_kern,confidence_kernel(2,:),confidence_kernel_std(2,:),'--r','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_confidence_kernel(1,:),sim_confidence_kernel_std(1,:),'b','edgealpha',0,'facealpha',0.3);
-errorzone(T_kern,sim_confidence_kernel(2,:),sim_confidence_kernel_std(2,:),'r','edgealpha',0,'facealpha',0.3);
-hold off
-title('Confidence kernel')
-xlabel('T - RT [ms]')
-legend({'Subject C_{S}','Subject C_{N}','Simulation C_{S}','Simulation C_{N}'})
-
-function out = merit(x)
-    sim_RT = zeros(size(RT));
-    threshold_passed = abs(dprime)>=x(1);
-    for i = 1:size(dprime,1)
-        ind = find(threshold_passed(i,:),1);
-        if ~isempty(ind)
-            sim_RT(i) = T(ind);
-        else
-            sim_RT(i) = T(end);
-        end
-    end
-    out = sum((RT-sim_RT-x(2)).^2);
-end
-function [sim_dec,sim_RT,tdec_ind] = simulate_decision(t,b)
-    sim_dec = zeros(size(RT));
-    sim_RT = zeros(size(RT));
-    threshold_passed = abs(dprime)>=t;
-    tdec_ind = zeros(size(RT));
-    for i = 1:size(dprime,1)
-        ind = find(threshold_passed(i,:),1);
-        if ~isempty(ind)
-            tdec_ind(i) = ind;
-            sim_RT(i) = T(ind)+b;
-            if dprime(ind)>0
-                sim_dec(i) = 1;
-            else
-                sim_dec(i) = 2;
-            end
-        else
-            sim_RT(i) = T(end)+b;
-            tdec_ind(i) = length(T);
-        end
-    end
-end
-end
+if __name__=="__main__":
+	test()

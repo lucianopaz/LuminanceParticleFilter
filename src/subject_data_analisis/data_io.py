@@ -24,7 +24,7 @@ class subject:
 			target = np.transpose(np.array([s[0] for s in aux['stim'].squeeze()]),(0,2,1))
 			distractor = np.transpose(np.array([s[1] for s in aux['stim'].squeeze()]),(0,2,1))
 			mean_target_lum = aux['trial'][:,1]
-			rt = aux['trial'][:,5]
+			rt = aux['trial'][:,5]-200 # Substract 200ms from recorded response time because fixation duration was not substracted during the experimental data acquisition
 			performance = aux['trial'][:,7]
 			confidence = aux['trial'][:,8]
 			if aux['trial'].shape[1]>9:
@@ -47,6 +47,8 @@ class subject:
 				all_distractor = np.concatenate((all_distractor,distractor),axis=0)
 			first_element = False
 		return all_data,all_target,all_distractor
+	def copy(self):
+		return subject(self.name,self.id,self.blocks.copy(),self.data_files.copy(),self.nsessions)
 
 def column_description():
 	out = ['mean target lum','RT','performance','confidence','selected side','subject id','experiment block']

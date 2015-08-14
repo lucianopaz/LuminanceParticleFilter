@@ -6,3 +6,9 @@
 
 # pyc
 *.pyc
+
+# Python pickles
+*.pkl
+
+# Matlab .mat files
+*.mat

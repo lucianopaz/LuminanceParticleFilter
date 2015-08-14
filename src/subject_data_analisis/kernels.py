@@ -102,6 +102,8 @@ def kernels(fluctuations,selection,confidence,is_binary_confidence=True,locked_o
 	high_trials = 0
 	low_trials = 0
 	for trial,f in enumerate(fluctuations):
+		if np.isnan(selection[trial]):
+			continue
 		if is_binary_confidence:
 			if confidence[trial]==1:
 				high[trial,0] = f[selection[trial]]
