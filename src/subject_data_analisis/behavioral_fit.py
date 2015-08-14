@@ -281,11 +281,11 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 	criterias = ['optimal','dprime','dprime-var','var']
 	objectives = ['rt','rtd']
 	if subject_id!='all':
-		subjects = itertools.ifilter(lambda s: s.id==subject_id,subjects)
+		subjects = [s for s in itertools.ifilter(lambda s: s.id==subject_id,subjects)]
 	if criteria!='all':
-		criterias = itertools.ifilter(lambda c: c==criteria, criterias)
+		criterias = [c for c in itertools.ifilter(lambda c: c==criteria, criterias)]
 	if objective!='all':
-		objectives = itertools.ifilter(lambda c: c==objective, objectives)
+		objectives = [o for o in itertools.ifilter(lambda c: c==objective, objectives)]
 	ISI = 40.
 	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
 	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
