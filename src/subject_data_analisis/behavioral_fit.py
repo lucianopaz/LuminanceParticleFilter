@@ -28,6 +28,25 @@ def normcdf(x,mu=0.,sigma=1.):
 		new_x = np.sign(x-mu)*np.inf
 	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
+def conv_hist(h,p,ISI,mode='full'):
+	conv_window = np.linspace(-p*6,p*6,int(math.ceil(p*12/ISI))+1)
+	conv_val = np.zeros_like(conv_window)
+	conv_val[1:-1] = np.diff(normcdf(conv_window[:-1],0,p))
+	conv_val[0] = normcdf(conv_window[0],0,p)
+	conv_val[-1] = 1-normcdf(conv_window[-2],0,p)
+	ch = np.convolve(h,conv_val,mode=mode)
+	a = int(0.5*(ch.shape[0]-h.shape[0]))
+	if a==0:
+		if 0.5*(ch.shape[0]-h.shape[0])==0:
+			ret = ch
+		else:
+			ret = ch[:-1]
+	elif a==0.5*(ch.shape[0]-h.shape[0]):
+		ret = ch[a:-a]
+	else:
+		ret = ch[a:-a-1]
+	return ret
+
 def optimal_criteria(post_mu_t,post_mu_d,post_va_t,post_va_d):
 	"""
 	Optimal decision criteria for discriminating which of two gaussians
@@ -80,25 +99,6 @@ def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
 
-def conv_hist(h,p,ISI,mode='full'):
-	conv_window = np.linspace(-p*6,p*6,int(math.ceil(p*12/ISI))+1)
-	conv_val = np.zeros_like(conv_window)
-	conv_val[1:-1] = np.diff(normcdf(conv_window[:-1],0,p))
-	conv_val[0] = normcdf(conv_window[0],0,p)
-	conv_val[-1] = 1-normcdf(conv_window[-2],0,p)
-	ch = np.convolve(h,conv_val,mode=mode)
-	a = int(0.5*(ch.shape[0]-h.shape[0]))
-	if a==0:
-		if 0.5*(ch.shape[0]-h.shape[0])==0:
-			ret = ch
-		else:
-			ret = ch[:-1]
-	elif a==0.5*(ch.shape[0]-h.shape[0]):
-		ret = ch[a:-a]
-	else:
-		ret = ch[a:-a-1]
-	return ret
-
 def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,model,target,distractor):
 	"""
 	The same as rt_histogram but allowing for random time shifts added
@@ -111,6 +111,81 @@ def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,m
 	# by convolving the simulated rt with a gaussian pdf
 	simulated_rt_histogram = conv_hist(simulated_rt_histogram,params[2],model.ISI)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
+
+def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distractormean):
+	"""
+	Compute least square difference between subject and simulation
+	decision kernels. Only take into account the first 1000ms of
+	the kernel.
+	"""
+	model.threshold = params[0]
+	simulation = model.batchInference(target,distractor)
+	selection = 1.-simulation[:,1]
+	fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
+	sim_kernel,_,_,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
+	return np.sum((subject_kernel-sim_kernel[:,:25])**2)
+
+class Objective():
+	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.):
+		self._rt = 0.
+		self._rtd = 0.
+		self._k = 0.
+		self._p = 0.
+		name = []
+		if all([weigth_rt==0.,weight_rtd==0.,weight_k==0.,weight_p==0.]):
+			raise ValueError("No fit objective set. All weights were equal to 0")
+		if weight_rt:
+			warnings.warn("Direct fitting of RT values is deprecated and will be removed in the future",DeprecationWarning)
+			self._rt = weight_rt
+			name.append('rt')
+		if weight_rtd:
+			self._rtd = weight_rtd
+			name.append('rtd')
+		if weight_k:
+			self._k = weight_k
+			name.append('kernel')
+		if weight_p:
+			self._p = weight_p
+			name.append('performance')
+		self.name = '_'.join([str(n) for n in list(name)])
+	
+	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean):
+		output = 0.
+		model.threshold = params[0]
+		simulation = model.batchInference(target,distractor)
+		if self._rt:
+			output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
+		if self._rtd:
+			# Squared difference between rt histograms
+			simulated_rtd,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
+			if len(params)>2:
+				simulated_rtd = conv_hist(simulated_rtd,params[2],model.ISI)
+			output+= self._rtd * np.sum((subject_rtd-simulated_rtd)**2)
+		if self._k:
+			# Squared difference between decision kernels
+			selection = 1.-simulation[:,1]
+			fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
+			sim_kernel,_,_,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
+			window = min(subject_kernel[1],sim_kernel[1])
+			output+= self._k * np.sum((subject_kernel[:,:window]-sim_kernel[:,:window])**2)
+		if self._p:
+			# Pearson chi squared statistic to test whether the simulated and subject performances come from the same distribution
+			hits = np.array([np.sum(subject_performance),np.nansum(simulation[:,1])])
+			misses = np.array([len(subject_performance),np.nansum(np.logical_not(np.isnan(simulation[:,1])))])-hits
+			contingency = np.array([hits,misses])
+			expected = np.dot(np.sum(contingency,axis=1,keepdims=True),np.sum(contingency,axis=0,keepdims=True))/np.sum(contingency)
+			output+= self._p*np.nansum((contingency-expected)**2/expected)
+		return output
+	
+	def __getstate__(self):
+		return {'name':self.name,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p}
+	
+	def __setstate__(self,state):
+		self.name = state['name']
+		self._rt = state['_rt']
+		self._rtd = state['_rtd']
+		self._k = state['_k']
+		self._p = state['_p']
 
 def load_fitter(filename):
 	if not filename.endswith('.pkl'):
@@ -146,36 +221,70 @@ class Fitter():
 			# Use the supplied model's criteria
 			pass
 		# Objective function (merit)
-		if objective.lower() in ('rtd','rt distribution','rt histogram','rt_distribution','rt_histogram'):
+		if isinstance(objective,Objective):
+			self.objective = objective
 			self.use_subject_signals = use_subject_signals
-			self.fittype = 0
 			if initial_parameters is not None:
 				self.initial_parameters = initial_parameters
 			else:
 				self.initial_parameters = np.random.random(2)
-			if len(self.initial_parameters)==2:
-				self.merit = rt_histogram_merit
+			if objective.name=='rtd':
+				self.fittype = 0
+			elif objective.name=='rt':
+				self.fittype = 1
+				self.use_subject_signals = True
+				self.initial_parameters = self.initial_parameters[:2]
+			elif objective.name=='kernel':
+				self.fittype = 2
+				self.initial_parameters = self.initial_parameters[:2]
 			else:
-				self.merit = rt_histogram_merit_variable_deadtime
+				self.fittype = 3
 			if self.use_subject_signals and (synthetic_trials is not None):
 				warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 				self.synthetic_trials = None
 			else:
 				self.synthetic_trials = synthetic_trials
-		elif objective.lower()=='rt':
-			if not use_subject_signals:
-				warnings.warn("When the objective is to fit subject RT values (not the distribution), use_subject_values is always set as True",RuntimeWarning)
-			self.use_subject_signals = True
-			if len(initial_parameters)!=2:
-				raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
-			self.fittype = 1
-			self.synthetic_trials = None
-			if synthetic_trials is not None:
-				warnings.warn("Variable synthetic_trials is not used when the objective is to fit the RT values",RuntimeWarning)
-			self.initial_parameters = initial_parameters
-			self.merit = rt_merit
 		else:
-			raise(ValueError("Unknown fit objective: %s",objective))
+			if objective.lower() in ('rtd','rt distribution','rt histogram','rt_distribution','rt_histogram'):
+				self.objective = Objective(weight_rtd=1.)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 0
+				if initial_parameters is not None:
+					self.initial_parameters = initial_parameters
+				else:
+					self.initial_parameters = np.random.random(2)
+				if self.use_subject_signals and (synthetic_trials is not None):
+					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
+					self.synthetic_trials = None
+				else:
+					self.synthetic_trials = synthetic_trials
+			elif objective.lower()=='rt':
+				self.objective = Objective(weight_rt=1.)
+				if not use_subject_signals:
+					warnings.warn("When the objective is to fit subject RT values (not the distribution), use_subject_values is always set as True",RuntimeWarning)
+				self.use_subject_signals = True
+				if len(initial_parameters)!=2:
+					raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
+				self.fittype = 1
+				self.synthetic_trials = None
+				if synthetic_trials is not None:
+					warnings.warn("Variable synthetic_trials is not used when the objective is to fit the RT values",RuntimeWarning)
+				self.initial_parameters = initial_parameters
+			elif objective.lower()=='kernel':
+				self.objective = Objective(weight_k=1.)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 2
+				if initial_parameters is not None:
+					self.initial_parameters = initial_parameters
+				else:
+					self.initial_parameters = np.random.random(2)
+				if self.use_subject_signals and (synthetic_trials is not None):
+					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
+					self.synthetic_trials = None
+				else:
+					self.synthetic_trials = synthetic_trials
+			else:
+				raise(ValueError("Unknown fit objective: %s",objective))
 		# CMA parameters
 		self.cma_sigma = cma_sigma
 		self.cma_options = cma_options
@@ -192,6 +301,8 @@ class Fitter():
 	def fit(self,restarts=0,**kwargs):
 		# Load subject data
 		dat,t,d = self.subject.load_data()
+		t = np.mean(t,axis=2)
+		d = np.mean(d,axis=2)
 		max_rt_ind = int(math.ceil(max(dat[:,1])/self.model.ISI))
 		bin_edges = np.array(range(max_rt_ind+1))*self.model.ISI
 		subject_rt = dat[:,1]
@@ -207,8 +318,8 @@ class Fitter():
 		target = np.zeros((n_trials,max_rt_ind+1))
 		distractor = np.zeros((n_trials,max_rt_ind+1))
 		if self.use_subject_signals:
-			target[:,:t.shape[1]] = np.mean(t,axis=2)
-			distractor[:,:d.shape[1]] = np.mean(d,axis=2)
+			target[:,:t.shape[1]] = t
+			distractor[:,:d.shape[1]] = d
 			target[:,t.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-t.shape[1],n_trials)+dat[:,0]).T
 			distractor[:,d.shape[1]:] = (sigma*np.random.randn(max_rt_ind+1-d.shape[1],n_trials)+50).T
 		else:
@@ -217,12 +328,19 @@ class Fitter():
 		self.synthetic_data = {'target':target,'distractor':distractor,'indeces':indeces}
 		if self.fittype==0:
 			subject_rt_histogram,_ = np.histogram(subject_rt,bin_edges,density=True)
-			args = (subject_rt_histogram,bin_edges,self.model,target,distractor)
+			args = (None,subject_rt_histogram,None,None,self.model,bin_edges,target,distractor,None,None)
 		elif self.fittype==1:
-			args = (subject_rt,self.model,target,distractor,self.model.ISI)
+			args = (subject_rt,None,None,None,self.model,None,target,distractor,None,None)
+		elif self.fittype==2:
+			fluctuations = np.transpose(np.array([t.T-dat[:,0],d.T-50]),(2,0,1))
+			subject_kernel,_,_,_ = ke.kernels(fluctuations,1-dat[:,2],dat[:,3]-1)
+			args = (None,None,subject_kernel,None,self.model,None,target,distractor,dat[indeces,0],50)
 		else:
-			args = (None,)
-		cma_fmin_output = cma.fmin(self.merit,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
+			subject_rt_histogram,_ = np.histogram(subject_rt,bin_edges,density=True)
+			fluctuations = np.transpose(np.array([t.T-dat[:,0],d.T-50]),(2,0,1))
+			subject_kernel,_,_,_ = ke.kernels(fluctuations,1-dat[:,2],dat[:,3]-1)
+			args = (subject_rt,subject_rt_histogram,subject_kernel,dat[:,1],self.model,bin_edges,target,distractor,dat[indeces,0],50)
+		cma_fmin_output = cma.fmin(self.objective,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
 		stop_cond = {}
 		for key in cma_fmin_output[7].keys():
 			stop_cond[key] = cma_fmin_output[7][key]
@@ -238,7 +356,17 @@ class Fitter():
 		self.fittype = state['fittype']
 		self.synthetic_trials = state['synthetic_trials']
 		self.initial_parameters = state['initial_parameters']
-		self.merit = state['merit']
+		if isinstance(state['objective'],Objective):
+			self.objective = state['objective']
+		else:
+			if state['objective'].__name__=="rt_merit":
+				self.objective = Objective(weight_rt=1.)
+			elif state['objective'].__name__=="rt_histogram_merit":
+				self.objective = Objective(weight_rtd=1.)
+			elif state['objective'].__name__=="rt_histogram_merit_variable_deadtime":
+				self.objective = Objective(weight_rtd=1.)
+			elif state['objective'].__name__=="kernel_merit":
+				self.objective = Objective(weight_k=1.)
 		self.cma_sigma = state['cma_sigma']
 		self.cma_options = state['cma_options']
 		self.synthetic_data = state['synthetic_data']
@@ -247,7 +375,7 @@ class Fitter():
 	def __getstate__(self):
 		return {'subject':self.subject,'model':self.model,'use_subject_signals':self.use_subject_signals,\
 				'fittype':self.fittype,'synthetic_trials':self.synthetic_trials,'initial_parameters':self.initial_parameters,\
-				'merit':self.merit,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
+				'objective':self.objective,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
 				'synthetic_data':self.synthetic_data,'fit_output':self.fit_output}
 	
 	def get_criteria(self):
@@ -265,6 +393,15 @@ class Fitter():
 				criteria = 'var'
 		return criteria
 	
+	def get_objective(self):
+		if self.fittype==0:
+			objective = 'rtd'
+		elif self.fittype==1:
+			objective = 'rt'
+		elif self.fittype==2:
+			objective = 'kernel'
+		return objective
+	
 	def save(self,filename,overwrite=False):
 		if not filename.endswith('.pkl'):
 			filename+='.pkl'
@@ -279,7 +416,7 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	criterias = ['optimal','dprime','dprime-var','var']
-	objectives = ['rt','rtd']
+	objectives = ['rt','rtd','kernel']
 	if subject_id!='all':
 		subjects = [s for s in itertools.ifilter(lambda s: s.id==subject_id,subjects)]
 	if criteria!='all':
@@ -309,15 +446,14 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+objective
 				fitter.save(filename,overwrite=True)
 
-def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=True):
-	files = [f for f in os.listdir(fit_dir) if f.endswith(".pkl")]
+def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None):
+	files = sorted([f for f in os.listdir(fit_dir) if f.endswith(".pkl")])
 	figures = []
 	ids = []
 	counter = 0
 	for f in files:
 		temp = f.split("_")
 		sid = temp[2]
-		ids.append(sid)
 		cri = temp[4]
 		obj = temp[6][:-4]
 		if sid not in subject_id:
@@ -327,7 +463,7 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		if cri not in criteria:
 			if criteria!='all':
 				continue
-		if obj not in objective:
+		if obj!=objective:
 			if objective!='all':
 				continue
 		counter+=1
@@ -373,30 +509,65 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		
 		if not interactive_pyplot:
 			plt.ioff() # cma overrides original pyplot settings and if interactive mode was off, the plot is never displayed!
-		figures.append(plt.figure(figsize=(13,10)))
+		
+		suptitle = []
+		label = ['Simulation']
+		if group_by!='subject':
+			suptitle.append('subject='+sname)
+		else:
+			label.append('subject='+sname)
+		if group_by!='criteria':
+			suptitle.append('criteria='+cri)
+		else:
+			label.append('criteria='+cri)
+		if group_by!='objective':
+			suptitle.append('objective='+obj)
+		else:
+			label.append('objective='+obj)
+		suptitle = '; '.join(suptitle)
+		label = '; '.join(label)
+		fig = plt.figure(suptitle,figsize=(13,10))
+		plot_subject_data = True
+		if fig not in figures:
+			figures.append(fig)
+			ids.append(sid)
+		elif group_by!='subject':
+			plot_subject_data = False
 		plt.subplot(121)
-		plt.plot(bin_edges[:-1],subject_rt,'k')
-		plt.plot(bin_edges[:-1],simulated_rt,'r')
-		plt.legend(['Subject','Simulation'])
+		if plot_subject_data:
+			plt.plot(bin_edges[:-1],subject_rt,'k',label='Subject',linewidth=2)
+		plt.plot(bin_edges[:-1],simulated_rt,label=label)
+		plt.legend()
 		plt.xlabel('Response time [ms]')
 		plt.ylabel('Prob density [1/ms]')
 		plt.subplot(122)
-		plt.plot(sT,sdk[0],color='b',linestyle='--')
-		plt.plot(sT,sdk[1],color='r',linestyle='--')
-		plt.plot(sim_sT,sim_sdk[0],color='b')
-		plt.plot(sim_sT,sim_sdk[1],color='r')
-		plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color='b',alpha=0.3,edgecolor=None)
-		plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color='r',alpha=0.3,edgecolor=None)
-		plt.fill_between(sim_sT,sim_sdk[0]-sim_sdk_std[0],sim_sdk[0]+sim_sdk_std[0],color='b',alpha=0.3,edgecolor=None)
-		plt.fill_between(sim_sT,sim_sdk[1]-sim_sdk_std[1],sim_sdk[1]+sim_sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		if group_by is None:
+			plt.plot(sT,sdk[0],color='b',linestyle='--',label='Subject $D_{S}$')
+			plt.plot(sT,sdk[1],color='r',linestyle='--',label='Subject $D_{N}$')
+			plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color='b',alpha=0.3,edgecolor=None)
+			plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+			plt.plot(sim_sT,sim_sdk[0],color='b',label='Simulation $D_{S}$')
+			plt.plot(sim_sT,sim_sdk[1],color='r',label='Simulation $D_{N}$')
+			plt.fill_between(sim_sT,sim_sdk[0]-sim_sdk_std[0],sim_sdk[0]+sim_sdk_std[0],color='b',alpha=0.3,edgecolor=None)
+			plt.fill_between(sim_sT,sim_sdk[1]-sim_sdk_std[1],sim_sdk[1]+sim_sdk_std[1],color='r',alpha=0.3,edgecolor=None)
+		else:
+			if plot_subject_data:
+				line1 = plt.plot(sT,sdk[0],color='k',linestyle='--',label='Subject')[0]
+				plt.plot(sT,sdk[1],color=line1.get_color(),linestyle='--')
+				plt.fill_between(sT,sdk[0]-sdk_std[0],sdk[0]+sdk_std[0],color=line1.get_color(),alpha=0.3,edgecolor=None)
+				plt.fill_between(sT,sdk[1]-sdk_std[1],sdk[1]+sdk_std[1],color=line1.get_color(),alpha=0.3,edgecolor=None)
+			line1 = plt.plot(sim_sT,sim_sdk[0],label=label)[0]
+			plt.plot(sim_sT,sim_sdk[1],color=line1.get_color())
+			plt.fill_between(sim_sT,sim_sdk[0]-sim_sdk_std[0],sim_sdk[0]+sim_sdk_std[0],color=line1.get_color(),alpha=0.3,edgecolor=None)
+			plt.fill_between(sim_sT,sim_sdk[1]-sim_sdk_std[1],sim_sdk[1]+sim_sdk_std[1],color=line1.get_color(),alpha=0.3,edgecolor=None)
 		plt.plot(plt.gca().get_xlim(),[0,0],color='k')
 		plt.xlabel('Time [ms]')
 		plt.ylabel('Fluctuation [$cd/m^{2}$]')
-		plt.legend(['Subject $D_{S}$','Subject $D_{N}$','Simulated $D_{S}$','Simulated $D_{N}$'])
-		plt.suptitle('Subject='+sname+'; criteria='+cri+'; objective='+obj)
+		plt.legend()
+		plt.suptitle(suptitle)
 	if save:
 		from matplotlib.backends.backend_pdf import PdfPages
-		with PdfPages('../../figs/fits.pdf') as pdf:
+		with PdfPages('../../figs/'+savefname+'.pdf') as pdf:
 			for fig in [f for (i,f) in sorted(zip(ids,figures), key=lambda pair: pair[0])]:
 				pdf.savefig(fig)
 	else:
@@ -499,8 +670,8 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 
 def parse_args():
 	""" Parse arguments passed from the command line """
-	arg_list = ['program','dir','subject','criteria','objective','save']
-	options = {'program':'test','dir':None,'subject':'all','criteria':'all','objective':'all','save':True}
+	arg_list = ['program','dir','subject','criteria','objective','save','group_by','savefname']
+	options = {'program':'test','dir':None,'subject':'all','criteria':'all','objective':'all','save':False,'group_by':None,'savefname':'fits'}
 	kwarg_flag = False
 	skip_arg = True
 	arg_n = 0
@@ -515,6 +686,8 @@ def parse_args():
 				if arg.lower() not in ['test','fit','analyze']:
 					raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
+			elif c==2:
+				pass
 			elif c==3:
 				if arg.lower()!='all':
 					try:
@@ -527,14 +700,21 @@ def parse_args():
 					raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
 			elif c==5:
-				if arg.lower() not in ['all','rt','rtd']:
-					raise ValueError("Supplied objective must be either 'all', 'rt' or 'rtd'. User supplied '%s' instead" % (arg))
+				if arg.lower() not in ['all','rt','rtd','kernel']:
+					raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
 			elif c==6:
-				if arg.lower not in ['true','false']:
+				if arg.lower() not in ['true','false']:
 					raise ValueError("Save must be either 'true' or 'false'. User supplied '%s' instead" % (arg))
 				arg = arg=='true'
-			elif c>6:
+			elif c==7:
+				if arg.lower() not in ['none','subject','criteria','objective']:
+					raise ValueError("Group_by must be either 'none', 'subject', 'criteria' or 'objective'. User supplied '%s' instead" % (arg))
+				arg = arg.lower()
+				arg = arg if arg!='none' else None
+			elif c==8:
+				pass
+			elif c>8:
 				raise Exception("Unknown sixth option supplied '%s'" %s)
 			options[arg_list[arg_n]] = arg
 			arg_n+=1
@@ -558,19 +738,25 @@ def parse_args():
 					if val not in ['all','optimal','dprime','dprime-var','var']:
 						raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (val))
 				elif key=='objective':
-					if val not in ['all','rt','rtd']:
-						raise ValueError("Supplied objective must be either 'all', 'rt' or 'rtd'. User supplied '%s' instead" % (val))
-			elif key=='dir':
+					if val not in ['all','rt','rtd','kernel']:
+						raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (val))
+			elif key in ['dir','savefname']:
 				val = sys.argv[c+1]
 			elif key=='save':
 				val = sys.argv[c+1].lower()
 				if val not in ['true','false']:
 					raise ValueError("Save must be either 'true' or 'false'. User supplied '%s' instead" % (val))
 				val = val=='true'
+			elif key=='group_by':
+				val = sys.argv[c+1].lower()
+				if val.lower() not in ['none','subject','criteria','objective']:
+					raise ValueError("Group_by must be either 'none', 'subject', 'criteria' or 'objective'. User supplied '%s' instead" % (val))
+				val = val.lower()
+				val = val if val!='none' else None
 			elif key in ['h','-help']:
 				display_help()
 			else:
-				raise Exception("Unknown option '%s' supplied" %s)
+				raise Exception("Unknown option '%s' supplied" % (key))
 			options[key] = val
 	print options
 	return options
@@ -588,7 +774,9 @@ def display_help():
  'subject': The subject you with to fit or analyze. Can be 'all' saying you with to analyze all subjects (including the merge of all subjects that has id=0) or an integer id 0(represents the merge of all subjects), 1, 2, etc. [default 'all']
  'criteria': The criteria to implement. Posible values are 'optimal', 'dprime', 'var' and 'dprime-var'. [default 'optimal']
  'objective': The objective function to fit or analyze. Can be 'all', 'rt' or 'rtd'. [default 'all']
- 'save': Only used with the analyze program. Can be 'false' or 'true' and determines whether the graphs are shown or saved to ../../figs/fits.pdf respectively.
+ 'save': Only used with the analyze program. Can be 'false' or 'true' and determines whether the graphs are shown or saved to ../../figs/fits.pdf respectively. [default 'false']
+ 'group_by': Only used with the analyze program. Can be 'none', 'subject', 'criteria' or 'objective' and determines whether plots are grouped by a given property. [default 'none']
+ 'savefname': Only used with the analyze program if save is True. Is the filename to which to save the plots. [default: 'fits']
  
  Argument can be supplied as positional arguments or as -key value pairs.
  
@@ -612,6 +800,6 @@ if __name__=="__main__":
 			fit_all_subjects(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'])
 	elif args['program']=='analyze':
 		if args['dir'] is not None:
-			analyze_all_fits(fit_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'])
+			analyze_all_fits(fit_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],group_by=args['group_by'],savefname=args['savefname'])
 		else:
-			analyze_all_fits(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'])
+			analyze_all_fits(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'],group_by=args['group_by'],savefname=args['savefname'])
