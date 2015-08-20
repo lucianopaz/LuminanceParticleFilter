@@ -12,6 +12,3 @@
 
 # Matlab .mat files
 *.mat
-
-# cma package
-cma.py

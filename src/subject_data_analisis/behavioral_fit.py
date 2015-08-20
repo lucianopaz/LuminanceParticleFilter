@@ -132,7 +132,7 @@ class Objective():
 		self._k = 0.
 		self._p = 0.
 		name = []
-		if all([weigth_rt==0.,weight_rtd==0.,weight_k==0.,weight_p==0.]):
+		if all([weight_rt==0.,weight_rtd==0.,weight_k==0.,weight_p==0.]):
 			raise ValueError("No fit objective set. All weights were equal to 0")
 		if weight_rt:
 			warnings.warn("Direct fitting of RT values is deprecated and will be removed in the future",DeprecationWarning)
@@ -147,7 +147,7 @@ class Objective():
 		if weight_p:
 			self._p = weight_p
 			name.append('performance')
-		self.name = '_'.join([str(n) for n in list(name)])
+		self.name = '-'.join([str(n) for n in list(name)])
 	
 	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean):
 		output = 0.
@@ -166,7 +166,7 @@ class Objective():
 			selection = 1.-simulation[:,1]
 			fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
 			sim_kernel,_,_,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
-			window = min(subject_kernel[1],sim_kernel[1])
+			window = min(subject_kernel.shape[1],sim_kernel.shape[1])
 			output+= self._k * np.sum((subject_kernel[:,:window]-sim_kernel[:,:window])**2)
 		if self._p:
 			# Pearson chi squared statistic to test whether the simulated and subject performances come from the same distribution
@@ -194,6 +194,21 @@ def load_fitter(filename):
 	output = pickle.load(f)
 	f.close()
 	return output
+
+def resave(directory='fits/'):
+	"""
+	Used to update the Fitter instances saved in the specified directory
+	to use the Objective class instead of the _merit functions
+	"""
+	if not directory.endswith('/'):
+		directory+='/'
+	files = sorted([f for f in os.listdir(directory) if f.endswith(".pkl")])
+	for f in files:
+		fitter = load_fitter(directory+f)
+		fitter.save(directory+f,overwrite=True)
+		fitter2 = load_fitter(directory+f)
+		print fitter.__getstate__()
+		print fitter2.__getstate__()
 
 class Fitter():
 	def __init__(self,subject,model=None,objective='rt distribution',initial_parameters=None,ubounds=None,\
@@ -236,7 +251,7 @@ class Fitter():
 				self.initial_parameters = self.initial_parameters[:2]
 			elif objective.name=='kernel':
 				self.fittype = 2
-				self.initial_parameters = self.initial_parameters[:2]
+				self.initial_parameters = self.initial_parameters[:1]
 			else:
 				self.fittype = 3
 			if self.use_subject_signals and (synthetic_trials is not None):
@@ -275,9 +290,9 @@ class Fitter():
 				self.use_subject_signals = use_subject_signals
 				self.fittype = 2
 				if initial_parameters is not None:
-					self.initial_parameters = initial_parameters
+					self.initial_parameters = initial_parameters[:1]
 				else:
-					self.initial_parameters = np.random.random(2)
+					self.initial_parameters = np.random.random(1)
 				if self.use_subject_signals and (synthetic_trials is not None):
 					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 					self.synthetic_trials = None
@@ -291,8 +306,8 @@ class Fitter():
 		if ubounds is not None:
 			if len(ubounds)!=len(initial_parameters):
 				raise(ValueError("Parameter upper boundary must be an array with the same length as the supplied initial_parameters"))
-			self.cma_options.set('bounds',[np.zeros(len(initial_parameters)),ubounds])
-			self.cma_options.set('scaling_of_variables',ubounds)
+			self.cma_options.set('bounds',[np.zeros(len(self.initial_parameters)),ubounds[:len(self.initial_parameters)]])
+			self.cma_options.set('scaling_of_variables',ubounds[:len(self.initial_parameters)])
 		
 		# Fitting output
 		self.synthetic_data = {'target':None,'distractor':None,'indeces':None}
@@ -356,6 +371,8 @@ class Fitter():
 		self.fittype = state['fittype']
 		self.synthetic_trials = state['synthetic_trials']
 		self.initial_parameters = state['initial_parameters']
+		if 'merit' in state.keys() and 'objective' not in state.keys():
+			state['objective'] = state['merit']
 		if isinstance(state['objective'],Objective):
 			self.objective = state['objective']
 		else:
@@ -400,6 +417,8 @@ class Fitter():
 			objective = 'rt'
 		elif self.fittype==2:
 			objective = 'kernel'
+		else:
+			objective = self.objective
 		return objective
 	
 	def save(self,filename,overwrite=False):
@@ -422,7 +441,10 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 	if criteria!='all':
 		criterias = [c for c in itertools.ifilter(lambda c: c==criteria, criterias)]
 	if objective!='all':
-		objectives = [o for o in itertools.ifilter(lambda c: c==objective, objectives)]
+		if isinstance(objective,tuple):
+			objectives = [Objective(*objective)]
+		else:
+			objectives = [o for o in itertools.ifilter(lambda c: c==objective, objectives)]
 	ISI = 40.
 	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
 	model = pe.KnownVarPerfectInference(model_var_t=25.,model_var_d=25.,ISI=ISI,**priors)
@@ -443,10 +465,16 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 				fitter = Fitter(s,model,objective=objective,initial_parameters=init_pars,ubounds=ub,\
 						criteria=criteria,synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False)
 				fitter.fit(restarts=0)
-				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+objective
+				if isinstance(objective,Objective):
+					obj_name = objective.name
+				else:
+					obj_name = objective
+				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+obj_name
 				fitter.save(filename,overwrite=True)
 
 def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None):
+	if not fit_dir.endswith('/'):
+		fit_dir+='/'
 	files = sorted([f for f in os.listdir(fit_dir) if f.endswith(".pkl")])
 	figures = []
 	ids = []
@@ -487,9 +515,18 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		distractor = fitter.synthetic_data['distractor']
 		indeces = fitter.synthetic_data['indeces']
 		model.threshold = fitter.fit_output['xopt'][0]
-		dead_time = fitter.fit_output['xopt'][1]
+		if len(fitter.fit_output['xopt'])>1:
+			if fitter.fittype!=2:
+				dead_time = fitter.fit_output['xopt'][1]
+			else:
+				dead_time = 0.
+		else:
+			dead_time = 0.
 		if len(fitter.fit_output['xopt'])>2:
-			var_dead_time = fitter.fit_output['xopt'][2]
+			if fitter.fittype!=1 and fitter.fittype!=2:
+				var_dead_time = fitter.fit_output['xopt'][2]
+			else:
+				var_dead_time = None
 		else:
 			var_dead_time = None
 		simulation = model.batchInference(target,distractor)
@@ -511,27 +548,31 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 			plt.ioff() # cma overrides original pyplot settings and if interactive mode was off, the plot is never displayed!
 		
 		suptitle = []
-		label = ['Simulation']
-		if group_by!='subject':
-			suptitle.append('subject='+sname)
+		label = ['Sim']
+		if group_by is not None:
+			if group_by=='subject':
+				suptitle.append('subject='+sname)
+			else:
+				label.append('s='+sname)
+			if group_by=='criteria':
+				suptitle.append('criteria='+cri)
+			else:
+				label.append('c='+cri)
+			if group_by=='objective':
+				suptitle.append('objective='+obj)
+			else:
+				label.append('o='+obj)
+			suptitle = '; '.join(suptitle).capitalize()
+			label = '; '.join(label)
 		else:
-			label.append('subject='+sname)
-		if group_by!='criteria':
-			suptitle.append('criteria='+cri)
-		else:
-			label.append('criteria='+cri)
-		if group_by!='objective':
-			suptitle.append('objective='+obj)
-		else:
-			label.append('objective='+obj)
-		suptitle = '; '.join(suptitle)
-		label = '; '.join(label)
+			suptitle = 'Subject='+sname+'; criteria='+cri+'; objective='+obj
+			label = 'Simulation'
 		fig = plt.figure(suptitle,figsize=(13,10))
 		plot_subject_data = True
 		if fig not in figures:
 			figures.append(fig)
 			ids.append(sid)
-		elif group_by!='subject':
+		elif group_by=='subject':
 			plot_subject_data = False
 		plt.subplot(121)
 		if plot_subject_data:
@@ -700,9 +741,19 @@ def parse_args():
 					raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
 			elif c==5:
-				if arg.lower() not in ['all','rt','rtd','kernel']:
-					raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (arg))
-				arg = arg.lower()
+				if arg.startswith('(') and arg.endswith(')'): # Passing a tuple of values to construct a mixed Objective
+					try:
+						parsed_arg = arg[1:-1] # Trim the parenthesis from the tuple
+						parsed_arg.split(',')
+						parsed_arg = tuple([float(a) for a in parsed_arg])
+						arg = parsed_arg
+					except:
+						print "Could not properly parse the tuple supplied to construct Objective. Supplied tuple: %s"%(arg)
+						raise
+				else:
+					if arg.lower() not in ['all','rt','rtd','kernel']:
+						raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (arg))
+					arg = arg.lower()
 			elif c==6:
 				if arg.lower() not in ['true','false']:
 					raise ValueError("Save must be either 'true' or 'false'. User supplied '%s' instead" % (arg))
@@ -738,8 +789,19 @@ def parse_args():
 					if val not in ['all','optimal','dprime','dprime-var','var']:
 						raise ValueError("Supplied criteria must be either 'all', 'optimal', 'dprime', 'dprime-var' or 'var'. User supplied '%s' instead" % (val))
 				elif key=='objective':
-					if val not in ['all','rt','rtd','kernel']:
-						raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (val))
+					if val.startswith('(') and val.endswith(')'): # Passing a tuple of values to construct a mixed Objective
+						try:
+							parsed_val = val[1:-1] # Trim the parenthesis from the tuple
+							parsed_val = parsed_val.split(',')
+							parsed_val = tuple([float(a) for a in parsed_val])
+							val = parsed_val
+						except:
+							print "Could not properly parse the tuple supplied to construct Objective. Supplied tuple: %s"%(val)
+							raise
+					else:
+						if val.lower() not in ['all','rt','rtd','kernel']:
+							raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (val))
+						val = val.lower()
 			elif key in ['dir','savefname']:
 				val = sys.argv[c+1]
 			elif key=='save':
@@ -773,7 +835,7 @@ def display_help():
  'dir': The directory from which to fetch the data. If the program is test or fit, it must be the path to the behavioral data files. If program is analyze, dir must be the path to the fit files. [default 'None' and fall to each function's default]
  'subject': The subject you with to fit or analyze. Can be 'all' saying you with to analyze all subjects (including the merge of all subjects that has id=0) or an integer id 0(represents the merge of all subjects), 1, 2, etc. [default 'all']
  'criteria': The criteria to implement. Posible values are 'optimal', 'dprime', 'var' and 'dprime-var'. [default 'optimal']
- 'objective': The objective function to fit or analyze. Can be 'all', 'rt' or 'rtd'. [default 'all']
+ 'objective': The objective function to fit or analyze. Can be 'all', 'rt', 'rtd' or 'kernel'. If using the 'fit' program, one can supply a tuple of four elements to construct the custom Objective instance (weight_rt,weight_rtd,weight_k,weight_p). [default 'all']
  'save': Only used with the analyze program. Can be 'false' or 'true' and determines whether the graphs are shown or saved to ../../figs/fits.pdf respectively. [default 'false']
  'group_by': Only used with the analyze program. Can be 'none', 'subject', 'criteria' or 'objective' and determines whether plots are grouped by a given property. [default 'none']
  'savefname': Only used with the analyze program if save is True. Is the filename to which to save the plots. [default: 'fits']
