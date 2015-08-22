@@ -49,6 +49,17 @@ def pad_stim(stim,length,axis=1,pad=np.nan,start=0):
 		padded_stim.append(temp)
 	return np.array(padded_stim)
 
+def center_around(arr,centers,axis=1,padding=np.nan):
+	arr_shape = list(arr.shape)
+	arr_shape[axis] = arr_shape[axis]*2-1
+	centered_arr = padding*np.ones(tuple(arr_shape))
+	slices = [1]+[range(sh) for sh in arr_shape[1:]]
+	for i,(a,c) in enumerate(zip(arr,centers)):
+		slices[0] = [i]
+		slices[axis] = range(arr.shape[axis]-1-int(c),arr_shape[axis]-int(c))
+		centered_arr[np.ix_(*slices)] = a.copy()
+	return centered_arr
+
 def kernels(fluctuations,selection,confidence,is_binary_confidence=True,locked_on_onset=True,RT_ind=None):
 	"""
 	Compute psychophysical decision and confidence kernels, locked to
@@ -84,17 +95,11 @@ def kernels(fluctuations,selection,confidence,is_binary_confidence=True,locked_o
 	  the confidence kernel.
 	"""
 	
-	fluct_shape = list(fluctuations.shape)
 	if not locked_on_onset:
 		# If the locked on onset kernels are wanted, the fluctuations are
 		# shifted on a new vector so that RT_ind is located at its center
-		fluct_shape[2] = fluct_shape[2]*2-1
-		fluct_T_dec = np.nan*np.ones(tuple(fluct_shape))
-		
-		for i,f in enumerate(fluctuations):
-			fluct_T_dec[i,:,fluctuations.shape[2]-1-RT_ind[i]:fluct_shape[2]-RT_ind[i]] = f.copy()
-		fluctuations = fluct_T_dec
-	fluct_shape = tuple(fluct_shape)
+		fluctuations = center_around(fluctuations,RT_ind,axis=2)
+	fluct_shape = fluctuations.shape
 	
 	# High and low, selected and non selected fluctuation vectors
 	high = np.nan*np.ones(fluct_shape)
