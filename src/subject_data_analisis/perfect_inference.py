@@ -72,15 +72,15 @@ class KnownVarPerfectInference(PerfectInference):
 		                time between changes of the target and distractor
 		                stimuli.
 		"""
-		self.var_t = model_var_t
-		self.var_d = model_var_d
-		self.prior_mu_t = prior_mu_t
-		self.prior_mu_d = prior_mu_d
-		self.prior_va_t = prior_va_t
-		self.prior_va_d = prior_va_d
+		self.var_t = float(model_var_t)
+		self.var_d = float(model_var_d)
+		self.prior_mu_t = float(prior_mu_t)
+		self.prior_mu_d = float(prior_mu_d)
+		self.prior_va_t = float(prior_va_t)
+		self.prior_va_d = float(prior_va_d)
 		
-		self.threshold = threshold
-		self.ISI = ISI
+		self.threshold = float(threshold)
+		self.ISI = float(ISI)
 		self.signals = []
 	
 	def criteria(self,post_mu_t,post_mu_d,post_va_t,post_va_d):
@@ -127,6 +127,23 @@ class KnownVarPerfectInference(PerfectInference):
 			performance = 1 if criterium>0 else 0
 			ret = decided,performance,criterium,n*self.ISI
 		return ret
+	
+	def passiveInference(self,targetSignalArr,distractorSignalArr):
+		if targetSignalArr.shape!=distractorSignalArr.shape:
+			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		s = list(targetSignalArr.shape)
+		s[1]+=1
+		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
+		post_mu_d = self.prior_mu_d*np.ones(tuple(s))
+		post_va_t = self.prior_va_t*np.ones(tuple(s))
+		post_va_d = self.prior_va_d*np.ones(tuple(s))
+		n = np.tile(np.reshape(np.arange(s[1]),(1,s[1])),(s[0],1))
+		
+		post_va_t = 1./(1./self.prior_va_t+n/self.var_t)
+		post_va_d = 1./(1./self.prior_va_d+n/self.var_d)
+		post_mu_t[:,1:] = (self.prior_mu_t/self.prior_va_t+np.cumsum(targetSignalArr,axis=1)/self.var_t)*post_va_t[:,1:]
+		post_mu_d[:,1:] = (self.prior_mu_d/self.prior_va_d+np.cumsum(distractorSignalArr,axis=1)/self.var_d)*post_va_d[:,1:]
+		return post_mu_t,post_mu_d,post_va_t,post_va_d
 	
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
@@ -198,17 +215,17 @@ class UnknownVarPerfectInference(PerfectInference):
 		                time between changes of the target and distractor
 		                stimuli.
 		"""
-		self.prior_mu_t = prior_mu_t
-		self.prior_mu_d = prior_mu_d
-		self.prior_nu_t = prior_nu_t
-		self.prior_nu_d = prior_nu_d
-		self.prior_a_t = prior_a_t
-		self.prior_a_d = prior_a_d
-		self.prior_b_t = prior_b_t
-		self.prior_b_d = prior_b_d
+		self.prior_mu_t = float(prior_mu_t)
+		self.prior_mu_d = float(prior_mu_d)
+		self.prior_nu_t = float(prior_nu_t)
+		self.prior_nu_d = float(prior_nu_d)
+		self.prior_a_t = float(prior_a_t)
+		self.prior_a_d = float(prior_a_d)
+		self.prior_b_t = float(prior_b_t)
+		self.prior_b_d = float(prior_b_d)
 		
-		self.ISI = ISI
-		self.threshold = threshold
+		self.ISI = float(ISI)
+		self.threshold = float(threshold)
 		self.signals = []
 	
 	def criteria(self,post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d):
@@ -283,6 +300,40 @@ class UnknownVarPerfectInference(PerfectInference):
 			performance = 1 if criterium>0 else 0
 			ret = decided,performance,criterium,n*self.ISI
 		return ret
+	
+	def passiveInference(self,targetSignalArr,distractorSignalArr):
+		if targetSignalArr.shape!=distractorSignalArr.shape:
+			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		s = list(targetSignalArr.shape)
+		s[1]+=1
+		post_nu_t = self.prior_nu_t*np.ones(tuple(s))
+		post_a_t =  self.prior_a_t*np.ones(tuple(s))
+		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
+		post_b_t =  self.prior_b_t*np.ones(tuple(s))
+		post_nu_d = self.prior_nu_d*np.ones(tuple(s))
+		post_a_d =  self.prior_a_d*np.ones(tuple(s))
+		post_mu_d = self.prior_mu_d*np.ones(tuple(s))
+		post_b_d =  self.prior_b_d*np.ones(tuple(s))
+		n = np.tile(np.reshape(np.arange(s[1]),(1,s[1])),(s[0],1))
+		
+		mv = onlineMeanVar()
+		t_mean,t_var = mv.arr_add_value(targetSignalArr,axis=1)
+		mv.reset()
+		d_mean,d_var = mv.arr_add_value(distractorSignalArr,axis=1)
+		
+		# Target distribution hyperparameter update
+		post_nu_t = self.prior_nu_t+n
+		post_a_t =  self.prior_a_t+0.5*n
+		post_mu_t[:,1:] = (self.prior_nu_t*self.prior_mu_t+n[:,1:]*t_mean)/(self.prior_nu_t+n[:,1:])
+		post_b_t[:,1:] = self.prior_b_t+0.5*t_var+0.5*n[:,1:]*self.prior_nu_t*(t_mean-self.prior_mu_t)**2/(self.prior_nu_t+n[:,1:])
+		
+		# Distractor distribution hyperparameter update
+		post_nu_d = self.prior_nu_d+n
+		post_a_d =  self.prior_a_d+0.5*n
+		post_mu_d[:,1:] = (self.prior_nu_d*self.prior_mu_d+n[:,1:]*d_mean)/(self.prior_nu_d+n[:,1:])
+		post_b_d[:,1:] = self.prior_b_d+0.5*d_var+0.5*n[:,1:]*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n[:,1:])
+		
+		return post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_t
 	
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
