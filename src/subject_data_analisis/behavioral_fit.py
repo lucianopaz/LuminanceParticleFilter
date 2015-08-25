@@ -715,6 +715,7 @@ def parse_args():
 	options = {'program':'test','dir':None,'subject':'all','criteria':'all','objective':'all','save':False,'group_by':None,'savefname':'fits'}
 	kwarg_flag = False
 	skip_arg = True
+	mixed_objective = False
 	arg_n = 0
 	for c,arg in enumerate(sys.argv):
 		if skip_arg:
@@ -751,8 +752,13 @@ def parse_args():
 						print "Could not properly parse the tuple supplied to construct Objective. Supplied tuple: %s"%(arg)
 						raise
 				else:
-					if arg.lower() not in ['all','rt','rtd','kernel']:
-						raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (arg))
+					arg = arg.lower()
+					if arg not in ['all','rt','rtd','kernel']:
+						if '-' in arg:
+							if not all([(a in ['rt','rtd','kernel']) for a in arg.split('-')]):
+								raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (arg))
+							else:
+								mixed_objective = True
 					arg = arg.lower()
 			elif c==6:
 				if arg.lower() not in ['true','false']:
@@ -800,7 +806,11 @@ def parse_args():
 							raise
 					else:
 						if val.lower() not in ['all','rt','rtd','kernel']:
-							raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (val))
+							if '-' in val:
+								if not all([(v in ['rt','rtd','kernel']) for v in val.lower().split('-')]):
+									raise ValueError("Supplied objective must be either 'all', 'rt', 'rtd' or 'kernel'. User supplied '%s' instead" % (val))
+								else:
+									mixed_objective = True
 						val = val.lower()
 			elif key in ['dir','savefname']:
 				val = sys.argv[c+1]
@@ -820,6 +830,8 @@ def parse_args():
 			else:
 				raise Exception("Unknown option '%s' supplied" % (key))
 			options[key] = val
+	if mixed_objective and (not options['program']=='analyze'):
+		raise ValueError("Mixed objective name is only accepted in 'analyze' program. For other programs use the tuple of weigths.")
 	print options
 	return options
 
