@@ -27,7 +27,7 @@ def normcdf(x,mu=0.,sigma=1.):
 		new_x = np.sign(x-mu)*np.inf
 	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
-def objective(params,model,performance,rt_ind,target,distractor,return_ind=False,return_posterior=False,return_performance=False):
+def objective(params,model,performance,rt_ind,target,distractor,return_ind=False,return_likelihood=False,return_performance=False):
 	model.var_t = params[0]**2
 	model.var_d = params[0]**2
 	if len(params)>1:
@@ -37,20 +37,20 @@ def objective(params,model,performance,rt_ind,target,distractor,return_ind=False
 			model.prior_mu_t = params[2]
 			model.prior_mu_d = params[2]
 	mu_t,mu_d,va_t,va_d = model.passiveInference(target,distractor)
-	mu_diff = mu_t-mu_d
-	va_diff = va_t+va_d
-	miss_prob = ke.center_around(normcdf(0.,mu_diff,va_diff),rt_ind+1) # Plus 1 because mu_t, mu_d, va_t and va_d's first element is the prior hyperparameter (i.e. no observations)
-	posterior = miss_prob.copy()
-	posterior[performance==1] = 1.-posterior[performance==1]
-	posterior = np.nanmean(np.log(posterior),axis=0)
-	ind = np.nanargmax(posterior[:mu_t.shape[1]])
-	out = -posterior[ind] # The minus is added so the that when fmin is called, the maximum is found
-	if any([return_ind,return_posterior,return_performance]):
+	mu_diff = mu_t[:,0:]-mu_d[:,0:] # We disregard the prior value that is stored in [:,0]
+	va_diff = va_t[:,0:]+va_d[:,0:] # We disregard the prior value that is stored in [:,0]
+	miss_prob = ke.center_around(normcdf(0.,mu_diff,va_diff),rt_ind)
+	likelihood = miss_prob.copy()
+	likelihood[performance==1] = 1.-likelihood[performance==1]
+	likelihood = np.nanmean(np.log(likelihood),axis=0)*target.shape[0]
+	ind = np.nanargmax(likelihood[:mu_t.shape[1]])
+	out = -likelihood[ind] # The minus is added so the that when fmin is called, the maximum is found
+	if any([return_ind,return_likelihood,return_performance]):
 		out = (out,)
 		if return_ind:
 			out+=(ind,)
-		if return_posterior:
-			out+=(posterior,)
+		if return_likelihood:
+			out+=(likelihood,)
 		if return_performance:
 			performance = np.nanmean(1-miss_prob,axis=0)
 			performance_std = np.sqrt(np.nansum((1-miss_prob)*miss_prob,axis=0))/np.sum(~np.isnan(miss_prob),axis=0)
@@ -123,7 +123,9 @@ def analyze(fit_dir='fits/',save=False,savefname='inferences'):
 		ff = open(fit_dir+f,'r')
 		(subject,fit_output) = pickle.load(ff)
 		ff.close()
-		
+		if subject.id<=1:
+			print subject.name, subject.id
+			print subject.data_files
 		dat,t,d = subject.load_data()
 		inds = dat[:,1]<1000
 		dat = dat[inds]
@@ -136,7 +138,7 @@ def analyze(fit_dir='fits/',save=False,savefname='inferences'):
 		rT = (centered_ind-t.shape[1]+1)*0.04
 		
 		model = pe.KnownVarPerfectInference()
-		max_logp,ind_max,posterior,perf = objective(fit_output['xopt'],model,dat[:,2],rt_ind,t,d,return_ind=True,return_posterior=True,return_performance=True)
+		max_logp,ind_max,likelihood,perf = objective(fit_output['xopt'],model,dat[:,2],rt_ind,t,d,return_ind=True,return_likelihood=True,return_performance=True)
 		performance = perf[0]
 		performance_std = perf[1]
 		
@@ -149,7 +151,7 @@ def analyze(fit_dir='fits/',save=False,savefname='inferences'):
 		plt.plot(rT,rdk[1],color='r',label='$D_{N}$')
 		plt.fill_between(rT,rdk[0]-rdk_std[0],rdk[0]+rdk_std[0],color='b',alpha=0.3,edgecolor=None)
 		plt.fill_between(rT,rdk[1]-rdk_std[1],rdk[1]+rdk_std[1],color='r',alpha=0.3,edgecolor=None)
-		plt.plot(rT[ind_max-1]*np.ones(2),ax.get_ylim(),'--k')
+		plt.plot(rT[ind_max]*np.ones(2),ax.get_ylim(),'--k')
 		plt.ylabel('Decision kernel')
 		
 		plt.subplot(223)
@@ -160,12 +162,12 @@ def analyze(fit_dir='fits/',save=False,savefname='inferences'):
 		plt.ylabel('Performance')
 		
 		ax = plt.subplot(122)
-		plt.plot(np.linspace(-1,1,posterior.shape[0]),posterior)
+		plt.plot(np.linspace(-1,1,likelihood.shape[0]),likelihood)
 		ylim = ax.get_ylim()
-		plt.plot(np.linspace(-1,1,posterior.shape[0])[ind_max]*np.ones(2),ylim,'--k')
+		plt.plot(np.linspace(-1,1,likelihood.shape[0])[ind_max]*np.ones(2),ylim,'--k')
 		ax.set_ylim(ylim)
 		plt.xlabel('T locked on RT [s]')
-		plt.ylabel('Log posterior')
+		plt.ylabel('Log likelihood')
 		
 		sname = str(subject.id) if subject.id!=0 else 'all'
 		plt.suptitle('Subject '+sname)

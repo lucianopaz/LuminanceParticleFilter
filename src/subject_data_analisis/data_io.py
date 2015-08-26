@@ -88,8 +88,8 @@ def unique_subjects(data_dir):
 def merge_subjects(subject_list,name='all',subject_id=0):
 	for i,s in enumerate(subject_list):
 		if i==0:
-			b = s.blocks
-			d = s.data_files
+			b = [bla for bla in s.blocks]
+			d = [bla for bla in s.data_files]
 			ns = s.nsessions
 		else:
 			b.extend(s.blocks);
