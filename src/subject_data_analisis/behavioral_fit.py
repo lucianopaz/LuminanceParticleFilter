@@ -475,7 +475,7 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None):
 	if not fit_dir.endswith('/'):
 		fit_dir+='/'
-	files = sorted([f for f in os.listdir(fit_dir) if f.endswith(".pkl")])
+	files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Fit_'))])
 	figures = []
 	ids = []
 	counter = 0

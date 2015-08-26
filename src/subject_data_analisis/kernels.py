@@ -54,6 +54,8 @@ def center_around(arr,centers,axis=1,padding=np.nan):
 	arr_shape[axis] = arr_shape[axis]*2-1
 	centered_arr = padding*np.ones(tuple(arr_shape))
 	slices = [1]+[range(sh) for sh in arr_shape[1:]]
+	if any(centers>arr.shape[axis]):
+		raise IndexError("Can not center around supplied center index. Index out of bounds.")
 	for i,(a,c) in enumerate(zip(arr,centers)):
 		slices[0] = [i]
 		slices[axis] = range(arr.shape[axis]-1-int(c),arr_shape[axis]-int(c))
