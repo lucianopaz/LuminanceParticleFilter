@@ -4,47 +4,84 @@
 from __future__ import division
 import numpy as np
 from scipy import optimize
+import math
 
-class Model():
-	def __init__(self,prior,n,dt,nT,m,mu_range,reward=1.,penalty=0.,T_i=1.,T_p=0.):
-		self.n = int(n)
-		self.dt = float(dt)
-		self.nT = int(nT)
-		self.reward = float(reward)
-		self.penalty = float(penalty)
-		self.T_i = float(T_i)
-		self.T_p = float(T_p)
-		self.m = int(m) # Discretization of prior mu values
-		self.mu = np.linspace(mu_range[0],mu_range[1],self.m)
-		self.g = np.linspace(0,1,n)
-		self.V = np.zeros((nT,n))
-		self.costs = np.zeros(nT)
-		if isinstance(prior,np.ndarray):
-			if prior.shape!=self.mu.shape:
-				raise ValueError("Supplied prior must have shape (%d)"%(self.m))
-			self.prior_mu = prior
-		elif callable(prior):
-			self.prior_mu = np.array([prior(mu) for mu in self.mu])
-		else:
-			raise TypeError("Supplied prior must be an ndarray or a function to evaluate prior mu probabilities")
+_vectErf = np.vectorize(math.erf,otypes=[np.float])
+def normcdf(x,mu=0.,sigma=1.):
+	"""
+	Compute normal cummulative distribution with mean mu and standard
+	deviation sigma. x can be a numpy array.
+	"""
+	try:
+		new_x = (x-mu)/sigma
+	except ZeroDivisionError:
+		new_x = np.sign(x-mu)*np.inf
+	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
+
+#~ class Model():
+	#~ def __init__(self,prior,n=1,dt=0.1,nT=1,m=1,mu_range,reward=1.,penalty=0.,T_i=1.,T_p=0.):
+		#~ self.n = int(n)
+		#~ self.dt = float(dt)
+		#~ self.nT = int(nT)
+		#~ self.reward = float(reward)
+		#~ self.penalty = float(penalty)
+		#~ self.T_i = float(T_i)
+		#~ self.T_p = float(T_p)
+		#~ self.m = int(m) # Discretization of prior mu values
+		#~ self.mu = np.linspace(mu_range[0],mu_range[1],self.m)
+		#~ self.g = np.linspace(0,1,n)
+		#~ self.V = np.zeros((nT,n))
+		#~ self.costs = np.zeros(nT)
+		#~ if isinstance(prior,np.ndarray):
+			#~ if prior.shape!=self.mu.shape:
+				#~ raise ValueError("Supplied prior must have shape (%d)"%(self.m))
+			#~ self.prior_mu = prior
+		#~ elif callable(prior):
+			#~ self.prior_mu = np.array([prior(mu) for mu in self.mu])
+		#~ else:
+			#~ raise TypeError("Supplied prior must be an ndarray or a function to evaluate prior mu probabilities")
 		#~ self.p = self.propagate_probability()
 	
 	#~ def propagate_probability(self):
 		#~ p = np.zeros((nT,n,n))
 	
-	def g2x(self,g,p=None):
-		if p is None:
-			p = self.prior_mu
-		f = lambda x: self.x2g(x,p)-g
-		return optimize.brentq(f,self.mu[0]-10*(self.mu[-1]-self.mu[0]),self.mu[-1]+10*(self.mu[-1]-self.mu[0]))
+class Model():
+	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.):
+		self.model_var = model_var
+		self.prior_mu_mean = prior_mu_mean
+		self.prior_mu_var = prior_mu_var
+		self.n = int(n)
+		self.g = np.linspace(0,1,self.n)
+		self.t = np.arange(0,T+dt,dt,np.float)
+		self.nT = self.t.shape[0]-1
 	
-	def x2g(self,x,p=None):
-		if p is None:
-			p = self.prior_mu
-		arg = self.mu*(x-0.5*self.mu)
-		max_arg = np.max(arg)
-		norm_prob = p*np.exp(arg/max_arg)
-		return np.sum(norm_prob[self.mu>=0])/np.sum(norm_prob)
+	def post_mu_var(self,t):
+		return 1/(t/self.model_var+1/self.prior_mu_var)
+	
+	def post_mu_mean(self,t,x):
+		return (x/self.model_var+self.prior_mu_mean/self.prior_mu_var)*self.post_mu_var(t)
+	
+	def x2g(self,t,x):
+		return normcdf(self.post_mu_mean(t,x)/np.sqrt(self.post_mu_var(t)))
+	
+	def x2gprime(self,t,x):
+		return np.exp(-0.5*self.post_mu_mean(t,x)/np.sqrt(self.post_mu_var(t)))
+	
+	def g2x(self,t,g,a=None,b=None):
+		f = lambda x: self.x2g(t,x)-g
+		if a is None:
+			a = -100.
+		if b is None:
+			b = 100
+		return optimize.brentq(f,a,b)
+	
+	def belief_transition_p(self):
+		xx = np.zeros(self.nT,self.n)
+		for i,t in enumerate(self.t[:-1]):
+			for j,g in enumerate(self.g)
+				xx[i,j] = self.g2x(t,g)
+				
+		
 
 #~ def value_backtrack(reward_rate,V,T_i,T_p,g,reward_1,reward_2,p):
 	#~ 
@@ -89,11 +126,6 @@ class Model():
 			#~ value_of_exploring = 
 			#~ V[t] = np.max(np.array([value_of_selecting_1,value_of_selecting_2,]),axis=0)
 
-def post_mu_var(t,model_var,prior_mu_var):
-	return 1/(t/model_var+1/prior_mu_var)
-
-def post_mu_mean(t,x,model_var,prior_mu_var,prior_mu_mean):
-	return (x/true_var+prior_mu_mean/prior_mu_var)/post_mu_var(t,model_var,prior_mu_var)
 
 def belief_transition_logp():
 	x_prior = g2x(g)
