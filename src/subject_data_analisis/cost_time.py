@@ -107,15 +107,15 @@ class Model():
 	def decision_bounds(self):
 		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
 		v2 = self.reward*(1-self.g)-self.penalty-(self.iti+self.g*self.tp)*self.rho
-		bounds = zeros((self.nT,2))
+		bounds = np.zeros((self.nT,2))
 		decide_1 = v1==self.value
 		decide_2 = v2==self.value
 		for i,t in enumerate(self.t):
-			if any(decide_1):
+			if any(decide_1[i]):
 				bound1 = self.g[decide_1[i].nonzero()[0][0]]
 			else:
 				bound1 = 1.
-			if any(decide_2):
+			if any(decide_2[i]):
 				bound2 = self.g[decide_2[i].nonzero()[0][-1]]
 			else:
 				bound2 = 0.
@@ -123,12 +123,12 @@ class Model():
 		return bounds
 
 def test():
-	m = ct.Model(model_var=10,prior_mu_var=40,n=101,T=10.,cost=0.001)
+	m = Model(model_var=10,prior_mu_var=40,n=101,T=10.,cost=1)
 	b = m.decision_bounds()
 	plt.figure(figsize=(13,10))
 	colors = plt.get_cmap('jet')
 	plt.subplot(121)
-	gca().set_color_cycle([colors(v) for v in np.linspace(0,1,m.value.shape[0])])
+	plt.gca().set_color_cycle([colors(v) for v in np.linspace(0,1,m.value.shape[0])])
 	plt.plot(m.g,m.value.T)
 	plt.xlabel('belief')
 	plt.ylabel('value')
