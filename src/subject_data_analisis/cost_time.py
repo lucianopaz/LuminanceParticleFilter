@@ -21,7 +21,7 @@ def normcdf(x,mu=0.,sigma=1.):
 
 class Model():
 	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.,\
-				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05):
+				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True):
 		self.model_var = model_var
 		self.prior_mu_mean = prior_mu_mean
 		self.prior_mu_var = prior_mu_var
@@ -33,8 +33,10 @@ class Model():
 		self.T = float(T)
 		self.t = np.arange(0.,float(T+dt),float(dt),np.float)
 		self.nT = self.t.shape[0]
-		self.p = self.belief_transition_p()
 		self.cost = cost*np.ones_like(self.t)
+		self.store_p = store_p
+		if self.store_p:
+			self.p = self.belief_transition_p()
 		self.value_dp(reward=reward,penalty=penalty,iti=iti,tp=tp)
 	
 	def post_mu_var(self,t):
@@ -89,7 +91,10 @@ class Model():
 		self.iti = iti
 		self.tp = tp
 		
-		f = lambda x: self.backpropagate_value(x)
+		if self.store_p:
+			f = lambda x: self.backpropagate_value(x)
+		else:
+			f = lambda x: self.memory_efficient_backpropagate_value(x)
 		self.rho = optimize.brentq(f,-10,10)
 		self.decision_bounds()
 	
@@ -103,9 +108,8 @@ class Model():
 		dt = self.dt
 		dg = self.g[1]-self.g[0]
 		for i,t in reversed(list(enumerate(self.t[:-1]))):
-			v_explore = np.sum(self.value[i+1]*self.p[i]*dg,axis=1)-(self.cost[i]+self.rho)*dt
+			v_explore = np.dot(self.p[i],self.value[i+1])*dg-(self.cost[i]+self.rho)*dt
 			self.value[i] = np.max([v1,v2,v_explore],axis=0)
-		output = self.value[0,int(0.5*self.n)]
 		return self.value[0,int(0.5*self.n)]
 	
 	def decision_bounds(self):
@@ -145,9 +149,47 @@ class Model():
 			self.p = self.belief_transition_p()
 			self.backpropagate_value(rho=self.rho)
 			self.decision_bounds()
+	
+	def memory_efficient_backpropagate_value(self,rho=None):
+		print rho
+		if rho is not None:
+			self.rho = rho
+		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+		v2 = self.reward*(1-self.g)-self.penalty-(self.iti+self.g*self.tp)*self.rho
+		self.value = np.zeros((self.nT,self.n))
+		self.value[-1] = np.max(np.array([v1,v2]),axis=0)
+		dt = self.dt
+		dg = self.g[1]-self.g[0]
+		post_var_t1 = self.post_mu_var(self.t[-1])
+		invg_t1 = np.zeros(self.n)
+		for j,g in enumerate(self.g):
+			if j>0:
+				invg_t1[j] = self.g2x(self.t[-1],g,invg_t1[j-1])
+			else:
+				invg_t1[j] = self.g2x(self.t[-1],g)
+		invg_t = np.zeros_like(invg_t1)
+		p = np.zeros((self.n,self.n))
+		for i,t in reversed(list(enumerate(self.t[:-1]))):
+			post_var_t = self.post_mu_var(t)
+			for j,g in enumerate(self.g):
+				if j>0:
+					invg_t[j] = self.g2x(t,g,invg_t[j-1])
+				else:
+					invg_t[j] = self.g2x(t,g)
+				mu_n = self.post_mu_mean(t,invg_t[j])
+				p[j] = self.model_var/(np.sqrt(post_var_t+self.model_var)*post_var_t1)*\
+					   np.exp(-0.5*(invg_t1-invg_t[j]-mu_n)**2/(post_var_t1+self.model_var)+\
+							  0.5*post_var_t1*(invg_t1/self.model_var+self.prior_mu_mean/self.prior_mu_var))
+			
+			v_explore = np.sum(self.value[i+1]*p*dg,axis=1)-(self.cost[i]+self.rho)*dt
+			self.value[i] = np.max([v1,v2,v_explore],axis=0)
+			
+			post_var_t1 = post_var_t
+			invg_t1[:] = invg_t
+		return self.value[0,int(0.5*self.n)]
 
 def test():
-	m = Model(model_var=10,prior_mu_var=40,n=101,T=10.,cost=1)
+	m = Model(model_var=10,prior_mu_var=40,n=101,T=10.,cost=1,store_p=False)
 	#~ print m.rho
 	#~ m.refine_value(dt=1e-2,n=501)
 	b = m.bounds
