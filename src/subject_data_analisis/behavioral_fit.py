@@ -126,62 +126,80 @@ def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distra
 	return np.sum((subject_kernel-sim_kernel[:,:25])**2)
 
 class Objective():
-	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.):
+	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.,likelihood=False):
 		self._rt = 0.
 		self._rtd = 0.
 		self._k = 0.
 		self._p = 0.
-		name = []
-		if all([weight_rt==0.,weight_rtd==0.,weight_k==0.,weight_p==0.]):
-			raise ValueError("No fit objective set. All weights were equal to 0")
-		if weight_rt:
-			warnings.warn("Direct fitting of RT values is deprecated and will be removed in the future",DeprecationWarning)
-			self._rt = weight_rt
-			name.append('rt')
-		if weight_rtd:
-			self._rtd = weight_rtd
-			name.append('rtd')
-		if weight_k:
-			self._k = weight_k
-			name.append('kernel')
-		if weight_p:
-			self._p = weight_p
-			name.append('performance')
-		self.name = '-'.join([str(n) for n in list(name)])
+		if likelihood:
+			self.likelihood = True
+			self.name = 'nloglikelihood'
+		else:
+			self.likelihood = False
+			name = []
+			if all([weight_rt==0.,weight_rtd==0.,weight_k==0.,weight_p==0.]):
+				raise ValueError("No fit objective set. All weights were equal to 0")
+			if weight_rt:
+				warnings.warn("Direct fitting of RT values is deprecated and will be removed in the future",DeprecationWarning)
+				self._rt = weight_rt
+				name.append('rt')
+			if weight_rtd:
+				self._rtd = weight_rtd
+				name.append('rtd')
+			if weight_k:
+				self._k = weight_k
+				name.append('kernel')
+			if weight_p:
+				self._p = weight_p
+				name.append('performance')
+			self.name = '-'.join([str(n) for n in list(name)])
 	
 	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean):
-		output = 0.
-		model.threshold = params[0]
-		simulation = model.batchInference(target,distractor)
-		if self._rt:
-			output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
-		if self._rtd:
-			# Squared difference between rt histograms
-			simulated_rtd,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
-			if len(params)>2:
-				simulated_rtd = conv_hist(simulated_rtd,params[2],model.ISI)
-			output+= self._rtd * np.sum((subject_rtd-simulated_rtd)**2)
-		if self._k:
-			# Squared difference between decision kernels
-			selection = 1.-simulation[:,1]
-			fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
-			sim_kernel,_,_,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
-			window = min(subject_kernel.shape[1],sim_kernel.shape[1])
-			output+= self._k * np.sum((subject_kernel[:,:window]-sim_kernel[:,:window])**2)
-		if self._p:
-			# Pearson chi squared statistic to test whether the simulated and subject performances come from the same distribution
-			hits = np.array([np.sum(subject_performance),np.nansum(simulation[:,1])])
-			misses = np.array([len(subject_performance),np.nansum(np.logical_not(np.isnan(simulation[:,1])))])-hits
-			contingency = np.array([hits,misses])
-			expected = np.dot(np.sum(contingency,axis=1,keepdims=True),np.sum(contingency,axis=0,keepdims=True))/np.sum(contingency)
-			output+= self._p*np.nansum((contingency-expected)**2/expected)
+		if likelihood:
+			lp = len(params)
+			model.threshold = params[0]
+			dead_time_sigma = 1
+			dead_time = 0
+			if lp>1:
+				dead_time = params[1]
+				if lp>2:
+					dead_time_sigma = params[2]
+			simulation = model.batchInference(target,distractor)
+			output = np.sum(((subject_rt-simulation[:,3]-params[1])/dead_time_sigma)**2)
+		else:
+			output = 0.
+			model.threshold = params[0]
+			simulation = model.batchInference(target,distractor)
+			if self._rt:
+				output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
+			if self._rtd:
+				# Squared difference between rt histograms
+				simulated_rtd,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
+				if len(params)>2:
+					simulated_rtd = conv_hist(simulated_rtd,params[2],model.ISI)
+				output+= self._rtd * np.sum((subject_rtd-simulated_rtd)**2)
+			if self._k:
+				# Squared difference between decision kernels
+				selection = 1.-simulation[:,1]
+				fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
+				sim_kernel,_,_,_ = ke.kernels(fluctuations,selection,np.ones_like(selection))
+				window = min(subject_kernel.shape[1],sim_kernel.shape[1])
+				output+= self._k * np.sum((subject_kernel[:,:window]-sim_kernel[:,:window])**2)
+			if self._p:
+				# Pearson chi squared statistic to test whether the simulated and subject performances come from the same distribution
+				hits = np.array([np.sum(subject_performance),np.nansum(simulation[:,1])])
+				misses = np.array([len(subject_performance),np.nansum(np.logical_not(np.isnan(simulation[:,1])))])-hits
+				contingency = np.array([hits,misses])
+				expected = np.dot(np.sum(contingency,axis=1,keepdims=True),np.sum(contingency,axis=0,keepdims=True))/np.sum(contingency)
+				output+= self._p*np.nansum((contingency-expected)**2/expected)
 		return output
 	
 	def __getstate__(self):
-		return {'name':self.name,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p}
+		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p}
 	
 	def __setstate__(self,state):
 		self.name = state['name']
+		self.likelihood = state['likelihood']
 		self._rt = state['_rt']
 		self._rtd = state['_rtd']
 		self._k = state['_k']
