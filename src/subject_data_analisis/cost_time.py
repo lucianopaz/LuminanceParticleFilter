@@ -102,7 +102,9 @@ class Model():
 	
 	def value_dp(self,reward=1.,penalty=0.,iti=1.,tp=0.):
 		"""
-		Dynamic programming that computes the value of beliefs and the optimal bounds for decisions
+		Method that call the dynamic programming method that computes
+		the value of beliefs and the optimal bounds for decisions,
+		adjusting the predicted average reward (rho)
 		"""
 		self.reward = reward
 		self.penalty = penalty
@@ -117,6 +119,11 @@ class Model():
 		self.decision_bounds()
 	
 	def backpropagate_value(self,rho=None):
+		"""
+		Dynamic programming method that computes the value of beliefs.
+		It uses the previously computed belief transition probability
+		density that is very expensive in terms of memory.
+		"""
 		if rho is not None:
 			self.rho = rho
 		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
@@ -131,6 +138,11 @@ class Model():
 		return self.value[0,int(0.5*self.n)]
 	
 	def memory_efficient_backpropagate_value(self,rho=None):
+		"""
+		Dynamic programming method that computes the value of beliefs.
+		It computes the belief transition probability density on the fly
+		and is thus memory efficient at the expense of execution time.
+		"""
 		if rho is not None:
 			self.rho = rho
 		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
@@ -156,6 +168,9 @@ class Model():
 		return self.value[0,int(0.5*self.n)]
 	
 	def decision_bounds(self,value=None):
+		"""
+		Compute the decision bounds from the value of the beliefs
+		"""
 		if value is None:
 			value = self.value
 		self.bounds = np.zeros((2,self.nT))
@@ -176,11 +191,18 @@ class Model():
 		return self.bounds
 	
 	def belief_bound_to_mu_bound(self,bounds=None):
+		"""
+		Transform bounds in belief space to bounds in mean mu estimates
+		"""
 		if bounds is None:
 			bounds = self.bounds
 		return normcdfinv(bounds)*np.sqrt(self.post_mu_var(self.t))
 	
 	def refine_value(self,dt=None,n=None):
+		"""
+		This method re-computes the value of the beliefs using the
+		average reward (rho) that was already computed.
+		"""
 		change = False
 		if dt is not None:
 			if dt<self.dt:
