@@ -6,19 +6,7 @@ import numpy as np
 from scipy import optimize
 import math
 from matplotlib import pyplot as plt
-
-_vectErf = np.vectorize(math.erf,otypes=[np.float])
-def normcdf(x,mu=0.,sigma=1.):
-	"""
-	Compute normal cummulative distribution with mean mu and standard
-	deviation sigma. x, mu and sigma can be a numpy arrays that broadcast
-	together.
-	"""
-	try:
-		new_x = (x-mu)/sigma
-	except ZeroDivisionError:
-		new_x = np.sign(x-mu)*np.inf
-	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
+from utils import normcdf,normcdfinv
 
 class Model():
 	"""
@@ -78,35 +66,11 @@ class Model():
 		"""
 		return normcdf(self.post_mu_mean(t,x)/np.sqrt(self.post_mu_var(t)))
 	
-	def x2gprime(self,t,x):
-		"""
-		x2g(t,x) derivated by x
-		"""
-		return np.sqrt(0.5*self.post_mu_var(t)/np.PI)/self.model_var*\
-				np.exp(-0.5*self.post_mu_mean(t,x)/np.sqrt(self.post_mu_var(t)))
-	
-	def x2gdot(self,t,x):
-		"""
-		x2g(t,x) derivated by t
-		"""
-		return np.sqrt(0.125*self.post_mu_var(t)**2/np.PI)/self.model_var*\
-				np.exp(-0.5*self.post_mu_mean(t,x)/np.sqrt(self.post_mu_var(t)))*\
-				(x/self.model_var+self.prior_mu_mean/self.prior_mu_var)
-	
-	def g2x(self,t,g,a=None,b=None):
+	def g2x(self,t,g):
 		"""
 		Mapping from belief at time t to cumulated sample x (inverse of x2g)
 		"""
-		if g==0:
-			g = 1e-6
-		elif g==1:
-			g = 1-1e-6
-		f = lambda x: self.x2g(t,x)-g
-		if a is None:
-			a = -100.
-		if b is None:
-			b = 100
-		return optimize.brentq(f,a,b)
+		return self.model_var*(normcdfinv(g)/np.sqrt(self.post_mu_var(t))-self.prior_mu_mean/self.prior_mu_var)
 	
 	def invert_belief(self):
 		"""
@@ -115,10 +79,7 @@ class Model():
 		self.invg = np.zeros((self.nT,self.n))
 		for i,t in enumerate(self.t):
 			for j,g in enumerate(self.g):
-				if j>0:
-					self.invg[i,j] = self.g2x(t,g,self.invg[i,j-1])
-				else:
-					self.invg[i,j] = self.g2x(t,g)
+				self.invg[i,j] = self.g2x(t,g)
 		return self.invg
 	
 	def belief_transition_p(self):
@@ -194,12 +155,14 @@ class Model():
 			post_var_t1 = post_var_t
 		return self.value[0,int(0.5*self.n)]
 	
-	def decision_bounds(self):
-		self.bounds = np.zeros((self.nT,2))
+	def decision_bounds(self,value=None):
+		if value is None:
+			value = self.value
+		self.bounds = np.zeros((2,self.nT))
 		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
 		v2 = self.reward*(1-self.g)-self.penalty-(self.iti+self.g*self.tp)*self.rho
-		decide_1 = np.abs((v1-self.value)/v1)<1e-9
-		decide_2 = np.abs((v2-self.value)/v1)<1e-9
+		decide_1 = np.abs((v1-value)/v1)<1e-9
+		decide_2 = np.abs((v2-value)/v1)<1e-9
 		for i,t in enumerate(self.t):
 			if any(decide_1[i]):
 				bound1 = self.g[decide_1[i].nonzero()[0][0]]
@@ -209,8 +172,13 @@ class Model():
 				bound2 = self.g[decide_2[i].nonzero()[0][-1]]
 			else:
 				bound2 = 0.
-			self.bounds[i] = np.array([bound1,bound2])
+			self.bounds[:,i] = np.array([bound1,bound2])
 		return self.bounds
+	
+	def belief_bound_to_mu_bound(self,bounds=None):
+		if bounds is None:
+			bounds = self.bounds
+		return normcdfinv(bounds)*np.sqrt(self.post_mu_var(self.t))
 	
 	def refine_value(self,dt=None,n=None):
 		change = False
@@ -242,6 +210,7 @@ def test():
 	m = Model(model_var=10,prior_mu_var=40,n=51,T=10.,cost=5,store_p=False)
 	m.refine_value(n=501)
 	b = m.bounds
+	mu_b = m.belief_bound_to_mu_bound(b)
 	plt.figure(figsize=(13,10))
 	plt.subplot(121)
 	plt.imshow(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
@@ -254,10 +223,13 @@ def test():
 	#~ plt.plot(m.g,m.value.T)
 	#~ plt.xlabel('belief')
 	#~ plt.ylabel('value')
-	plt.subplot(122)
-	plt.plot(m.t,b)
+	plt.subplot(222)
+	plt.plot(m.t,b.T)
+	plt.ylabel('Belief bound')
+	plt.subplot(224)
+	plt.plot(m.t,mu_b.T)
+	plt.ylabel('$\mu$ bound')
 	plt.xlabel('T [s]')
-	plt.ylabel('Bound')
 	plt.show()
 
 if __name__=="__main__":
