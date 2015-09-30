@@ -100,7 +100,7 @@ class Model():
 		p = np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0)/(self.g[1]-self.g[0])
 		return np.transpose(p,(1,2,0))
 	
-	def value_dp(self,reward=1.,penalty=0.,iti=1.,tp=0.):
+	def value_dp(self,reward=1.,penalty=0.,iti=1.,tp=0.,lb=-10.,ub=10.):
 		"""
 		Method that call the dynamic programming method that computes
 		the value of beliefs and the optimal bounds for decisions,
@@ -115,7 +115,7 @@ class Model():
 			f = lambda x: self.backpropagate_value(x)
 		else:
 			f = lambda x: self.memory_efficient_backpropagate_value(x)
-		self.rho = optimize.brentq(f,-10,10)
+		self.rho = optimize.brentq(f,lb,ub)
 		self.decision_bounds()
 	
 	def backpropagate_value(self,rho=None):
@@ -226,10 +226,49 @@ class Model():
 				self.backpropagate_value(rho=self.rho)
 			else:
 				self.memory_efficient_backpropagate_value(rho=self.rho)
+			val0 = self.value[0,int(0.5*self.n)]
+			if abs(val0)>1e-12:
+				# Must refine the value of self.rho
+				if val0>0:
+					ub = self.rho
+					lb = self.rho-1e-2
+				else:
+					ub = self.rho+1e-2
+					lb = self.rho
+				self.value_dp(self.reward,self.penalty,self.iti,self.tp,lb,ub)
 			self.decision_bounds()
+	
+	# Regularization functions that map the bayesian parameter update to a Wien process
+	def phi(self,t):
+		"""
+		Regularization of time to transform the parameter update to a standard Wien process 
+		"""
+		s = np.sqrt(self.model_var)
+		co = self.model_var/self.prior_mu_var
+		fa = 4./s
+		return (t+co)**(1-fa)/(1.-fa)*(co**fa)-co/(1.-fa)
+	
+	def invphi(self,t):
+		"""
+		Inverse of self.phi(t)
+		"""
+		s = np.sqrt(self.model_var)
+		co = self.model_var/self.prior_mu_var
+		fa = 4./s
+		return (((1-fa)*t+co)*(co**(-fa)))**(1./(1.-fa))-co
+	
+	def psi_dash(self,x,t):
+		"""
+		Regularization of parameter values to transform the parameter update to a standard Wien process 
+		"""
+		s = np.sqrt(self.model_var)
+		co = self.model_var/self.prior_mu_var
+		fa = 2./s
+		mu0 = 0.5*self.prior_mu_mean*co*co
+		return ((t+co)/co)**(-fa)*(x/s*(t+co)-mu0)+mu0
 
 def test():
-	m = Model(model_var=10,prior_mu_var=40,n=51,T=10.,cost=5,store_p=False)
+	m = Model(model_var=10,prior_mu_var=40,n=51,T=10.,cost=1,store_p=False)
 	m.refine_value(n=501)
 	b = m.bounds
 	mu_b = m.belief_bound_to_mu_bound(b)
