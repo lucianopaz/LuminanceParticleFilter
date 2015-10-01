@@ -8,7 +8,7 @@ import math
 from matplotlib import pyplot as plt
 from utils import normcdf,normcdfinv
 
-class Model():
+class DecisionPolicy():
 	"""
 	Class that implements the dynamic programming method that optimizes
 	reward rate and computes the optimal decision bounds
@@ -43,10 +43,25 @@ class Model():
 		self.nT = self.t.shape[0]
 		self.cost = cost*np.ones_like(self.t)
 		self.store_p = store_p
+		self.reward = reward
+		self.penalty = penalty
+		self.iti = iti
+		self.tp = tp
+		
 		self.invert_belief()
 		if self.store_p:
 			self.p = self.belief_transition_p()
-		self.value_dp(reward=reward,penalty=penalty,iti=iti,tp=tp)
+		self.value_dp()
+	
+	def reset(self):
+		if self.store_p:
+			self.p = np.empty(1)
+		self.invg = np.empty(1)
+		self.value = np.empty(1)
+		self.bounds = np.empty(1)
+	
+	def set_constant_cost(self,cost):
+		self.cost = cost*np.ones_like(self.cost)
 	
 	def post_mu_var(self,t):
 		"""
@@ -100,17 +115,12 @@ class Model():
 		p = np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0)/(self.g[1]-self.g[0])
 		return np.transpose(p,(1,2,0))
 	
-	def value_dp(self,reward=1.,penalty=0.,iti=1.,tp=0.,lb=-10.,ub=10.):
+	def value_dp(self,lb=-10.,ub=10.):
 		"""
 		Method that call the dynamic programming method that computes
 		the value of beliefs and the optimal bounds for decisions,
 		adjusting the predicted average reward (rho)
 		"""
-		self.reward = reward
-		self.penalty = penalty
-		self.iti = iti
-		self.tp = tp
-		
 		if self.store_p:
 			f = lambda x: self.backpropagate_value(x)
 		else:
@@ -190,6 +200,15 @@ class Model():
 			self.bounds[:,i] = np.array([bound1,bound2])
 		return self.bounds
 	
+	def belief_bound_to_norm_mu_bound(self,bounds=None):
+		"""
+		Transform bounds in belief space to bounds in normalized mu
+		estimates (mean_mu/std_mu)
+		"""
+		if bounds is None:
+			bounds = self.bounds
+		return normcdfinv(bounds)
+	
 	def belief_bound_to_mu_bound(self,bounds=None):
 		"""
 		Transform bounds in belief space to bounds in mean mu estimates
@@ -238,6 +257,34 @@ class Model():
 				self.value_dp(self.reward,self.penalty,self.iti,self.tp,lb,ub)
 			self.decision_bounds()
 	
+	def compute_decision_bounds(self,cost=None,reward=None,n=51,N=501,type_of_bound='belief'):
+		if lower(type_of_bound) not in ['belief','norm_mu','mu']:
+			raise ValueError("type_of_bound must be 'belief', 'norm_mu' or 'mu'. %s supplied instead."%(type_of_bound))
+		self.store_p = True
+		if reward not is None:
+			self.reward = reward
+		self.n = int(n)
+		if self.n%2==0:
+			self.n+1
+		self.g = np.linspace(0.,1.,self.n)
+		if cost not is None:
+			if np.isscalar(cost):
+				self.set_constant_cost(cost)
+			else:
+				self.cost = cost
+		self.invert_belief()
+		self.p = self.belief_transition_p()
+		self.value_dp()
+		del self.p
+		self.store_p = False
+		self.refine_value(n=N)
+		bounds = self.decision_bounds()
+		if lower(type_of_bound)=='norm_mu':
+			bounds = self.belief_bound_to_norm_mu_bound(bounds)
+		elif lower(type_of_bound)=='mu':
+			bounds = self.belief_bound_to_mu_bound(bounds)
+		return bounds
+	
 	# Regularization functions that map the bayesian parameter update to a Wien process
 	def phi(self,t):
 		"""
@@ -268,10 +315,11 @@ class Model():
 		return ((t+co)/co)**(-fa)*(x/s*(t+co)-mu0)+mu0
 
 def test():
-	m = Model(model_var=10,prior_mu_var=40,n=51,T=10.,cost=1,store_p=False)
+	m = DecisionPolicy(model_var=10,prior_mu_var=40,n=51,T=10.,cost=5,store_p=False)
 	m.refine_value(n=501)
 	b = m.bounds
 	mu_b = m.belief_bound_to_mu_bound(b)
+	nmu_b = m.belief_bound_to_norm_mu_bound(b)
 	plt.figure(figsize=(13,10))
 	plt.subplot(121)
 	plt.imshow(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
@@ -284,12 +332,15 @@ def test():
 	#~ plt.plot(m.g,m.value.T)
 	#~ plt.xlabel('belief')
 	#~ plt.ylabel('value')
-	plt.subplot(222)
+	plt.subplot(322)
 	plt.plot(m.t,b.T)
 	plt.ylabel('Belief bound')
-	plt.subplot(224)
+	plt.subplot(324)
 	plt.plot(m.t,mu_b.T)
 	plt.ylabel('$\mu$ bound')
+	plt.subplot(326)
+	plt.plot(m.t,nmu_b.T)
+	plt.ylabel('$\mu/\sigma$ bound')
 	plt.xlabel('T [s]')
 	plt.show()
 

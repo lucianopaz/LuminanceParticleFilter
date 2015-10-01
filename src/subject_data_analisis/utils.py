@@ -36,6 +36,7 @@ def erfinv(y):
 
 _vectErf = np.vectorize(math.erf,otypes=[np.float])
 _vectErfinv = np.vectorize(erfinv,otypes=[np.float])
+_vectGamma = np.vectorize(math.gamma,otypes=[np.float])
 def normcdf(x,mu=0.,sigma=1.):
 	"""
 	Compute normal cummulative distribution with mean mu and standard
@@ -72,3 +73,9 @@ def normcdfinv(y,mu=0.,sigma=1.):
 			raise ValueError("Invalid sigma supplied to normcdfinv. sigma cannot be 0")
 		x = sigma*x+mu
 	return x
+
+def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
+	return beta**alpha/_vectGamma(alpha)*np.sqrt(0.5*l/np.pi)*t**(alpha-0.5)*np.exp(-0.5*l*t*(x-mu)**2-beta*t)
+
+def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
+	return normgamma(x,sigma**(-2),mu,l,beta,alpha)

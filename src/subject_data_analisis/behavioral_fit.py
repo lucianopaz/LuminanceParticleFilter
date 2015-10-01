@@ -7,6 +7,8 @@ import numpy as np
 import kernels as ke
 import data_io as io
 import perfect_inference as pe
+import cost_time as ct
+from utils import normcdf,normcdfinv
 try:
 	import matplotlib as mt
 	from matplotlib import pyplot as plt
@@ -15,18 +17,6 @@ try:
 except:
 	loaded_plot_libs = False
 import sys, itertools, math, cma, os, pickle, warnings
-
-_vectErf = np.vectorize(math.erf,otypes=[np.float])
-def normcdf(x,mu=0.,sigma=1.):
-	"""
-	Compute normal cummulative distribution with mean mu and standard
-	deviation sigma. x can be a numpy array.
-	"""
-	try:
-		new_x = (x-mu)/sigma
-	except ZeroDivisionError:
-		new_x = np.sign(x-mu)*np.inf
-	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
 def conv_hist(h,p,ISI,mode='full'):
 	conv_window = np.linspace(-p*6,p*6,int(math.ceil(p*12/ISI))+1)
@@ -81,7 +71,7 @@ def rt_merit(params,subject_rt,model,target,distractor,ISI):
 	response times. This assumes that the subject and the model viewed
 	exactly the same stimuli, allowing trial to trial comparison of RT.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt = simulation[:,3]+params[1]
 	return np.sum((subject_rt-simulated_rt)**2)
@@ -94,7 +84,7 @@ def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
 	between response time pairs as rt_merit. This function can be used
 	even when the model and the subject did not see the same stimuli.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
@@ -104,7 +94,7 @@ def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,m
 	The same as rt_histogram but allowing for random time shifts added
 	to the model decision times.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	# Include a normal fluctuation to the simulated_rt with width params[2]
@@ -118,7 +108,7 @@ def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distra
 	decision kernels. Only take into account the first 1000ms of
 	the kernel.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	selection = 1.-simulation[:,1]
 	fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
@@ -126,7 +116,7 @@ def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distra
 	return np.sum((subject_kernel-sim_kernel[:,:25])**2)
 
 class Objective():
-	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.,likelihood=False):
+	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.,likelihood=False,variable_list=['threshold','dead_time','dead_time_sigma'],fixed_values={}):
 		self._rt = 0.
 		self._rtd = 0.
 		self._k = 0.
@@ -153,23 +143,46 @@ class Objective():
 				self._p = weight_p
 				name.append('performance')
 			self.name = '-'.join([str(n) for n in list(name)])
+		self.fixed_threshold = True
+		self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None,'cost':None,'reward':None,'prior_mu_mean':None,'prior_mu_var':None}
+		for v in variable_list:
+			if lower(v) not in self.fittable_variables:
+				raise ValueError("Unknown variable '%s' being fitted",v)
+			if lower(v) in ['cost','reward']:
+				self.fixed_threshold = False
+		self.variable_list = [lower(v) for v in variable_list]
+		if ('cost' in self.variable_list or 'reward' in self.variable_list) and 'threshold' in self.variable_list:
+			raise ValueError("Cannot fit cost and reward, and a fixed threshold value. cost and reward are used with the decision_policy to compute a time varying threshold.")
+		for v in fixed_values.keys():
+			if lower(v) not in self.fittable_variables.keys():
+				raise ValueError("Unknown variable '%s' being fixed",lower(v))
+			if lower(v) in ['cost','reward']:
+				self.fixed_threshold = False
+			self.fittable_variables[lower(v)] = fixed_values[v]
 	
-	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean):
+	def call_params_to_variables(self,params):
+		if len(params)!=len(self.variable_list):
+			raise ValueError("Supplied parameter values must have the same number of elements as the variable_list being fitted.")
+		for p,v in zip(params,self.variable_list):
+			self.fittable_variables[v] = p
+	
+	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean,decision_policy=None):
+		self.call_params_to_variables(params)
+		if self.fixed_threshold:
+			model.set_symmetric_threshold(self.fittable_variables['threshold'])
+		else:
+			if self.fittable_variables['cost'] not is None:
+				decision_policy.set_constant_cost(self.fittable_variables['cost'])
+			if self.fittable_variables['reward'] not is None:
+				decision_policy.reward = self.fittable_variables['reward']
+			model.set_asymmetric_threshold(decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
+		dead_time_sigma = 1 if self.fittable_variables['dead_time_sigma'] is None else self.fittable_variables['dead_time_sigma']
+		dead_time = 0 if self.fittable_variables['dead_time'] is None else self.fittable_variables['dead_time']
+		simulation = model.batchInference(target,distractor)
 		if likelihood:
-			lp = len(params)
-			model.threshold = params[0]
-			dead_time_sigma = 1
-			dead_time = 0
-			if lp>1:
-				dead_time = params[1]
-				if lp>2:
-					dead_time_sigma = params[2]
-			simulation = model.batchInference(target,distractor)
 			output = np.sum(((subject_rt-simulation[:,3]-params[1])/dead_time_sigma)**2)
 		else:
 			output = 0.
-			model.threshold = params[0]
-			simulation = model.batchInference(target,distractor)
 			if self._rt:
 				output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
 			if self._rtd:
@@ -195,7 +208,9 @@ class Objective():
 		return output
 	
 	def __getstate__(self):
-		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p}
+		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p,\
+				'fixed_threshold':self.fixed_threshold,'fittable_variables':self.fittable_variables,'variable_list':self.variable_list}
+		}
 	
 	def __setstate__(self,state):
 		self.name = state['name']
@@ -204,6 +219,14 @@ class Objective():
 		self._rtd = state['_rtd']
 		self._k = state['_k']
 		self._p = state['_p']
+		if fixed_threshold not in state.keys():
+			self.fixed_threshold = True
+			self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None}
+			self.variable_list = ['threshold','dead_time','dead_time_sigma']
+		else:
+			self.fixed_threshold = state['fixed_threshold']
+			self.fittable_variables = state['fittable_variables']
+			self.variable_list = state['variable_list']
 
 def load_fitter(filename):
 	if not filename.endswith('.pkl'):
@@ -229,7 +252,7 @@ def resave(directory='fits/'):
 		print fitter2.__getstate__()
 
 class Fitter():
-	def __init__(self,subject,model=None,objective='rt distribution',initial_parameters=None,ubounds=None,\
+	def __init__(self,subject,model=None,decision_policy=None,objective='rt distribution',initial_parameters=None,ubounds=None,\
 				criteria=None,synthetic_trials=None,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False):
 		# Subject data
 		self.subject = subject
@@ -253,6 +276,14 @@ class Fitter():
 		else:
 			# Use the supplied model's criteria
 			pass
+		# Decision policy
+		if decision_policy is None:
+			self.update_threshold = False
+			self.decision_policy = None
+		else:
+			self.update_threshold = True
+			self.decision_policy = decision_policy
+		
 		# Objective function (merit)
 		if isinstance(objective,Objective):
 			self.objective = objective
@@ -385,6 +416,12 @@ class Fitter():
 	def __setstate__(self,state):
 		self.subject = state['subject']
 		self.model = state['model']
+		if 'decision_policy' not in state.keys() or 'update_threshold' not in state.keys():
+			self.decision_policy = None
+			self.update_threshold = False
+		else:
+			self.decision_policy = state['decision_policy']
+			self.update_threshold = state['update_threshold']
 		self.use_subject_signals = state['use_subject_signals']
 		self.fittype = state['fittype']
 		self.synthetic_trials = state['synthetic_trials']
@@ -408,7 +445,8 @@ class Fitter():
 		self.fit_output = state['fit_output']
 	
 	def __getstate__(self):
-		return {'subject':self.subject,'model':self.model,'use_subject_signals':self.use_subject_signals,\
+		return {'subject':self.subject,'model':self.model,'decision_policy':self.decision_policy,\
+				'update_threshold':self.update_threshold,'use_subject_signals':self.use_subject_signals,\
 				'fittype':self.fittype,'synthetic_trials':self.synthetic_trials,'initial_parameters':self.initial_parameters,\
 				'objective':self.objective,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
 				'synthetic_data':self.synthetic_data,'fit_output':self.fit_output}
@@ -532,7 +570,7 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		target = fitter.synthetic_data['target']
 		distractor = fitter.synthetic_data['distractor']
 		indeces = fitter.synthetic_data['indeces']
-		model.threshold = fitter.fit_output['xopt'][0]
+		model.set_symmetric_threshold(fitter.fit_output['xopt'][0])
 		if len(fitter.fit_output['xopt'])>1:
 			if fitter.fittype!=2:
 				dead_time = fitter.fit_output['xopt'][1]
@@ -675,7 +713,7 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	sT = np.array(range(sdk.shape[1]),dtype=float)*ISI
 	
 	# Compute fitted model's rt distribution
-	model.threshold = fit_output[0][0]
+	model.set_symmetric_threshold(fit_output[0][0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt,_ = np.histogram(simulation[:,3]+fit_output[0][1],bin_edges,density=True)
 	if var_dead_time:
