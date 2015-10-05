@@ -160,6 +160,12 @@ class KnownVarPerfectInference(PerfectInference):
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		if isinstance(self.upper_threshold,np.ndarray):
+			upper_threshold = self.upper_threshold[:(targetSignalArr.shape[-1]+1)]
+			lower_threshold = self.lower_threshold[:(targetSignalArr.shape[-1]+1)]
+		else:
+			upper_threshold = self.upper_threshold
+			lower_threshold = self.lower_threshold
 		s = list(targetSignalArr.shape)
 		s[1]+=1
 		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
@@ -178,8 +184,8 @@ class KnownVarPerfectInference(PerfectInference):
 		if returnPosterior:
 			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'var_t':np.nan*np.zeros(s[0]),'var_d':np.nan*np.zeros(s[0])}
 		for trial,cr in enumerate(criterium):
-			dt1 = np.flatnonzero(cr>=self.upper_threshold)
-			dt2 = np.flatnonzero(cr<=self.lower_threshold)
+			dt1 = np.flatnonzero(cr>=upper_threshold)
+			dt2 = np.flatnonzero(cr<=lower_threshold)
 			if dt1.size==0 and dt2.size==0:
 				decided = False
 				performance = np.nan
@@ -194,7 +200,7 @@ class KnownVarPerfectInference(PerfectInference):
 					performance = 0
 					dt = dt2[0]
 				else:
-					if dt1[0]>dt2[0]:
+					if dt1[0]<dt2[0]:
 						performance = 1
 						dt = dt1[0]
 					else:
@@ -374,6 +380,12 @@ class UnknownVarPerfectInference(PerfectInference):
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		if isinstance(self.upper_threshold,np.ndarray):
+			upper_threshold = self.upper_threshold[:(targetSignalArr.shape[-1]+1)]
+			lower_threshold = self.lower_threshold[:(targetSignalArr.shape[-1]+1)]
+		else:
+			upper_threshold = self.upper_threshold
+			lower_threshold = self.lower_threshold
 		s = list(targetSignalArr.shape)
 		s[1]+=1
 		post_nu_t = self.prior_nu_t*np.ones(tuple(s))
@@ -408,8 +420,8 @@ class UnknownVarPerfectInference(PerfectInference):
 		if returnPosterior:
 			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'nu_t':np.nan*np.zeros(s[0]),'nu_d':np.nan*np.zeros(s[0]),'b_t':np.nan*np.zeros(s[0]),'b_d':np.nan*np.zeros(s[0]),'a_t':np.nan*np.zeros(s[0]),'a_d':np.nan*np.zeros(s[0])}
 		for trial,cr in enumerate(criterium):
-			dt1 = np.flatnonzero(cr>=self.upper_threshold)
-			dt2 = np.flatnonzero(cr<=self.lower_threshold)
+			dt1 = np.flatnonzero(cr>=upper_threshold)
+			dt2 = np.flatnonzero(cr<=lower_threshold)
 			if dt1.size==0 and dt2.size==0:
 				decided = False
 				performance = np.nan
@@ -428,7 +440,7 @@ class UnknownVarPerfectInference(PerfectInference):
 					crit = cr[dt]
 					RT = dt*self.ISI
 				else:
-					if dt1[0]>dt2[0]:
+					if dt1[0]<dt2[0]:
 						dt = dt1[0]
 						performance = 1
 						crit = cr[dt]
@@ -514,8 +526,8 @@ def matlab_comparison():
 	import kernels as ke
 	aux = io.loadmat('mat_py_comp.mat')
 	model = KnownVarPerfectInference(model_var_t=aux['sigma'][0][0]**2,model_var_d=aux['sigma'][0][0]**2,\
-				prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
-				ISI=aux['ISI'][0][0])
+			prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
+			ISI=aux['ISI'][0][0])
 	model.set_symmetric_threshold(aux['threshold'][0][0])
 	target = aux['target']
 	distractor = aux['distractor']

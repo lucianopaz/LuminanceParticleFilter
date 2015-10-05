@@ -146,19 +146,19 @@ class Objective():
 		self.fixed_threshold = True
 		self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None,'cost':None,'reward':None,'prior_mu_mean':None,'prior_mu_var':None}
 		for v in variable_list:
-			if lower(v) not in self.fittable_variables:
+			if v.lower() not in self.fittable_variables:
 				raise ValueError("Unknown variable '%s' being fitted",v)
-			if lower(v) in ['cost','reward']:
+			if v.lower() in ['cost','reward']:
 				self.fixed_threshold = False
-		self.variable_list = [lower(v) for v in variable_list]
+		self.variable_list = [v.lower() for v in variable_list]
 		if ('cost' in self.variable_list or 'reward' in self.variable_list) and 'threshold' in self.variable_list:
 			raise ValueError("Cannot fit cost and reward, and a fixed threshold value. cost and reward are used with the decision_policy to compute a time varying threshold.")
 		for v in fixed_values.keys():
-			if lower(v) not in self.fittable_variables.keys():
-				raise ValueError("Unknown variable '%s' being fixed",lower(v))
-			if lower(v) in ['cost','reward']:
+			if v.lower() not in self.fittable_variables.keys():
+				raise ValueError("Unknown variable '%s' being fixed",v.lower())
+			if v.lower() in ['cost','reward']:
 				self.fixed_threshold = False
-			self.fittable_variables[lower(v)] = fixed_values[v]
+			self.fittable_variables[v.lower()] = fixed_values[v]
 	
 	def call_params_to_variables(self,params):
 		if len(params)!=len(self.variable_list):
@@ -171,15 +171,15 @@ class Objective():
 		if self.fixed_threshold:
 			model.set_symmetric_threshold(self.fittable_variables['threshold'])
 		else:
-			if self.fittable_variables['cost'] not is None:
+			if self.fittable_variables['cost'] is not None:
 				decision_policy.set_constant_cost(self.fittable_variables['cost'])
-			if self.fittable_variables['reward'] not is None:
+			if self.fittable_variables['reward'] is not None:
 				decision_policy.reward = self.fittable_variables['reward']
 			model.set_asymmetric_threshold(decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
 		dead_time_sigma = 1. if (self.fittable_variables['dead_time_sigma'] is None) else self.fittable_variables['dead_time_sigma']
 		dead_time = 0 if (self.fittable_variables['dead_time'] is None) else self.fittable_variables['dead_time']
 		simulation = model.batchInference(target,distractor)
-		if likelihood:
+		if self.likelihood:
 			output = np.sum(((subject_rt-simulation[:,3]-dead_time)/dead_time_sigma)**2)
 		else:
 			output = 0.
@@ -209,8 +209,8 @@ class Objective():
 	
 	def __getstate__(self):
 		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p,\
-				'fixed_threshold':self.fixed_threshold,'fittable_variables':self.fittable_variables,'variable_list':self.variable_list}
-		}
+				'fixed_threshold':self.fixed_threshold,'fittable_variables':self.fittable_variables,\
+				'variable_list':self.variable_list}
 	
 	def __setstate__(self,state):
 		self.name = state['name']
@@ -291,16 +291,25 @@ class Fitter():
 			if initial_parameters is not None:
 				self.initial_parameters = initial_parameters
 			else:
-				self.initial_parameters = np.random.random(2)
+				self.initial_parameters = np.random.random(len(self.objective.variable_list))
 			if objective.name=='rtd':
 				self.fittype = 0
 			elif objective.name=='rt':
 				self.fittype = 1
 				self.use_subject_signals = True
-				self.initial_parameters = self.initial_parameters[:2]
+				try:
+					self.objective.variable_list.remove('dead_time_sigma')
+					self.initial_parameters = self.initial_parameters[:len(self.objective.variable_list)]
+				except ValueError:
+					pass
 			elif objective.name=='kernel':
 				self.fittype = 2
-				self.initial_parameters = self.initial_parameters[:1]
+				try:
+					self.objective.variable_list.remove('dead_time')
+					self.objective.variable_list.remove('dead_time_sigma')
+					self.initial_parameters = self.initial_parameters[:len(self.objective.variable_list)]
+				except ValueError:
+					pass
 			else:
 				self.fittype = 3
 			if self.use_subject_signals and (synthetic_trials is not None):
@@ -310,38 +319,46 @@ class Fitter():
 				self.synthetic_trials = synthetic_trials
 		else:
 			if objective.lower() in ('rtd','rt distribution','rt histogram','rt_distribution','rt_histogram'):
-				self.objective = Objective(weight_rtd=1.)
-				self.use_subject_signals = use_subject_signals
-				self.fittype = 0
 				if initial_parameters is not None:
 					self.initial_parameters = initial_parameters
+					if len(initial_parameters)==2:
+						variable_list = ['threshold','dead_time']
+					elif len(initial_parameters)==3:
+						variable_list = ['threshold','dead_time','dead_time_sigma']
 				else:
 					self.initial_parameters = np.random.random(2)
+					variable_list = ['threshold','dead_time']
+				self.objective = Objective(weight_rtd=1.,variable_list=variable_list)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 0
 				if self.use_subject_signals and (synthetic_trials is not None):
 					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 					self.synthetic_trials = None
 				else:
 					self.synthetic_trials = synthetic_trials
 			elif objective.lower()=='rt':
-				self.objective = Objective(weight_rt=1.)
+				if len(initial_parameters)!=2:
+					raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
+				variable_list = ['threshold','dead_time']
+				self.objective = Objective(weight_rt=1.,variable_list=variable_list)
 				if not use_subject_signals:
 					warnings.warn("When the objective is to fit subject RT values (not the distribution), use_subject_values is always set as True",RuntimeWarning)
 				self.use_subject_signals = True
-				if len(initial_parameters)!=2:
-					raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
 				self.fittype = 1
 				self.synthetic_trials = None
 				if synthetic_trials is not None:
 					warnings.warn("Variable synthetic_trials is not used when the objective is to fit the RT values",RuntimeWarning)
 				self.initial_parameters = initial_parameters
 			elif objective.lower()=='kernel':
-				self.objective = Objective(weight_k=1.)
-				self.use_subject_signals = use_subject_signals
-				self.fittype = 2
 				if initial_parameters is not None:
+					variable_list = ['threshold']
 					self.initial_parameters = initial_parameters[:1]
 				else:
+					variable_list = ['threshold']
 					self.initial_parameters = np.random.random(1)
+				self.objective = Objective(weight_k=1.,variable_list=variable_list)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 2
 				if self.use_subject_signals and (synthetic_trials is not None):
 					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 					self.synthetic_trials = None
@@ -404,6 +421,8 @@ class Fitter():
 			fluctuations = np.transpose(np.array([t.T-dat[:,0],d.T-50]),(2,0,1))
 			subject_kernel,_,_,_ = ke.kernels(fluctuations,1-dat[:,2],dat[:,3]-1)
 			args = (subject_rt,subject_rt_histogram,subject_kernel,dat[:,1],self.model,bin_edges,target,distractor,dat[indeces,0],50)
+		if self.update_threshold:
+			args+=(self.decision_policy,)
 		cma_fmin_output = cma.fmin(self.objective,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
 		stop_cond = {}
 		for key in cma_fmin_output[7].keys():
@@ -765,6 +784,37 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 		plt.show()
 	return 0
 
+def fit_moving_bounds(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles',subject_id='all',objective='likelihood'):
+	# Fit parameters for each subject and then for all subjects
+	subjects = io.unique_subjects(data_dir)
+	subjects.append(io.merge_subjects(subjects))
+	if subject_id!='all':
+		subjects = [s for s in itertools.ifilter(lambda s: s.id==subject_id,subjects)]
+	objective = Objective(likelihood=True,variable_list=['dead_time','dead_time_sigma','reward','cost'])
+	ISI = 40.
+	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
+	model_var = 25.
+	decision_policy = ct.DecisionPolicy(model_var=2*model_var/ISI,\
+										prior_mu_mean=priors['prior_mu_t']-priors['prior_mu_d'],\
+										prior_mu_var=priors['prior_va_t']+priors['prior_va_d'],\
+										n=500,dt=ISI,T=1e4,reward=1.,penalty=0.,iti=1e3,tp=0.,cost=0.05,store_p=False,compute_value=False)
+	model = pe.KnownVarPerfectInference(model_var_t=model_var,model_var_d=model_var,ISI=ISI,**priors)
+	initial_parameters = [621.71742870406183, 75.978678076060476,1.,0.]
+	ubounds = [5000.,200.,100.,100.]
+	counter = 0
+	for s in subjects:
+		counter+=1
+		print counter
+		fitter = Fitter(s,model,objective=objective,decision_policy=decision_policy,initial_parameters=initial_parameters,ubounds=ubounds,\
+				synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=True)
+		fitter.fit(restarts=0)
+		if isinstance(objective,Objective):
+			obj_name = objective.name
+		else:
+			obj_name = objective
+		filename = 'fits/Moving_bound_Fit_subject_'+str(s.id)
+		fitter.save(filename,overwrite=True)
+
 def parse_args():
 	""" Parse arguments passed from the command line """
 	arg_list = ['program','dir','subject','criteria','objective','save','group_by','savefname']
@@ -781,8 +831,8 @@ def parse_args():
 			kwarg_flag = True
 		elif not kwarg_flag:
 			if c==1:
-				if arg.lower() not in ['test','fit','analyze']:
-					raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (arg))
+				if arg.lower() not in ['test','fit','fit_moving_bounds','analyze']:
+					raise ValueError("Supplied program must be either 'test', 'fit', 'fit_moving_bounds' or 'analyze'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
 			elif c==2:
 				pass
@@ -839,8 +889,8 @@ def parse_args():
 			if key in ['program','subject','criteria','objective']:
 				val = sys.argv[c+1].lower()
 				if key=='program':
-					if val not in ['test','fit','analyze']:
-						raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (val))
+					if val not in ['test','fit','fit_moving_bounds','analyze']:
+						raise ValueError("Supplied program must be either 'test', 'fit', 'fit_moving_bounds' or 'analyze'. User supplied '%s' instead" % (val))
 				elif key=='subject':
 					if arg!='all':
 						try:
@@ -899,7 +949,7 @@ def display_help():
  behavioral_fit.py -h [or --help] displays help
  
  Optional arguments are:
- 'program': Can be 'test', 'fit' or 'analyze'. Determines whether to run the test suite, run the fit_all_subjects function or analyze_all_fits function. [default 'test']
+ 'program': Can be 'test', 'fit', 'fit_moving_bounds' or 'analyze'. Determines whether to run the test suite, run the fit_all_subjects function or analyze_all_fits function. [default 'test']
  'dir': The directory from which to fetch the data. If the program is test or fit, it must be the path to the behavioral data files. If program is analyze, dir must be the path to the fit files. [default 'None' and fall to each function's default]
  'subject': The subject you with to fit or analyze. Can be 'all' saying you with to analyze all subjects (including the merge of all subjects that has id=0) or an integer id 0(represents the merge of all subjects), 1, 2, etc. [default 'all']
  'criteria': The criteria to implement. Posible values are 'optimal', 'dprime', 'var' and 'dprime-var'. [default 'optimal']
@@ -933,3 +983,9 @@ if __name__=="__main__":
 			analyze_all_fits(fit_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],group_by=args['group_by'],savefname=args['savefname'])
 		else:
 			analyze_all_fits(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'],group_by=args['group_by'],savefname=args['savefname'])
+	elif args['program']=='fit_moving_bounds':
+		fit_moving_bounds
+		if args['dir'] is not None:
+			fit_moving_bounds(fit_dir=args['dir'],subject_id=args['subject'])
+		else:
+			fit_moving_bounds(subject_id=args['subject'])

@@ -4,7 +4,7 @@
 from __future__ import division
 import numpy as np
 from scipy import optimize
-import math
+import math, copy
 from matplotlib import pyplot as plt
 from utils import normcdf,normcdfinv
 
@@ -14,7 +14,7 @@ class DecisionPolicy():
 	reward rate and computes the optimal decision bounds
 	"""
 	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.,\
-				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True):
+				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True,compute_value=True):
 		"""
 		Constructor input:
 		model_var = True variance of the process that generates samples
@@ -48,10 +48,11 @@ class DecisionPolicy():
 		self.iti = iti
 		self.tp = tp
 		
-		self.invert_belief()
-		if self.store_p:
-			self.p = self.belief_transition_p()
-		self.value_dp()
+		if compute_value:
+			self.invert_belief()
+			if self.store_p:
+				self.p = self.belief_transition_p()
+			self.value_dp()
 	
 	def reset(self):
 		if self.store_p:
@@ -59,6 +60,17 @@ class DecisionPolicy():
 		self.invg = np.empty(1)
 		self.value = np.empty(1)
 		self.bounds = np.empty(1)
+	
+	def copy(self):
+		out = DecisionPolicy(self.model_var,self.prior_mu_mean,self.prior_mu_var,self.n,self.dt,self.T,\
+				 self.reward,self.penalty,self.iti,self.tp,cost=0.05,store_p=self.store_p,compute_value=False)
+		out.invg = copy.deepcopy(self.invg)
+		if self.store_p:
+			out.p = copy.deepcopy(self.p)
+		out.value = copy.deepcopy(self.value)
+		out.bounds = copy.deepcopy(self.bounds)
+		out.cost = copy.deepcoy(self.cost)
+		return out
 	
 	def set_constant_cost(self,cost):
 		self.cost = cost*np.ones_like(self.cost)
@@ -231,6 +243,7 @@ class DecisionPolicy():
 				self.cost = np.interp(self.t, oldt, self.cost)
 				change = True
 		if n is not None:
+			#~ print self.value[0,int(0.5*self.n)]
 			n = int(n)
 			if n%2==0:
 				n+=1
@@ -246,28 +259,29 @@ class DecisionPolicy():
 			else:
 				self.memory_efficient_backpropagate_value(rho=self.rho)
 			val0 = self.value[0,int(0.5*self.n)]
+			#~ print val0
 			if abs(val0)>1e-12:
 				# Must refine the value of self.rho
-				if val0>0:
+				if val0<0:
 					ub = self.rho
 					lb = self.rho-1e-2
 				else:
 					ub = self.rho+1e-2
 					lb = self.rho
-				self.value_dp(self.reward,self.penalty,self.iti,self.tp,lb,ub)
+				self.value_dp(lb,ub)
 			self.decision_bounds()
 	
 	def compute_decision_bounds(self,cost=None,reward=None,n=51,N=501,type_of_bound='belief'):
-		if lower(type_of_bound) not in ['belief','norm_mu','mu']:
+		if type_of_bound.lower() not in ['belief','norm_mu','mu']:
 			raise ValueError("type_of_bound must be 'belief', 'norm_mu' or 'mu'. %s supplied instead."%(type_of_bound))
 		self.store_p = True
-		if reward not is None:
+		if reward is not None:
 			self.reward = reward
 		self.n = int(n)
 		if self.n%2==0:
 			self.n+1
 		self.g = np.linspace(0.,1.,self.n)
-		if cost not is None:
+		if cost is not None:
 			if np.isscalar(cost):
 				self.set_constant_cost(cost)
 			else:
@@ -279,9 +293,9 @@ class DecisionPolicy():
 		self.store_p = False
 		self.refine_value(n=N)
 		bounds = self.decision_bounds()
-		if lower(type_of_bound)=='norm_mu':
+		if type_of_bound.lower()=='norm_mu':
 			bounds = self.belief_bound_to_norm_mu_bound(bounds)
-		elif lower(type_of_bound)=='mu':
+		elif type_of_bound.lower()=='mu':
 			bounds = self.belief_bound_to_mu_bound(bounds)
 		return bounds
 	
