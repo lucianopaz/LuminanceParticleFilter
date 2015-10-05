@@ -176,20 +176,20 @@ class Objective():
 			if self.fittable_variables['reward'] not is None:
 				decision_policy.reward = self.fittable_variables['reward']
 			model.set_asymmetric_threshold(decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
-		dead_time_sigma = 1 if self.fittable_variables['dead_time_sigma'] is None else self.fittable_variables['dead_time_sigma']
-		dead_time = 0 if self.fittable_variables['dead_time'] is None else self.fittable_variables['dead_time']
+		dead_time_sigma = 1. if (self.fittable_variables['dead_time_sigma'] is None) else self.fittable_variables['dead_time_sigma']
+		dead_time = 0 if (self.fittable_variables['dead_time'] is None) else self.fittable_variables['dead_time']
 		simulation = model.batchInference(target,distractor)
 		if likelihood:
-			output = np.sum(((subject_rt-simulation[:,3]-params[1])/dead_time_sigma)**2)
+			output = np.sum(((subject_rt-simulation[:,3]-dead_time)/dead_time_sigma)**2)
 		else:
 			output = 0.
 			if self._rt:
-				output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
+				output+= self._rt * np.sum((subject_rt-simulation[:,3]-dead_time)**2)
 			if self._rtd:
 				# Squared difference between rt histograms
-				simulated_rtd,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
+				simulated_rtd,_ = np.histogram(simulation[:,3]+dead_time,bin_edges,density=True)
 				if len(params)>2:
-					simulated_rtd = conv_hist(simulated_rtd,params[2],model.ISI)
+					simulated_rtd = conv_hist(simulated_rtd,dead_time_sigma,model.ISI)
 				output+= self._rtd * np.sum((subject_rtd-simulated_rtd)**2)
 			if self._k:
 				# Squared difference between decision kernels
