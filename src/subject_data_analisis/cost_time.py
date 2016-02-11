@@ -255,8 +255,9 @@ class DecisionPolicy():
 		self.bounds = np.zeros((2,self.nT))
 		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
 		v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
-		decide_1 = np.abs((v1-value)/v1)<1e-9
-		decide_2 = np.abs((v2-value)/v1)<1e-9
+		with np.errstate(invalid='ignore'):
+			decide_1 = np.abs((v1-value)/v1)<1e-9
+			decide_2 = np.abs((v2-value)/v2)<1e-9
 		for i,t in enumerate(self.t):
 			if any(decide_1[i]):
 				bound1 = self.g[decide_1[i].nonzero()[0][0]]
@@ -276,11 +277,6 @@ class DecisionPolicy():
 		"""
 		if bounds is None:
 			bounds = self.bounds
-		#~ xbounds = np.zeros_like(bounds)
-		#~ xbounds[0] = self.g2x(self.t,bounds[0])
-		#~ xbounds[1] = self.g2x(self.t,bounds[1])
-		#~ for i,(t,b) in enumerate(zip(self.t,bounds)):
-			#~ xbounds[i] = self.g2x(t,b)
 		return self.g2x(self.t,bounds)
 	
 	def belief_bound_to_norm_mu_bound(self,bounds=None):
@@ -369,35 +365,6 @@ class DecisionPolicy():
 		elif type_of_bound.lower()=='mu':
 			bounds = self.belief_bound_to_mu_bound(bounds)
 		return bounds
-	
-	# Regularization functions that map the bayesian parameter update to a Wien process
-	def phi(self,t):
-		"""
-		Regularization of time to transform the parameter update to a standard Wien process 
-		"""
-		s = np.sqrt(self.model_var)
-		co = self.model_var/self.prior_mu_var
-		fa = 4./s
-		return (t+co)**(1-fa)/(1.-fa)*(co**fa)-co/(1.-fa)
-	
-	def invphi(self,t):
-		"""
-		Inverse of self.phi(t)
-		"""
-		s = np.sqrt(self.model_var)
-		co = self.model_var/self.prior_mu_var
-		fa = 4./s
-		return (((1-fa)*t+co)*(co**(-fa)))**(1./(1.-fa))-co
-	
-	def psi_dash(self,x,t):
-		"""
-		Regularization of parameter values to transform the parameter update to a standard Wien process 
-		"""
-		s = np.sqrt(self.model_var)
-		co = self.model_var/self.prior_mu_var
-		fa = 2./s
-		mu0 = 0.5*self.prior_mu_mean*co*co
-		return ((t+co)/co)**(-fa)*(x/s*(t+co)-mu0)+mu0
 	
 	def rt(self,mu,bounds=None):
 		if bounds is None:
