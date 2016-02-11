@@ -166,6 +166,14 @@ class Objective():
 		for p,v in zip(params,self.variable_list):
 			self.fittable_variables[v] = p
 	
+	def fittable_variables_to_tuple(self,params=None):
+		if params is not None:
+			self.call_params_to_variables(params)
+		return (self.fittable_variables['threshold'],self.fittable_variables['dead_time'],\
+				self.fittable_variables['dead_time_sigma'],self.fittable_variables['cost'],\
+				self.fittable_variables['reward'],self.fittable_variables['prior_mu_mean'],\
+				self.fittable_variables['prior_mu_var'])
+	
 	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean,decision_policy=None):
 		self.call_params_to_variables(params)
 		if self.fixed_threshold:
@@ -219,7 +227,7 @@ class Objective():
 		self._rtd = state['_rtd']
 		self._k = state['_k']
 		self._p = state['_p']
-		if fixed_threshold not in state.keys():
+		if 'fixed_threshold' not in state.keys():
 			self.fixed_threshold = True
 			self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None}
 			self.variable_list = ['threshold','dead_time','dead_time_sigma']
@@ -547,18 +555,25 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+obj_name
 				fitter.save(filename,overwrite=True)
 
-def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None):
+def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None,movingBound=True):
 	if not fit_dir.endswith('/'):
 		fit_dir+='/'
-	files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Fit_'))])
+	if movingBound:
+		files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Moving-bound-Fit_'))])
+	else:
+		files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Fit_'))])
 	figures = []
 	ids = []
 	counter = 0
 	for f in files:
 		temp = f.split("_")
-		sid = temp[2]
-		cri = temp[4]
-		obj = temp[6][:-4]
+		sid = cri = obj = ''
+		try:
+			sid = temp[2]
+			cri = temp[4]
+			obj = temp[6][:-4]
+		except:
+			pass
 		if sid not in subject_id:
 			if subject_id!='all':
 				continue
@@ -589,25 +604,23 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		target = fitter.synthetic_data['target']
 		distractor = fitter.synthetic_data['distractor']
 		indeces = fitter.synthetic_data['indeces']
-		model.set_symmetric_threshold(fitter.fit_output['xopt'][0])
-		if len(fitter.fit_output['xopt'])>1:
-			if fitter.fittype!=2:
-				dead_time = fitter.fit_output['xopt'][1]
-			else:
-				dead_time = 0.
+		
+		threshold,dead_time,dead_time_sigma,cost,reward,prior_mean,prior_var =\
+				fitter.objective.fittable_variables_to_tuple(fitter.fit_output['xopt'])
+		if fitter.update_threshold:
+			if cost is not None:
+				fitter.decision_policy.set_constant_cost(cost)
+			if reward is not None:
+				fitter.decision_policy.reward = reward
+			model.set_asymmetric_threshold(fitter.decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
 		else:
+			model.set_symmetric_threshold(threshold)
+		if dead_time is None:
 			dead_time = 0.
-		if len(fitter.fit_output['xopt'])>2:
-			if fitter.fittype!=1 and fitter.fittype!=2:
-				var_dead_time = fitter.fit_output['xopt'][2]
-			else:
-				var_dead_time = None
-		else:
-			var_dead_time = None
 		simulation = model.batchInference(target,distractor)
 		simulated_rt,_ = np.histogram(simulation[:,3]+dead_time,bin_edges,density=True)
-		if var_dead_time:
-			simulated_rt = conv_hist(simulated_rt,var_dead_time,model.ISI)
+		if dead_time_sigma:
+			simulated_rt = conv_hist(simulated_rt,dead_time_sigma,model.ISI)
 		simulated_sel = 1-simulation[:,1]
 		simulated_sel[np.isnan(simulated_sel)] = 1
 		sim_fluctuations = np.transpose(np.array([target.T-dat[indeces,0],distractor.T-50]),(2,0,1))
@@ -812,8 +825,10 @@ def fit_moving_bounds(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03
 			obj_name = objective.name
 		else:
 			obj_name = objective
-		filename = 'fits/Moving_bound_Fit_subject_'+str(s.id)
+		filename = 'fits/Moving-bound-Fit-subject_'+str(s.id)
 		fitter.save(filename,overwrite=True)
+
+
 
 def parse_args():
 	""" Parse arguments passed from the command line """
