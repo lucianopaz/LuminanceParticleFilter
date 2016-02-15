@@ -253,22 +253,55 @@ class DecisionPolicy():
 		if value is None:
 			value = self.value
 		self.bounds = np.zeros((2,self.nT))
-		v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
-		v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
-		with np.errstate(invalid='ignore'):
-			decide_1 = np.abs((v1-value)/v1)<1e-9
-			decide_2 = np.abs((v2-value)/v2)<1e-9
-		for i,t in enumerate(self.t):
-			if any(decide_1[i]):
-				bound1 = self.g[decide_1[i].nonzero()[0][0]]
-			else:
-				bound1 = 1.
-			if any(decide_2[i]):
-				bound2 = self.g[decide_2[i].nonzero()[0][-1]]
-			else:
-				bound2 = 0.
+		v1_arr = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+		v2_arr = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
+		for i,v_explore in enumerate(self.v_explore()):
+			setted_ub = False
+			bound1 = 1.
+			bound2 = 0.
+			for j,(v1_pr,v2_pr,ve_pr,v1,v2,ve) in enumerate(zip(v1_arr[:-1],v2_arr[:-1],v_explore[:-1],v1_arr[1:],v2_arr[1:],v_explore[1:])):
+				prev_val_zone = np.argmax([v1_pr,v2_pr,ve_pr])
+				curr_val_zone = np.argmax([v1,v2,ve])
+				if curr_val_zone==0 and v1==v2:
+					bound1 = self.g[j+1]
+					bound2 = self.g[j+1]
+				elif curr_val_zone==0 and v1==ve:
+					bound1 = self.g[j+1]
+				elif curr_val_zone==1 and v2==ve:
+					bound2 = self.g[j+1]
+				elif curr_val_zone!=prev_val_zone:
+					if curr_val_zone==2 and prev_val_zone==1:
+						bound2 = ((ve-v2)*self.g[j]-(ve_pr-v2_pr)*self.g[j+1]) / (v2_pr-v2+ve-ve_pr)
+					elif curr_val_zone==0 and prev_val_zone==2 and not setted_ub:
+						setted_ub = True
+						bound1 = ((v1-ve)*self.g[j]-(v1_pr-ve_pr)*self.g[j+1]) / (ve_pr-ve+v1-v1_pr)
 			self.bounds[:,i] = np.array([bound1,bound2])
+		self.bounds[:,-1] = np.array([0.5,0.5])
 		return self.bounds
+		
+	#~ def decision_bounds(self,value=None):
+		#~ """
+		#~ Compute the decision bounds from the value of the beliefs
+		#~ """
+		#~ if value is None:
+			#~ value = self.value
+		#~ self.bounds = np.zeros((2,self.nT))
+		#~ v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+		#~ v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
+		#~ with np.errstate(invalid='ignore'):
+			#~ decide_1 = np.abs((v1-value)/v1)<1e-9
+			#~ decide_2 = np.abs((v2-value)/v2)<1e-9
+		#~ for i,t in enumerate(self.t):
+			#~ if any(decide_1[i]):
+				#~ bound1 = self.g[decide_1[i].nonzero()[0][0]]
+			#~ else:
+				#~ bound1 = 1.
+			#~ if any(decide_2[i]):
+				#~ bound2 = self.g[decide_2[i].nonzero()[0][-1]]
+			#~ else:
+				#~ bound2 = 0.
+			#~ self.bounds[:,i] = np.array([bound1,bound2])
+		#~ return self.bounds
 	
 	def belief_bound_to_x_bound(self,bounds=None):
 		"""
