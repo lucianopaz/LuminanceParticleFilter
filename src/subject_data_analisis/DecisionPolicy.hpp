@@ -2,6 +2,8 @@
 #define __DecisionPolicy
 
 #include <math.h>
+#include <cstddef>
+#include <iostream>
 
 inline double normcdf(double x, double mu, double sigma){
 	if (sigma==0.){
@@ -92,6 +94,8 @@ public:
 	
 	double* x_ubound();
 	double* x_lbound();
+	double Psi(double mu, double* bound, int itp, double tp, double x0, double t0);
+	void rt(double mu, double* g1, double* g2, double* xub, double* xlb);
 };
 
 #endif
