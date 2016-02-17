@@ -131,6 +131,28 @@ class DecisionPolicy():
 		p = np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0)#/(self.g[1]-self.g[0])
 		return np.transpose(p,(1,2,0))
 	
+	def test_belief_transition_p(self):
+		"""
+		Compute the belief transition probability and store it in an internal array
+		"""
+		invg = self.invg
+		post_var = np.zeros(self.nT)
+		p = np.zeros((self.n*(self.nT-1),self.n))
+		for i,t in enumerate(self.t):
+			post_var[i] = self.post_mu_var(t)
+		counter = -1
+		for i,t in reversed(list(enumerate(self.t[:-1]))):
+			counter+=1
+			for j,g in enumerate(self.g):
+				mu_n = self.post_mu_mean(t,invg[i,j])
+				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self.model_var)+\
+						         0.5*(invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
+				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
+						   #~ 0.5*self.model_var/(self.model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
+		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
+		#~ p = np.exp(p-np.max(p,axis=1))/np.sum(np.exp(p-np.max(p,axis=1)),axis=1)#/(self.g[1]-self.g[0])
+		return p #np.transpose(p,(1,2,0))
+	
 	def value_dp(self,lb=-10.,ub=10.):
 		"""
 		Method that call the dynamic programming method that computes
@@ -212,7 +234,7 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t1+self.model_var)+\
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self.model_var)+\
 					   0.5*post_var_t1*(self.invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2
 				#~ p[:,j] = 0.5*normcdfinv(self.g)**2*post_var_t1/post_var_t**2-\
 						 #~ 0.5*self.model_var/(self.model_var+post_var_t)*(normcdfinv(self.g)/post_var_t1-normcdfinv(g)/post_var_t-mu_n)**2

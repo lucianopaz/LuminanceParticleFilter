@@ -75,6 +75,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	curr_invg = 0;
 	fut_invg = 1;
 	#ifdef DEBUG
+	FILE *details_file = fopen("details.txt","w");
 	FILE *prob_file = fopen("prob.txt","w");
 	FILE *value_file = fopen("value.txt","w");
 	FILE *v_explore_file = fopen("v_explore.txt","w");
@@ -117,9 +118,20 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			norm_p = 0.;
 			maxp = -INFINITY;
 			for (k=0;k<n;k++){
-				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t1+model_var)+
-						0.5*post_var_t1*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2);
+				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t+model_var)+
+						0.5*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2)*post_var_t1;
+						
+						//~ -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self.model_var)+\
+						//~ 0.5*(invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				maxp = p[k]>maxp ? p[k] : maxp;
+				#ifdef DEBUG
+				fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
+				if (k<n-1){
+					fprintf(prob_file,"%f\t",p[k]);
+				} else {
+					fprintf(prob_file,"%f\n",p[k]);
+				}
+				#endif
 			}
 			for (k=0;k<n;k++){
 				p[k] = exp(p[k]-maxp);
@@ -129,10 +141,10 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			v_explore[j] = v_explore[j]/norm_p - (cost+rho)*dt;
 			
 			#ifdef DEBUG
-			for (k=0;k<n-1;k++){
-				fprintf(prob_file,"%f\t",p[k]/norm_p);
-			}
-			fprintf(prob_file,"%f\n",p[k]/norm_p);
+			//~ for (k=0;k<n-1;k++){
+				//~ fprintf(prob_file,"%f\t",p[k]/norm_p);
+			//~ }
+			//~ fprintf(prob_file,"%f\n",p[k]/norm_p);
 			if (j<n-1){
 				fprintf(v_explore_file,"%f\t",v_explore[j]);
 			} else {

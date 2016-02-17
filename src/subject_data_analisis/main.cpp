@@ -8,7 +8,7 @@ int main(){
 	double prior_mu_var = 100;
 	int n = 51;
 	double dt = 1e-2;
-	double T = 10.;
+	double T = 1.;
 	double reward = 1.;
 	double penalty = 0.;
 	double iti = 10.;
@@ -27,7 +27,7 @@ int main(){
 	//~ val = dp.backpropagate_value(-1.5, false);
 	//~ std::cout << "Start value for rho=-1.5" << val << std::endl;
 	
-	
+	dp.disp();
 	
 	std::cout<<dp.backpropagate_value(0.09970029970029969, true)<<std::endl;
 	double* xub = dp.x_ubound();
