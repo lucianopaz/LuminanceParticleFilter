@@ -68,7 +68,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 				this->lb[nT-1] = g[i];
 				this->ub[nT-1] = g[i];
 			} else if (i>0 && i<n){
-				if (v1[i]>v2[i] && v1[i-1]<v2[i-1]){
+				if ((v1[i]>v2[i] && v1[i-1]<v2[i-1]) || v1[i]<v2[i] && v1[i-1]>v2[i-1]){
 					lb[nT-1] = ((v1[i-1]-v2[i-1])*g[i] + (v1[i]-v2[i])*g[i-1]) / (v2[i]-v1[i]+v1[i-1]-v2[i-1]);
 					ub[nT-1] = lb[nT-1];
 				}
