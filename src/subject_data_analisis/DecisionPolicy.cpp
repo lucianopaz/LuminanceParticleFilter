@@ -15,12 +15,13 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	}
 	this->dt = dt;
 	this->T = T;
-	this->nT = (int)(T/dt);
+	this->nT = (int)(T/dt)+1;
 	this->cost = cost;
 	this->reward = reward;
 	this->penalty = penalty;
 	this->iti = iti;
 	this->tp = tp;
+	this->rho = 0.;
 	this->g = new double[n];
 	for (i=0;i<n;i++){
 		this->g[i] = double(i)/double(n-1);
@@ -28,7 +29,7 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	this->dg = 1./double(n-1);
 	this->t = new double[nT];
 	for (i=0;i<nT;i++){
-		this->t[i] = double(i)*dt/T;
+		this->t[i] = double(i)*dt;
 	}
 	this->ub = new double[nT];
 	this->lb = new double[nT];
@@ -44,24 +45,52 @@ DecisionPolicy::~DecisionPolicy(){
 	std::cout<<"Destroyed DecisionPolicy instance"<<std::endl;
 }
 
+void DecisionPolicy::disp(){
+	std::cout<<"model_var = "<<model_var<<std::endl;
+	std::cout<<"prior_mu_mean = "<<prior_mu_mean<<std::endl;
+	std::cout<<"prior_mu_var = "<<prior_mu_var<<std::endl;
+	std::cout<<"dt = "<<dt<<std::endl;
+	std::cout<<"dg = "<<dg<<std::endl;
+	std::cout<<"T = "<<T<<std::endl;
+	std::cout<<"cost = "<<cost<<std::endl;
+	std::cout<<"reward = "<<reward<<std::endl;
+	std::cout<<"iti = "<<iti<<std::endl;
+	std::cout<<"tp = "<<tp<<std::endl;
+	std::cout<<"rho = "<<rho<<std::endl;
+	std::cout<<"n = "<<tp<<std::endl;
+	std::cout<<"nT = "<<rho<<std::endl;
+}
+
 double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	std::cout<<"Entered backpropagate_value with rho = "<<rho<<std::endl;
 	bool setted_ub = false;
 	int previous_value_zone;
 	int current_value_zone;
 	int i, j, k, curr_invg, fut_invg;
-	double mu_n, post_var_t1, post_var_t, norm_p;
+	double mu_n, post_var_t1, post_var_t, norm_p, maxp;
 	double value[n], v1[n], v2[n], v_explore[n], p[n];
 	double invg[2][n];
 	
 	this->rho = rho;
 	curr_invg = 0;
 	fut_invg = 1;
+	#ifdef DEBUG
+	FILE *prob_file = fopen("prob.txt","w");
+	FILE *value_file = fopen("value.txt","w");
+	FILE *v_explore_file = fopen("v_explore.txt","w");
+	#endif
 	for (i=0;i<n;i++){
 		v1[i] = reward*g[i]-penalty*(1.-g[i]) - (iti+(1.-g[i])*tp)*rho;
 		v2[i] = reward*(1.-g[i])-penalty*g[i] - (iti+g[i]*tp)*rho;
 		value[i] = v1[i]>=v2[i] ? v1[i] : v2[i];
 		invg[fut_invg][i] = g2x(t[nT-1],g[i]);
+		#ifdef DEBUG
+		if (i<n-1){
+			fprintf(value_file,"%f\t",value[i]);
+		} else {
+			fprintf(value_file,"%f\n",value[i]);
+		}
+		#endif
 		
 		if (compute_bounds){
 			if (v1[i]==v2[i]){
@@ -86,13 +115,30 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			invg[curr_invg][j] = g2x(t[i],g[j]);
 			mu_n = post_mu_mean(t[i],invg[curr_invg][j]);
 			norm_p = 0.;
+			maxp = -INFINITY;
 			for (k=0;k<n;k++){
 				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t1+model_var)+
 						0.5*post_var_t1*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2);
+				maxp = p[k]>maxp ? p[k] : maxp;
+			}
+			for (k=0;k<n;k++){
+				p[k] = exp(p[k]-maxp);
 				norm_p+=p[k];
 				v_explore[j]+= p[k]*value[k];
 			}
 			v_explore[j] = v_explore[j]/norm_p - (cost+rho)*dt;
+			
+			#ifdef DEBUG
+			for (k=0;k<n-1;k++){
+				fprintf(prob_file,"%f\t",p[k]/norm_p);
+			}
+			fprintf(prob_file,"%f\n",p[k]/norm_p);
+			if (j<n-1){
+				fprintf(v_explore_file,"%f\t",v_explore[j]);
+			} else {
+				fprintf(v_explore_file,"%f\n",v_explore[j]);
+			}
+			#endif
 		}
 		post_var_t1 = post_var_t;
 		curr_invg = (curr_invg+1)%2;
@@ -109,6 +155,13 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 				value[j] = v_explore[j];
 				current_value_zone = 0;
 			}
+			#ifdef DEBUG
+			if (j<n-1){
+				fprintf(value_file,"%f\t",value[j]);
+			} else {
+				fprintf(value_file,"%f\n",value[j]);
+			}
+			#endif
 			if (compute_bounds){
 				if (i>0 && i<n){
 					if (v1[j]==v_explore[j]){
@@ -130,6 +183,12 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			previous_value_zone = current_value_zone;
 		}
 	}
+	
+	#ifdef DEBUG
+	fclose(prob_file);
+	fclose(value_file);
+	fclose(v_explore_file);
+	#endif
 	std::cout<<"Exited backpropagate_value "<<std::endl;
 	return value[int(0.5*n)];
 }

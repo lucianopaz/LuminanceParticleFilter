@@ -5,6 +5,10 @@
 #include <cstddef>
 #include <iostream>
 
+#ifdef DEBUG
+#include <cstdio>
+#endif
+
 inline double normcdf(double x, double mu, double sigma){
 	if (sigma==0.){
 		return x>mu ? INFINITY : -INFINITY;
@@ -74,8 +78,10 @@ public:
 				   double iti, double tp, double cost);
 	~DecisionPolicy();
 	
+	void disp();
+	
 	inline double post_mu_var(double t){
-		return 1./(t/this->model_var+1./this->prior_mu_var);
+		return 1./(t/this->model_var + 1./this->prior_mu_var);
 	}
 	
 	inline double post_mu_mean(double t, double x){

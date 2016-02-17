@@ -16,8 +16,9 @@ int main(){
 	double cost = 1./5.;
 	DecisionPolicy dp = DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
 						reward, penalty, iti, tp, cost);
-	int i;
+	int i,j;
 	double val;
+	FILE* myfile;
 	
 	//~ val = dp.backpropagate_value(-0.5, false);
 	//~ std::cout << "Start value for rho=-0.5" << val << std::endl;
@@ -26,15 +27,26 @@ int main(){
 	//~ val = dp.backpropagate_value(-1.5, false);
 	//~ std::cout << "Start value for rho=-1.5" << val << std::endl;
 	
-	dp.backpropagate_value(0, true);
+	
+	
+	std::cout<<dp.backpropagate_value(0.09970029970029969, true)<<std::endl;
 	double* xub = dp.x_ubound();
 	double* xlb = dp.x_lbound();
 	double g1[dp.nT];
 	double g2[dp.nT];
 	
+	double v1,v2;
+	myfile = fopen("v12.txt", "w+");
+	for (i=0;i<dp.n;i++){
+		v1 = dp.reward*dp.g[i]-dp.penalty*(1.-dp.g[i]) - (dp.iti+(1.-dp.g[i])*dp.tp)*dp.rho;
+		v2 = dp.reward*(1.-dp.g[i])-dp.penalty*dp.g[i] - (dp.iti+dp.g[i]*dp.tp)*dp.rho;
+		fprintf(myfile,"%f\t%f\n",v1,v2);
+	}
+	fclose(myfile);
+	
 	dp.rt(0.1, g1, g2, xub, xlb);
 	
-	FILE* myfile = fopen("test.txt", "w+");
+	myfile = fopen("test.txt", "w+");
 	for (i=0;i<dp.nT;i++){
 		fprintf(myfile,"%f\t%f\t%f\t%f\t%f\t%f\n",dp.ub[i],dp.lb[i],xub[i],xlb[i],g1[i],g2[i]);
 	}
