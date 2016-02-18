@@ -1,7 +1,7 @@
 #ifndef __DecisionPolicy
 #define __DecisionPolicy
 
-#include <math.h>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 
@@ -13,7 +13,7 @@ inline double normcdf(double x, double mu, double sigma){
 	if (sigma==0.){
 		return x>mu ? INFINITY : -INFINITY;
 	}
-	return 0.5 + 0.5*erf((x-mu)/sigma*0.707106781);
+	return 0.5 + 0.5*erf((x-mu)/sigma*0.70710678118654746);
 }
 
 inline double erfinv(double y) {
@@ -47,7 +47,7 @@ inline double normcdfinv(double y, double mu, double sigma){
 	if (sigma==0.){
 		return NAN;
 	}
-	return 1.414213562*sigma*erfinv(2.*(y-0.5))+mu;
+	return 1.4142135623730951*sigma*erfinv(2.*(y-0.5))+mu;
 }
 
 class DecisionPolicy {

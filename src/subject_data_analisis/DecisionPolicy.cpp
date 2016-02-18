@@ -1,8 +1,19 @@
 #include "DecisionPolicy.hpp"
 
+/***
+ * DecisionPolicy is a class that implements the dynamic programing method
+ * that computes the value of a given belief state as a function of time.
+ * 
+ * This class implements the method given in Drugowitsch et al 2012 but
+ * is limited to constant cost values.
+***/
+
 DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost){
+	/***
+	 * Constructor
+	***/
 	int i;
 	
 	this->model_var = model_var*dt;
@@ -22,11 +33,11 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	this->iti = iti;
 	this->tp = tp;
 	this->rho = 0.;
+	this->dg = 1./double(n);
 	this->g = new double[n];
 	for (i=0;i<n;i++){
-		this->g[i] = double(i)/double(n-1);
+		this->g[i] = (0.5+double(i))*this->dg;
 	}
-	this->dg = 1./double(n-1);
 	this->t = new double[nT];
 	for (i=0;i<nT;i++){
 		this->t[i] = double(i)*dt;
@@ -75,7 +86,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	curr_invg = 0;
 	fut_invg = 1;
 	#ifdef DEBUG
-	FILE *details_file = fopen("details.txt","w");
+	//~ FILE *details_file = fopen("details.txt","w");
 	FILE *prob_file = fopen("prob.txt","w");
 	FILE *value_file = fopen("value.txt","w");
 	FILE *v_explore_file = fopen("v_explore.txt","w");
@@ -113,6 +124,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 		lb[i] = 0.;
 		post_var_t = post_mu_var(t[i]);
 		for (j=0;j<n;j++){
+			v_explore[j] = 0.;
 			invg[curr_invg][j] = g2x(t[i],g[j]);
 			mu_n = post_mu_mean(t[i],invg[curr_invg][j]);
 			norm_p = 0.;
@@ -120,18 +132,10 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			for (k=0;k<n;k++){
 				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t+model_var)+
 						0.5*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2)*post_var_t1;
-						
-						//~ -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self.model_var)+\
-						//~ 0.5*(invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				maxp = p[k]>maxp ? p[k] : maxp;
-				#ifdef DEBUG
-				fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
-				if (k<n-1){
-					fprintf(prob_file,"%f\t",p[k]);
-				} else {
-					fprintf(prob_file,"%f\n",p[k]);
-				}
-				#endif
+				//~ #ifdef DEBUG
+				//~ fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
+				//~ #endif
 			}
 			for (k=0;k<n;k++){
 				p[k] = exp(p[k]-maxp);
@@ -141,10 +145,10 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			v_explore[j] = v_explore[j]/norm_p - (cost+rho)*dt;
 			
 			#ifdef DEBUG
-			//~ for (k=0;k<n-1;k++){
-				//~ fprintf(prob_file,"%f\t",p[k]/norm_p);
-			//~ }
-			//~ fprintf(prob_file,"%f\n",p[k]/norm_p);
+			for (k=0;k<n-1;k++){
+				fprintf(prob_file,"%f\t",p[k]/norm_p);
+			}
+			fprintf(prob_file,"%f\n",p[k]/norm_p);
 			if (j<n-1){
 				fprintf(v_explore_file,"%f\t",v_explore[j]);
 			} else {
@@ -155,7 +159,6 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 		post_var_t1 = post_var_t;
 		curr_invg = (curr_invg+1)%2;
 		fut_invg = (fut_invg+1)%2;
-		
 		for (j=0;j<n;j++){
 			if (v1[j]>=v2[j] && v1[j]>=v_explore[j]){
 				value[j] = v1[j];
@@ -175,19 +178,19 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			}
 			#endif
 			if (compute_bounds){
-				if (i>0 && i<n){
-					if (v1[j]==v_explore[j]){
+				if (j>0 && j<n){
+					if (std::abs(v1[j]-v_explore[j])<1e-8){
 						if (!setted_ub){
 							ub[i] = g[j];
 							setted_ub = true;
 						}
-					} else if (v2[j]==v_explore[j]){
+					} else if (std::abs(v2[j]-v_explore[j])<1e-8){
 						lb[i] = g[j];
 					} else if (current_value_zone!=previous_value_zone){
-						if (current_value_zone==1 && !setted_ub){
-							ub[i] = (g[i-1]*(v1[i]-v_explore[i]) - g[i]*(v1[i-1]-v_explore[i-1])) / (v_explore[i-1]-v_explore[i]+v1[i]-v1[i-1]);
-						} else if (current_value_zone==0){
-							lb[i] = (g[i-1]*(v_explore[i]-v2[i]) - g[i]*(v_explore[i-1]-v2[i-1])) / (v2[i-1]-v2[i]+v_explore[i]-v_explore[i-1]);
+						if (current_value_zone==1 && previous_value_zone==0 && !setted_ub){
+							ub[i] = (g[j-1]*(v1[j]-v_explore[j]) - g[j]*(v1[j-1]-v_explore[j-1])) / (v_explore[j-1]-v_explore[j]+v1[j]-v1[j-1]);
+						} else if (current_value_zone==0 && previous_value_zone==2){
+							lb[i] = (g[j-1]*(v_explore[j]-v2[j]) - g[j]*(v_explore[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v_explore[j]-v_explore[j-1]);
 						}
 					}
 				}
@@ -209,7 +212,7 @@ double* DecisionPolicy::x_ubound(){
 	std::cout<<"Entered x_ubound = "<<std::endl;
 	int i;
 	double *xb = new double[nT];
-	for (i=0;i<n;i++){
+	for (i=0;i<nT;i++){
 		xb[i] = g2x(t[i],ub[i]);
 	}
 	return xb;
@@ -226,12 +229,13 @@ double* DecisionPolicy::x_lbound(){
 }
 
 double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double x0, double t0){
-	double normpdf = 0.39894228*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->model_var/(tp-t0))/sqrt(this->model_var*(tp-t0));
+	double normpdf = 0.3989422804014327*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->model_var/(tp-t0))/sqrt(this->model_var*(tp-t0));
 	double bound_prime = itp<(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
 	return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0));
 }
 
 void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* xlb){
+	std::cout<<"Entered rt"<<std::endl;
 	int i,j;
 	double t0,tj,ti;
 	bool delete_xub = false;
@@ -248,15 +252,17 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	for (i=0;i<this->nT;i++){
 		ti = this->t[i];
 		if (i>1){
-			g1[i] = -2.*this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
-			g2[i] = 2.*this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
+			g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
+			g2[i] = this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
 			for (j=0;j<i;j++){
 				tj = this->t[j];
-				g1[i]+=2.*this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
+				g1[i]+=this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
 									g2[j]*this->Psi(mu,xub,i,ti,xlb[j],tj));
-				g2[i]-=2.*this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
+				g2[i]-=this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
 									g2[j]*this->Psi(mu,xlb,i,ti,xlb[j],tj));
 			}
+			g1[i]*=2.;
+			g2[i]*=2.;
 		} else if (i==1) {
 			g1[i] = -2.*this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
 			g2[i] = 2.*this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);

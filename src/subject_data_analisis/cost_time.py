@@ -38,7 +38,8 @@ class DecisionPolicy():
 		self.n = int(n)
 		if self.n%2==0:
 			self.n+1
-		self.g = np.linspace(0.,1.,self.n)
+		self.dg = 1./n;
+		self.g = np.linspace(self.dg/2.,1.-self.dg/2.,self.n)
 		self.dt = float(dt)
 		self.T = float(T)
 		self.t = np.arange(0.,float(T+dt),float(dt),np.float)
@@ -150,12 +151,12 @@ class DecisionPolicy():
 				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
 						   #~ 0.5*self.model_var/(self.model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
 		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
-		#~ p = np.exp(p-np.max(p,axis=1))/np.sum(np.exp(p-np.max(p,axis=1)),axis=1)#/(self.g[1]-self.g[0])
+		p = (np.exp(p.T-np.max(p,axis=1))/np.sum(np.exp(p.T-np.max(p,axis=1)),axis=0)).T#/(self.g[1]-self.g[0])
 		return p #np.transpose(p,(1,2,0))
 	
 	def value_dp(self,lb=-10.,ub=10.):
 		"""
-		Method that call the dynamic programming method that computes
+		Method that calls the dynamic programming method that computes
 		the value of beliefs and the optimal bounds for decisions,
 		adjusting the predicted average reward (rho)
 		"""
@@ -260,7 +261,7 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t1+self.model_var)+\
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self.model_var)+\
 					   0.5*post_var_t1*(self.invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2
 			# We transpose the array after the computation so numpy can correctly broadcast the intermediate operations (sum and max)
 			p = np.transpose(np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0),(1,0))
@@ -268,16 +269,16 @@ class DecisionPolicy():
 			post_var_t1 = post_var_t
 		return v_explore
 	
-	def decision_bounds(self,value=None):
+	def decision_bounds(self,v_explore_arr=None):
 		"""
 		Compute the decision bounds from the value of the beliefs
 		"""
-		if value is None:
-			value = self.value
+		if v_explore_arr is None:
+			v_explore_arr = self.v_explore()
 		self.bounds = np.zeros((2,self.nT))
 		v1_arr = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
 		v2_arr = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
-		for i,v_explore in enumerate(self.v_explore()):
+		for i,v_explore in enumerate(v_explore_arr):
 			setted_ub = False
 			bound1 = 1.
 			bound2 = 0.
