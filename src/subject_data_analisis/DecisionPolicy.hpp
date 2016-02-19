@@ -9,6 +9,8 @@
 #include <cstdio>
 #endif
 
+#define SIGN(x) ((x > 0) - (x < 0))
+
 inline double normcdf(double x, double mu, double sigma){
 	if (sigma==0.){
 		return x>mu ? INFINITY : -INFINITY;
@@ -97,6 +99,8 @@ public:
 	}
 	
 	double backpropagate_value(double rho, bool compute_bounds);
+	double value_for_root_finding(double rho);
+	double iterate_rho_value(double tolerance);
 	
 	double* x_ubound();
 	double* x_lbound();

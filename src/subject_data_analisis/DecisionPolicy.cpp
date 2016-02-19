@@ -208,6 +208,119 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	return value[int(0.5*n)];
 }
 
+double DecisionPolicy::value_for_root_finding(double rho){
+	return this->backpropagate_value(rho,false);
+}
+
+double DecisionPolicy::iterate_rho_value(double tolerance){
+	double lower_bound, upper_bound, low_buffer;
+	double func_at_low_bound, func_at_up_bound, func_at_low_buffer;
+	double d;
+	double interval;
+	double m;
+	double machine_eps = 2.220446049250313E-016;
+	double p;
+	double q;
+	double r;
+	double s;
+	double tol;
+	lower_bound=-10.; upper_bound = 10.;
+	func_at_low_bound = this->value_for_root_finding(lower_bound);
+	func_at_up_bound = this->value_for_root_finding(upper_bound);
+	if (func_at_low_bound==0){
+		this->rho = lower_bound;
+	} else if (func_at_up_bound==0){
+		this->rho = upper_bound;
+	} else {
+		// To get a sign changing interval
+		while (SIGN(func_at_low_bound)==SIGN(func_at_up_bound)){
+			if ((func_at_low_bound<func_at_up_bound and func_at_low_bound<0) ||
+			    (func_at_low_bound>func_at_up_bound and func_at_low_bound>0)){
+				lower_bound = upper_bound;
+				upper_bound*=10;
+				func_at_up_bound = this->value_for_root_finding(upper_bound);
+			} else if ((func_at_low_bound>func_at_up_bound and func_at_low_bound<0) ||
+			    (func_at_low_bound<func_at_up_bound and func_at_low_bound>0)){
+				upper_bound = lower_bound;
+				lower_bound*=10;
+				func_at_low_bound = this->value_for_root_finding(lower_bound);
+			}
+		}
+		// Brent's Algorithm for root finding
+		low_buffer = lower_bound;
+		func_at_low_buffer = func_at_low_bound;
+		interval = upper_bound - lower_bound;
+		d = interval;
+		
+		for ( ; ; ) {
+			if (std::abs(func_at_low_buffer)<std::abs(func_at_up_bound)) {
+				lower_bound = upper_bound;
+				upper_bound = low_buffer;
+				low_buffer = lower_bound;
+				func_at_low_bound = func_at_up_bound;
+				func_at_up_bound = func_at_low_buffer;
+				func_at_low_buffer = func_at_low_bound;
+			}
+			tol = 2.0*machine_eps*std::abs(upper_bound) + tolerance;
+			m = 0.5*(low_buffer-upper_bound);
+			if (std::abs(m)<= tol || func_at_up_bound==0.0) {
+				break;
+			}
+			if (std::abs(interval)<tol || std::abs(func_at_low_bound)<=std::abs(func_at_up_bound)) {
+				interval = m;
+				d = interval;
+			} else {
+				s = func_at_up_bound / func_at_low_bound;
+				if (lower_bound==low_buffer){
+					p = 2.0 * m * s;
+					q = 1.0 - s;
+				} else {
+					q = func_at_low_bound / func_at_low_buffer;
+					r = func_at_up_bound / func_at_low_buffer;
+					p = s * ( 2.0 * m * q * ( q - r ) - ( upper_bound - lower_bound ) * ( r - 1.0 ) );
+					q = ( q - 1.0 ) * ( r - 1.0 ) * ( s - 1.0 );
+				}
+				if ( 0.0 < p ) {
+					q = - q;
+				} else {
+					p = - p;
+				}
+				
+				s = interval;
+				interval = d;
+				
+				if ( 2.0 * p < 3.0 * m * q - std::abs ( tol * q ) &&
+					p < std::abs ( 0.5 * s * q ) ) {
+					d = p / q;
+				} else {
+					interval = m;
+					d = interval;
+				}
+			}
+			lower_bound = upper_bound;
+			func_at_low_bound = func_at_up_bound;
+
+			if ( tol < std::abs ( d ) ){
+				upper_bound = upper_bound + d;
+			} else if ( 0.0 < m ) {
+				upper_bound = upper_bound + tol;
+			} else {
+				upper_bound = upper_bound - tol;
+			}
+			
+			func_at_up_bound = value_for_root_finding(upper_bound);
+			if ( (0.0<func_at_up_bound && 0.0<func_at_low_buffer) || (func_at_up_bound<=0.0 && func_at_low_buffer<=0.0)) {
+				low_buffer = lower_bound;
+				func_at_low_buffer = func_at_low_bound;
+				interval = upper_bound - lower_bound;
+				d = interval;
+			}
+		}
+		this->rho = upper_bound;
+	}
+	return this->rho;
+
+
 double* DecisionPolicy::x_ubound(){
 	std::cout<<"Entered x_ubound = "<<std::endl;
 	int i;
