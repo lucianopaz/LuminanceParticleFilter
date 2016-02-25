@@ -28,8 +28,9 @@ int main(){
 	//~ std::cout << "Start value for rho=-1.5" << val << std::endl;
 	
 	dp.disp();
+	dp.iterate_rho_value(1e-12);
 	
-	std::cout<<dp.backpropagate_value(0.09970029970029969, true)<<std::endl;
+	std::cout<<dp.backpropagate_value()<<std::endl;
 	double* xub = dp.x_ubound();
 	double* xlb = dp.x_lbound();
 	double g1[dp.nT];

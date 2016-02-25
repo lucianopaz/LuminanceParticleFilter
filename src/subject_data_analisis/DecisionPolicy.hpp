@@ -6,6 +6,9 @@
 #include <iostream>
 
 #ifdef DEBUG
+#ifndef INFO
+#define INFO
+#endif
 #include <cstdio>
 #endif
 
@@ -98,6 +101,7 @@ public:
 		return this->model_var*(normcdfinv(g,0.,1.)/sqrt(this->post_mu_var(t))-this->prior_mu_mean/this->prior_mu_var);
 	}
 	
+	double backpropagate_value();
 	double backpropagate_value(double rho, bool compute_bounds);
 	double value_for_root_finding(double rho);
 	double iterate_rho_value(double tolerance);

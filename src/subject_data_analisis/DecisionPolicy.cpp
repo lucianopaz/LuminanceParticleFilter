@@ -45,7 +45,9 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	this->ub = new double[nT];
 	this->lb = new double[nT];
 	
-	std::cout<<"Created DecisionPolicy instance"<<std::endl;
+	#ifdef DEBUG
+	std::cout<<"Created DecisionPolicy instance at "<<this<<std::endl;
+	#endif
 }
 
 DecisionPolicy::~DecisionPolicy(){
@@ -53,7 +55,9 @@ DecisionPolicy::~DecisionPolicy(){
 	delete[] t;
 	delete[] ub;
 	delete[] lb;
+	#ifdef DEBUG
 	std::cout<<"Destroyed DecisionPolicy instance"<<std::endl;
+	#endif
 }
 
 void DecisionPolicy::disp(){
@@ -72,8 +76,14 @@ void DecisionPolicy::disp(){
 	std::cout<<"nT = "<<rho<<std::endl;
 }
 
+double DecisionPolicy::backpropagate_value(){
+	return this->backpropagate_value(this->rho,true);
+}
+
 double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
+	#ifdef DEBUG
 	std::cout<<"Entered backpropagate_value with rho = "<<rho<<std::endl;
+	#endif
 	bool setted_ub = false;
 	int previous_value_zone;
 	int current_value_zone;
@@ -86,7 +96,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	curr_invg = 0;
 	fut_invg = 1;
 	#ifdef DEBUG
-	//~ FILE *details_file = fopen("details.txt","w");
+	FILE *details_file = fopen("details.txt","w");
 	FILE *prob_file = fopen("prob.txt","w");
 	FILE *value_file = fopen("value.txt","w");
 	FILE *v_explore_file = fopen("v_explore.txt","w");
@@ -118,7 +128,9 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	}
 	post_var_t1 = post_mu_var(this->t[nT-1]);
 	for (i=nT-2;i>=0;i--){
+		#ifdef INFO
 		if (i%100==0) std::cout<<i<<std::endl;
+		#endif
 		setted_ub = false;
 		ub[i] = 1.;
 		lb[i] = 0.;
@@ -133,9 +145,9 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t+model_var)+
 						0.5*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2)*post_var_t1;
 				maxp = p[k]>maxp ? p[k] : maxp;
-				//~ #ifdef DEBUG
-				//~ fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
-				//~ #endif
+				#ifdef DEBUG
+				fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
+				#endif
 			}
 			for (k=0;k<n;k++){
 				p[k] = exp(p[k]-maxp);
@@ -189,6 +201,11 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 					} else if (current_value_zone!=previous_value_zone){
 						if (current_value_zone==1 && previous_value_zone==0 && !setted_ub){
 							ub[i] = (g[j-1]*(v1[j]-v_explore[j]) - g[j]*(v1[j-1]-v_explore[j-1])) / (v_explore[j-1]-v_explore[j]+v1[j]-v1[j-1]);
+						} else if (current_value_zone==1 && previous_value_zone==2){
+							lb[i] = (g[j-1]*(v1[j]-v2[j]) - g[j]*(v1[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v1[j]-v1[j-1]);
+							if (!setted_ub){
+								ub[i] = lb[i];
+							}
 						} else if (current_value_zone==0 && previous_value_zone==2){
 							lb[i] = (g[j-1]*(v_explore[j]-v2[j]) - g[j]*(v_explore[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v_explore[j]-v_explore[j-1]);
 						}
@@ -203,8 +220,8 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	fclose(prob_file);
 	fclose(value_file);
 	fclose(v_explore_file);
-	#endif
 	std::cout<<"Exited backpropagate_value "<<std::endl;
+	#endif
 	return value[int(0.5*n)];
 }
 
@@ -213,6 +230,9 @@ double DecisionPolicy::value_for_root_finding(double rho){
 }
 
 double DecisionPolicy::iterate_rho_value(double tolerance){
+	//  The Brent algorithm used here to iterate rho's value, was
+	//  adapted from brent.cpp written by John Burkardt and Richard
+	//  Brent.
 	double lower_bound, upper_bound, low_buffer;
 	double func_at_low_bound, func_at_up_bound, func_at_low_buffer;
 	double d;
@@ -319,10 +339,13 @@ double DecisionPolicy::iterate_rho_value(double tolerance){
 		this->rho = upper_bound;
 	}
 	return this->rho;
+}
 
 
 double* DecisionPolicy::x_ubound(){
+	#ifdef DEBUG
 	std::cout<<"Entered x_ubound = "<<std::endl;
+	#endif
 	int i;
 	double *xb = new double[nT];
 	for (i=0;i<nT;i++){
@@ -332,7 +355,9 @@ double* DecisionPolicy::x_ubound(){
 }
 
 double* DecisionPolicy::x_lbound(){
+	#ifdef DEBUG
 	std::cout<<"Entered x_lbound = "<<std::endl;
+	#endif
 	int i;
 	double *xb = new double[nT];
 	for (i=0;i<nT;i++){
@@ -348,7 +373,9 @@ double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double 
 }
 
 void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* xlb){
+	#ifdef DEBUG
 	std::cout<<"Entered rt"<<std::endl;
+	#endif
 	int i,j;
 	double t0,tj,ti;
 	bool delete_xub = false;
