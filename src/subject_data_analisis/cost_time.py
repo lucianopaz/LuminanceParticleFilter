@@ -50,6 +50,7 @@ class DecisionPolicy():
 		self.penalty = penalty
 		self.iti = iti
 		self.tp = tp
+		self.rho = 0.
 		
 		if compute_value:
 			self.invert_belief()

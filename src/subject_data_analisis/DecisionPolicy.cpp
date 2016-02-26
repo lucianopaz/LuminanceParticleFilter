@@ -119,7 +119,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 				this->lb[nT-1] = g[i];
 				this->ub[nT-1] = g[i];
 			} else if (i>0 && i<n){
-				if ((v1[i]>v2[i] && v1[i-1]<v2[i-1]) || v1[i]<v2[i] && v1[i-1]>v2[i-1]){
+				if ((v1[i]>v2[i] && v1[i-1]<v2[i-1]) || (v1[i]<v2[i] && v1[i-1]>v2[i-1])){
 					lb[nT-1] = ((v1[i-1]-v2[i-1])*g[i] + (v1[i]-v2[i])*g[i-1]) / (v2[i]-v1[i]+v1[i-1]-v2[i-1]);
 					ub[nT-1] = lb[nT-1];
 				}
@@ -353,10 +353,19 @@ double* DecisionPolicy::x_ubound(){
 	}
 	return xb;
 }
+void DecisionPolicy::x_ubound(double* xb){
+	#ifdef DEBUG
+	std::cout<<"Entered x_ubound_double* with xb = "<<xb<<std::endl;
+	#endif
+	int i;
+	for (i=0;i<nT;i++){
+		xb[i] = g2x(t[i],ub[i]);
+	}
+}
 
 double* DecisionPolicy::x_lbound(){
 	#ifdef DEBUG
-	std::cout<<"Entered x_lbound = "<<std::endl;
+	std::cout<<"Entered x_lbound"<<std::endl;
 	#endif
 	int i;
 	double *xb = new double[nT];
@@ -365,8 +374,17 @@ double* DecisionPolicy::x_lbound(){
 	}
 	return xb;
 }
+void DecisionPolicy::x_lbound(double* xb){
+	#ifdef DEBUG
+	std::cout<<"Entered x_lbound_double* with xb = "<<xb<<std::endl;
+	#endif
+	int i;
+	for (i=0;i<nT;i++){
+		xb[i] = g2x(t[i],lb[i]);
+	}
+}
 
-double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double x0, double t0){
+double DecisionPolicy::Psi(double mu, double* bound, unsigned int itp, double tp, double x0, double t0){
 	double normpdf = 0.3989422804014327*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->model_var/(tp-t0))/sqrt(this->model_var*(tp-t0));
 	double bound_prime = itp<(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
 	return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0));
@@ -376,7 +394,8 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	#ifdef DEBUG
 	std::cout<<"Entered rt"<<std::endl;
 	#endif
-	int i,j;
+	unsigned int i,j;
+	unsigned int tnT = this->nT;
 	double t0,tj,ti;
 	bool delete_xub = false;
 	bool delete_xlb = false;
@@ -389,7 +408,7 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 		delete_xlb = true;
 	}
 	
-	for (i=0;i<this->nT;i++){
+	for (i=0;i<tnT;i++){
 		ti = this->t[i];
 		if (i>1){
 			g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);

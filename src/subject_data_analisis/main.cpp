@@ -36,15 +36,6 @@ int main(){
 	double g1[dp.nT];
 	double g2[dp.nT];
 	
-	double v1,v2;
-	myfile = fopen("v12.txt", "w+");
-	for (i=0;i<dp.n;i++){
-		v1 = dp.reward*dp.g[i]-dp.penalty*(1.-dp.g[i]) - (dp.iti+(1.-dp.g[i])*dp.tp)*dp.rho;
-		v2 = dp.reward*(1.-dp.g[i])-dp.penalty*dp.g[i] - (dp.iti+dp.g[i]*dp.tp)*dp.rho;
-		fprintf(myfile,"%f\t%f\n",v1,v2);
-	}
-	fclose(myfile);
-	
 	//~ dp.rt(0.1, g1, g2, xub, xlb);
 	
 	myfile = fopen("test.txt", "w+");
