@@ -171,6 +171,8 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 		post_var_t1 = post_var_t;
 		curr_invg = (curr_invg+1)%2;
 		fut_invg = (fut_invg+1)%2;
+		previous_value_zone = -1;
+		current_value_zone = -1;
 		for (j=0;j<n;j++){
 			if (v1[j]>=v2[j] && v1[j]>=v_explore[j]){
 				value[j] = v1[j];
@@ -384,9 +386,9 @@ void DecisionPolicy::x_lbound(double* xb){
 	}
 }
 
-double DecisionPolicy::Psi(double mu, double* bound, unsigned int itp, double tp, double x0, double t0){
+double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double x0, double t0){
 	double normpdf = 0.3989422804014327*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->model_var/(tp-t0))/sqrt(this->model_var*(tp-t0));
-	double bound_prime = itp<(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
+	double bound_prime = itp<int(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
 	return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0));
 }
 
@@ -408,28 +410,24 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 		delete_xlb = true;
 	}
 	
-	for (i=0;i<tnT;i++){
+	g1[0] = 0.;
+	g2[0] = 0.;
+	t0 = this->t[0];
+	g1[1] = -2.*this->Psi(mu,xub,1,this->t[1],this->prior_mu_mean,t0);
+	g2[1] = 2.*this->Psi(mu,xlb,1,this->t[1],this->prior_mu_mean,t0);
+	for (i=2;i<tnT;i++){
 		ti = this->t[i];
-		if (i>1){
-			g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
-			g2[i] = this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
-			for (j=0;j<i;j++){
-				tj = this->t[j];
-				g1[i]+=this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
-									g2[j]*this->Psi(mu,xub,i,ti,xlb[j],tj));
-				g2[i]-=this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
-									g2[j]*this->Psi(mu,xlb,i,ti,xlb[j],tj));
-			}
-			g1[i]*=2.;
-			g2[i]*=2.;
-		} else if (i==1) {
-			g1[i] = -2.*this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
-			g2[i] = 2.*this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
-		} else {
-			g1[i] = 0.;
-			g2[i] = 0.;
-			t0 = ti;
+		g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
+		g2[i] = this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
+		for (j=0;j<i;j++){
+			tj = this->t[j];
+			g1[i]+=this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
+								g2[j]*this->Psi(mu,xub,i,ti,xlb[j],tj));
+			g2[i]-=this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
+								g2[j]*this->Psi(mu,xlb,i,ti,xlb[j],tj));
 		}
+		g1[i]*=2.;
+		g2[i]*=2.;
 	}
 	
 	if (delete_xub) delete[] xub;

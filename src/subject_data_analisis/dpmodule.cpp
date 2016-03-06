@@ -10,6 +10,10 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	PyObject* py_dp;
 	PyObject* py_set_rho_in_py_dp = NULL;
 	int set_rho_in_py_dp = 0;
+	PyObject* py_out = NULL;
+	PyObject* py_xub = NULL;
+	PyObject* py_xlb = NULL;
+	
 	
 	static char* kwlist[] = {"decPol", "tolerance","set_rho", NULL};
 	if (!PyArg_ParseTupleAndKeywords(args, keywds, "O|dO", kwlist, &py_dp, &tolerance, &py_set_rho_in_py_dp))
@@ -41,30 +45,53 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		py_n==NULL || py_dt==NULL || py_T==NULL || py_reward==NULL ||
 		py_penalty==NULL || py_iti==NULL || py_tp==NULL || py_cost==NULL){
 		PyErr_SetString(PyExc_ValueError, "Could not parse all decisionPolicy property values");
-		goto error_cleanup;
+		Py_XDECREF(py_model_var);
+		Py_XDECREF(py_prior_mu_mean);
+		Py_XDECREF(py_prior_mu_var);
+		Py_XDECREF(py_n);
+		Py_XDECREF(py_dt);
+		Py_XDECREF(py_T);
+		Py_XDECREF(py_reward);
+		Py_XDECREF(py_penalty);
+		Py_XDECREF(py_iti);
+		Py_XDECREF(py_tp);
+		Py_XDECREF(py_cost);
+		return NULL;
 	}
-	double model_var = PyFloat_AsDOUBLE(py_model_var);
-	double prior_mu_mean = PyFloat_AsDouble(prior_mu_mean);
-	double prior_mu_var = PyFloat_AsDouble(prior_mu_var);
-	int n = int(PyInt_AS_LONG(n));
-	double dt = PyFloat_AsDouble(dt);
-	double T = PyFloat_AsDouble(T);
-	double reward = PyFloat_AsDouble(reward);
-	double penalty = PyFloat_AsDouble(penalty);
-	double iti = PyFloat_AsDouble(iti);
-	double tp = PyFloat_AsDouble(tp);
-	double cost = PyFloat_AsDouble(cost);
+	double model_var = PyFloat_AS_DOUBLE(py_model_var);
+	double prior_mu_mean = PyFloat_AS_DOUBLE(py_prior_mu_mean);
+	double prior_mu_var = PyFloat_AS_DOUBLE(py_prior_mu_var);
+	int n = int(PyInt_AS_LONG(py_n));
+	double dt = PyFloat_AS_DOUBLE(py_dt);
+	double T = PyFloat_AS_DOUBLE(py_T);
+	double reward = PyFloat_AS_DOUBLE(py_reward);
+	double penalty = PyFloat_AS_DOUBLE(py_penalty);
+	double iti = PyFloat_AS_DOUBLE(py_iti);
+	double tp = PyFloat_AS_DOUBLE(py_tp);
+	double cost = PyFloat_AS_DOUBLE(py_cost);
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
-		goto error_cleanup;
+		Py_XDECREF(py_model_var);
+		Py_XDECREF(py_prior_mu_mean);
+		Py_XDECREF(py_prior_mu_var);
+		Py_XDECREF(py_n);
+		Py_XDECREF(py_dt);
+		Py_XDECREF(py_T);
+		Py_XDECREF(py_reward);
+		Py_XDECREF(py_penalty);
+		Py_XDECREF(py_iti);
+		Py_XDECREF(py_tp);
+		Py_XDECREF(py_cost);
+		return NULL;
 	}
 
 	DecisionPolicy dp = DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
 							reward, penalty, iti, tp, cost);
 
 	py_out = PyTuple_New(2);
-	py_xub = PyArray_SimpleNew(1, dp.nT, NPY_DOUBLE);
-	py_xlb = PyArray_SimpleNew(1, dp.nT, NPY_DOUBLE);
+	npy_intp py_nT[1] = { dp.nT };
+	py_xub = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
+	py_xlb = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
 
 	if (py_out==NULL || py_xub==NULL || py_xlb==NULL){
 		PyErr_SetString(PyExc_MemoryError, "Out of memory");
@@ -82,36 +109,36 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	dp.x_lbound((double*) PyArray_DATA((PyArrayObject*) py_xlb));
 	PyTuple_SET_ITEM(py_out, 0, py_xub); // Steals a reference to py_xub so no dec_ref must be called on py_xub on cleanup
 	PyTuple_SET_ITEM(py_out, 1, py_xlb); // Steals a reference to py_xlb so no dec_ref must be called on py_xlb on cleanup
-
-normal_cleanup:
-	PY_XDECREF(py_model_var);
-	PY_XDECREF(py_prior_mu_mean);
-	PY_XDECREF(py_prior_mu_var);
-	PY_XDECREF(py_n);
-	PY_XDECREF(py_dt);
-	PY_XDECREF(py_T);
-	PY_XDECREF(py_reward);
-	PY_XDECREF(py_penalty);
-	PY_XDECREF(py_iti);
-	PY_XDECREF(py_tp);
-	PY_XDECREF(py_cost);
+	
+	// normal_cleanup
+	Py_XDECREF(py_model_var);
+	Py_XDECREF(py_prior_mu_mean);
+	Py_XDECREF(py_prior_mu_var);
+	Py_XDECREF(py_n);
+	Py_XDECREF(py_dt);
+	Py_XDECREF(py_T);
+	Py_XDECREF(py_reward);
+	Py_XDECREF(py_penalty);
+	Py_XDECREF(py_iti);
+	Py_XDECREF(py_tp);
+	Py_XDECREF(py_cost);
 	return py_out;
 
 error_cleanup:
-	PY_XDECREF(py_model_var);
-	PY_XDECREF(py_prior_mu_mean);
-	PY_XDECREF(py_prior_mu_var);
-	PY_XDECREF(py_n);
-	PY_XDECREF(py_dt);
-	PY_XDECREF(py_T);
-	PY_XDECREF(py_reward);
-	PY_XDECREF(py_penalty);
-	PY_XDECREF(py_iti);
-	PY_XDECREF(py_tp);
-	PY_XDECREF(py_cost);
-	PY_XDECREF(py_xub);
-	PY_XDECREF(py_xlb);
-	PY_XDECREF(py_out);
+	Py_XDECREF(py_model_var);
+	Py_XDECREF(py_prior_mu_mean);
+	Py_XDECREF(py_prior_mu_var);
+	Py_XDECREF(py_n);
+	Py_XDECREF(py_dt);
+	Py_XDECREF(py_T);
+	Py_XDECREF(py_reward);
+	Py_XDECREF(py_penalty);
+	Py_XDECREF(py_iti);
+	Py_XDECREF(py_tp);
+	Py_XDECREF(py_cost);
+	Py_XDECREF(py_xub);
+	Py_XDECREF(py_xlb);
+	Py_XDECREF(py_out);
 	return NULL;
 }
 

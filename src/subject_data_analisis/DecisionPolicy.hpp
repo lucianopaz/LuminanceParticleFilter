@@ -110,7 +110,7 @@ public:
 	void x_ubound(double* xb);
 	double* x_lbound();
 	void x_lbound(double* xb);
-	double Psi(double mu, double* bound, unsigned int itp, double tp, double x0, double t0);
+	double Psi(double mu, double* bound, int itp, double tp, double x0, double t0);
 	void rt(double mu, double* g1, double* g2, double* xub, double* xlb);
 };
 
