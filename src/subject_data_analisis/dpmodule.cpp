@@ -58,17 +58,17 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		Py_XDECREF(py_cost);
 		return NULL;
 	}
-	double model_var = PyFloat_AS_DOUBLE(py_model_var);
-	double prior_mu_mean = PyFloat_AS_DOUBLE(py_prior_mu_mean);
-	double prior_mu_var = PyFloat_AS_DOUBLE(py_prior_mu_var);
+	double model_var = PyFloat_AsDouble(py_model_var);
+	double prior_mu_mean = PyFloat_AsDouble(py_prior_mu_mean);
+	double prior_mu_var = PyFloat_AsDouble(py_prior_mu_var);
 	int n = int(PyInt_AS_LONG(py_n));
-	double dt = PyFloat_AS_DOUBLE(py_dt);
-	double T = PyFloat_AS_DOUBLE(py_T);
-	double reward = PyFloat_AS_DOUBLE(py_reward);
-	double penalty = PyFloat_AS_DOUBLE(py_penalty);
-	double iti = PyFloat_AS_DOUBLE(py_iti);
-	double tp = PyFloat_AS_DOUBLE(py_tp);
-	double cost = PyFloat_AS_DOUBLE(py_cost);
+	double dt = PyFloat_AsDouble(py_dt);
+	double T = PyFloat_AsDouble(py_T);
+	double reward = PyFloat_AsDouble(py_reward);
+	double penalty = PyFloat_AsDouble(py_penalty);
+	double iti = PyFloat_AsDouble(py_iti);
+	double tp = PyFloat_AsDouble(py_tp);
+	double cost = PyFloat_AsDouble(py_cost);
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
 		Py_XDECREF(py_model_var);
@@ -143,15 +143,8 @@ error_cleanup:
 }
 
 static PyMethodDef DPMethods[] = {
-    {"fpt", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
-     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n\
-      (xub, xlb) = xbounds(dp, tolerance=1e-12)\n\n\
-      Computes the decision bounds for a decisionPolicy instance specified in 'dp'. \
-      This function is more memory and computationally efficient than calling \
-      dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python\
-      Another difference is that this function returns a tuple of (upper_bound, lower_bound) \
-      instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n\
-      'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0."},
+    {"xbounds", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
+     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0."},
     {NULL, NULL, 0, NULL}
 };
 
