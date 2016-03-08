@@ -42,8 +42,54 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	for (i=0;i<nT;i++){
 		this->t[i] = double(i)*dt;
 	}
+	this->owns_bounds = true;
 	this->ub = new double[nT];
 	this->lb = new double[nT];
+	this->bound_strides = 1;
+	
+	#ifdef DEBUG
+	std::cout<<"Created DecisionPolicy instance at "<<this<<std::endl;
+	#endif
+}
+
+DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb, int bound_strides){
+	/***
+	 * Constructor
+	***/
+	int i;
+	
+	this->model_var = model_var*dt;
+	this->prior_mu_mean = prior_mu_mean;
+	this->prior_mu_var = prior_mu_var;
+	if (n%2==0){
+		this->n = n+1;
+	} else {
+		this->n = n;
+	}
+	this->dt = dt;
+	this->T = T;
+	this->nT = (int)(T/dt)+1;
+	this->cost = cost;
+	this->reward = reward;
+	this->penalty = penalty;
+	this->iti = iti;
+	this->tp = tp;
+	this->rho = 0.;
+	this->dg = 1./double(n);
+	this->g = new double[n];
+	for (i=0;i<n;i++){
+		this->g[i] = (0.5+double(i))*this->dg;
+	}
+	this->t = new double[nT];
+	for (i=0;i<nT;i++){
+		this->t[i] = double(i)*dt;
+	}
+	this->owns_bounds = false;
+	this->ub = ub;
+	this->lb = lb;
+	this->bound_strides = bound_strides;
 	
 	#ifdef DEBUG
 	std::cout<<"Created DecisionPolicy instance at "<<this<<std::endl;
@@ -53,8 +99,10 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 DecisionPolicy::~DecisionPolicy(){
 	delete[] g;
 	delete[] t;
-	delete[] ub;
-	delete[] lb;
+	if (owns_bounds){
+		delete[] ub;
+		delete[] lb;
+	}
 	#ifdef DEBUG
 	std::cout<<"Destroyed DecisionPolicy instance"<<std::endl;
 	#endif
@@ -87,7 +135,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	bool setted_ub = false;
 	int previous_value_zone;
 	int current_value_zone;
-	int i, j, k, curr_invg, fut_invg;
+	int i, j, k, bound_ind, curr_invg, fut_invg;
 	double mu_n, post_var_t1, post_var_t, norm_p, maxp;
 	double value[n], v1[n], v2[n], v_explore[n], p[n];
 	double invg[2][n];
@@ -116,24 +164,25 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 		
 		if (compute_bounds){
 			if (v1[i]==v2[i]){
-				this->lb[nT-1] = g[i];
-				this->ub[nT-1] = g[i];
+				this->lb[bound_strides*(nT-1)] = g[i];
+				this->ub[bound_strides*(nT-1)] = g[i];
 			} else if (i>0 && i<n){
 				if ((v1[i]>v2[i] && v1[i-1]<v2[i-1]) || (v1[i]<v2[i] && v1[i-1]>v2[i-1])){
-					lb[nT-1] = ((v1[i-1]-v2[i-1])*g[i] + (v1[i]-v2[i])*g[i-1]) / (v2[i]-v1[i]+v1[i-1]-v2[i-1]);
-					ub[nT-1] = lb[nT-1];
+					lb[bound_strides*(nT-1)] = ((v1[i-1]-v2[i-1])*g[i] + (v1[i]-v2[i])*g[i-1]) / (v2[i]-v1[i]+v1[i-1]-v2[i-1]);
+					ub[bound_strides*(nT-1)] = lb[nT-1];
 				}
 			}
 		}
 	}
 	post_var_t1 = post_mu_var(this->t[nT-1]);
 	for (i=nT-2;i>=0;i--){
+		bound_ind = bound_strides*i;
 		#ifdef INFO
 		if (i%100==0) std::cout<<i<<std::endl;
 		#endif
 		setted_ub = false;
-		ub[i] = 1.;
-		lb[i] = 0.;
+		ub[bound_ind] = 1.;
+		lb[bound_ind] = 0.;
 		post_var_t = post_mu_var(t[i]);
 		for (j=0;j<n;j++){
 			v_explore[j] = 0.;
@@ -195,21 +244,21 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 				if (j>0 && j<n){
 					if (std::abs(v1[j]-v_explore[j])<1e-8){
 						if (!setted_ub){
-							ub[i] = g[j];
+							ub[bound_ind] = g[j];
 							setted_ub = true;
 						}
 					} else if (std::abs(v2[j]-v_explore[j])<1e-8){
-						lb[i] = g[j];
+						lb[bound_ind] = g[j];
 					} else if (current_value_zone!=previous_value_zone){
 						if (current_value_zone==1 && previous_value_zone==0 && !setted_ub){
-							ub[i] = (g[j-1]*(v1[j]-v_explore[j]) - g[j]*(v1[j-1]-v_explore[j-1])) / (v_explore[j-1]-v_explore[j]+v1[j]-v1[j-1]);
+							ub[bound_ind] = (g[j-1]*(v1[j]-v_explore[j]) - g[j]*(v1[j-1]-v_explore[j-1])) / (v_explore[j-1]-v_explore[j]+v1[j]-v1[j-1]);
 						} else if (current_value_zone==1 && previous_value_zone==2){
-							lb[i] = (g[j-1]*(v1[j]-v2[j]) - g[j]*(v1[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v1[j]-v1[j-1]);
+							lb[bound_ind] = (g[j-1]*(v1[j]-v2[j]) - g[j]*(v1[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v1[j]-v1[j-1]);
 							if (!setted_ub){
-								ub[i] = lb[i];
+								ub[bound_ind] = lb[bound_ind];
 							}
 						} else if (current_value_zone==0 && previous_value_zone==2){
-							lb[i] = (g[j-1]*(v_explore[j]-v2[j]) - g[j]*(v_explore[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v_explore[j]-v_explore[j-1]);
+							lb[bound_ind] = (g[j-1]*(v_explore[j]-v2[j]) - g[j]*(v_explore[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v_explore[j]-v_explore[j-1]);
 						}
 					}
 				}

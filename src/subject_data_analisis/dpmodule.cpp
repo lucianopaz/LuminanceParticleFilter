@@ -4,19 +4,24 @@
 #include <numpy/arrayobject.h>
 #include "DecisionPolicy.hpp"
 
+#include <cstdio>
+
 /* method fpt(decisionPolicy, tolerance=1e-12) */
 static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds){
 	double tolerance = 1e-12;
 	PyObject* py_dp;
-	PyObject* py_set_rho_in_py_dp = NULL;
+	PyObject* py_set_rho_in_py_dp = Py_None;
+	PyObject* py_touch_py_bounds = Py_None;
 	int set_rho_in_py_dp = 0;
+	int touch_py_bounds = 0;
+	int must_dec_ref_py_bounds = 1;
 	PyObject* py_out = NULL;
 	PyObject* py_xub = NULL;
 	PyObject* py_xlb = NULL;
+	DecisionPolicy* dp;
 	
-	
-	static char* kwlist[] = {"decPol", "tolerance","set_rho", NULL};
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "O|dO", kwlist, &py_dp, &tolerance, &py_set_rho_in_py_dp))
+	static char* kwlist[] = {"decPol", "tolerance","set_rho","set_bounds", NULL};
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "O|dOO", kwlist, &py_dp, &tolerance, &py_set_rho_in_py_dp, &touch_py_bounds))
 		return NULL;
 	
 	if (tolerance <= 0.0) {
@@ -26,6 +31,11 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	set_rho_in_py_dp = PyObject_IsTrue(py_set_rho_in_py_dp);
 	if (set_rho_in_py_dp==-1) { // Failed to evaluate truth statement
 		PyErr_SetString(PyExc_ValueError, "set_rho needs to evaluate to a valid truth statemente");
+		return NULL;
+	}
+	touch_py_bounds = PyObject_IsTrue(py_touch_py_bounds);
+	if (touch_py_bounds==-1) { // Failed to evaluate truth statement
+		PyErr_SetString(PyExc_ValueError, "set_bounds needs to evaluate to a valid truth statemente");
 		return NULL;
 	}
 	
@@ -40,6 +50,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	PyObject* py_iti = PyObject_GetAttrString(py_dp,"iti");
 	PyObject* py_tp = PyObject_GetAttrString(py_dp,"tp");
 	PyObject* py_cost = PyObject_GetAttrString(py_dp,"cost");
+	PyObject* py_bounds = NULL;
 
 	if (py_model_var==NULL || py_prior_mu_mean==NULL || py_prior_mu_var==NULL ||
 		py_n==NULL || py_dt==NULL || py_T==NULL || py_reward==NULL ||
@@ -64,13 +75,28 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	int n = int(PyInt_AS_LONG(py_n));
 	double dt = PyFloat_AsDouble(py_dt);
 	double T = PyFloat_AsDouble(py_T);
+	int nT = (int)(T/dt)+1;
+	npy_intp py_nT[1] = {nT};
 	double reward = PyFloat_AsDouble(py_reward);
 	double penalty = PyFloat_AsDouble(py_penalty);
 	double iti = PyFloat_AsDouble(py_iti);
 	double tp = PyFloat_AsDouble(py_tp);
-	double cost = PyFloat_AsDouble(py_cost);
+	double cost = 0.;
+	if (PyObject_IsInstance(py_cost,(PyObject*)(&PyArray_Type))){
+		if (!PyArray_IsAnyScalar((PyArrayObject*)py_cost)){
+			PyErr_WarnEx(PyExc_RuntimeWarning,"This extension is only capable of handling integer cost values. It will assume that the cost is constant and equal to the first element of the supplied cost array.",1);
+		}
+		if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
+			PyErr_SetString(PyExc_ValueError,"Supplied cost must be a floating point number that can be casted to double.");
+		} else {
+			cost = ((double*)PyArray_DATA((PyArrayObject*)py_cost))[0];
+		}
+	} else {
+		cost = PyFloat_AsDouble(py_cost);
+	}
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
+		std::cout<<"An error occured while converting attributes to c equivalents"<<std::endl;
 		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
@@ -84,33 +110,88 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		Py_XDECREF(py_cost);
 		return NULL;
 	}
-
-	DecisionPolicy dp = DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
-							reward, penalty, iti, tp, cost);
-
+	std::cout<<"Succesfully converted attributes to c equivalents"<<std::endl;
+	
+	if (touch_py_bounds){
+		std::cout<<"Creating c++ DecisionPolicy that owns its bounds pointers"<<std::endl;
+		dp = new DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
+								reward, penalty, iti, tp, cost);
+	} else {
+		std::cout<<"Creating c++ DecisionPolicy that does not own its bounds pointers"<<std::endl;
+		npy_intp shape[2] = {2,nT};
+		PyObject* py_bounds = PyObject_GetAttrString(py_dp,"bounds");
+		if (py_bounds==NULL){ // If the attribute bounds does not exist, create it
+			std::cout<<"Creating bounds numpy array"<<std::endl;
+			py_bounds = PyArray_SimpleNew(2,shape,NPY_DOUBLE);
+			if (py_bounds==NULL){
+				PyErr_SetString(PyExc_MemoryError,"An error occured attempting to create the numpy array that would stores the DecisionPolicy instance's bounds attribute. Out of memory.");
+				goto error_cleanup;
+			}
+			if (PyObject_SetAttrString(py_dp,"bounds", py_bounds)==-1){
+				PyErr_SetString(PyExc_AttributeError,"Could not create and assign attribute bounds for the Decision policy instance");
+				goto error_cleanup;
+			}
+			must_dec_ref_py_bounds = 0;
+			std::cout<<"Setted py_dp bounds attribute"<<std::endl;
+		} else {
+			std::cout<<"Using existing bounds array"<<std::endl;
+			if (!PyArray_Check((PyArrayObject*)py_bounds)){
+				PyErr_SetString(PyExc_TypeError,"Attribute 'bounds' in DecisionPolicy instance is not a numpy array");
+				goto error_cleanup;
+			}
+			if (PyArray_NDIM((PyArrayObject*)py_bounds)!=2){
+				PyErr_SetString(PyExc_RuntimeError,"Attribute 'bounds' in DecisionPolicy instance does not have the correct shape");
+				goto error_cleanup;
+			}
+			for (int i=0;i<2;i++){
+				if (shape[i]!=PyArray_SHAPE((PyArrayObject*)py_bounds)[i]){
+					PyErr_SetString(PyExc_RuntimeError,"Attribute 'bounds' in DecisionPolicy instance does not have the correct shape");
+					goto error_cleanup;
+				}
+			}
+		}
+		dp = new DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
+								reward, penalty, iti, tp, cost,
+								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)0,(npy_intp)0),
+								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)1,(npy_intp)0),
+								(int) PyArray_STRIDE((PyArrayObject*)py_bounds,1));
+		if (must_dec_ref_py_bounds){
+			Py_DECREF(py_bounds);
+		}
+	}
+	
 	py_out = PyTuple_New(2);
-	npy_intp py_nT[1] = { dp.nT };
 	py_xub = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
 	py_xlb = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
 
 	if (py_out==NULL || py_xub==NULL || py_xlb==NULL){
 		PyErr_SetString(PyExc_MemoryError, "Out of memory");
+		delete(dp);
 		goto error_cleanup;
 	}
-
-	dp.iterate_rho_value(tolerance);
+	std::cout<<"Succesfully initiated output tuple and arrays"<<std::endl;
+	
+	dp->iterate_rho_value(tolerance);
+	std::cout<<"Succesfully iterated rho value"<<std::endl;
 	if (set_rho_in_py_dp){
-		if (PyObject_SetAttrString(py_dp,"rho",Py_BuildValue("d",dp.rho))==-1){
+		if (PyObject_SetAttrString(py_dp,"rho",Py_BuildValue("d",dp->rho))==-1){
 			PyErr_SetString(PyExc_ValueError, "Could not set decisionPolicy property rho");
+			delete(dp);
 			goto error_cleanup;
 		}
 	}
-	dp.x_ubound((double*) PyArray_DATA((PyArrayObject*) py_xub));
-	dp.x_lbound((double*) PyArray_DATA((PyArrayObject*) py_xlb));
+	// Backpropagate and compute bounds
+	dp->backpropagate_value();
+	dp->x_ubound((double*) PyArray_DATA((PyArrayObject*) py_xub));
+	dp->x_lbound((double*) PyArray_DATA((PyArrayObject*) py_xlb));
+	std::cout<<"Succesfully setted xbounds to numpy arrays"<<std::endl;
 	PyTuple_SET_ITEM(py_out, 0, py_xub); // Steals a reference to py_xub so no dec_ref must be called on py_xub on cleanup
 	PyTuple_SET_ITEM(py_out, 1, py_xlb); // Steals a reference to py_xlb so no dec_ref must be called on py_xlb on cleanup
 	
+	std::cout<<"Succesfully placed numpy arrays in tuple output"<<std::endl;
 	// normal_cleanup
+	delete(dp);
+	std::cout<<"Deleted c++ dp pointer"<<std::endl;
 	Py_XDECREF(py_model_var);
 	Py_XDECREF(py_prior_mu_mean);
 	Py_XDECREF(py_prior_mu_var);
@@ -122,6 +203,8 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	Py_XDECREF(py_iti);
 	Py_XDECREF(py_tp);
 	Py_XDECREF(py_cost);
+	if (must_dec_ref_py_bounds) Py_XDECREF(py_bounds);
+	std::cout<<"Succesfully decrefed all instances"<<std::endl;
 	return py_out;
 
 error_cleanup:
@@ -136,6 +219,7 @@ error_cleanup:
 	Py_XDECREF(py_iti);
 	Py_XDECREF(py_tp);
 	Py_XDECREF(py_cost);
+	if (must_dec_ref_py_bounds) Py_XDECREF(py_bounds);
 	Py_XDECREF(py_xub);
 	Py_XDECREF(py_xlb);
 	Py_XDECREF(py_out);
@@ -144,7 +228,7 @@ error_cleanup:
 
 static PyMethodDef DPMethods[] = {
     {"xbounds", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
-     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0."},
+     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=None)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n"},
     {NULL, NULL, 0, NULL}
 };
 

@@ -57,8 +57,11 @@ inline double normcdfinv(double y, double mu, double sigma){
 
 class DecisionPolicy {
 public:
+	bool owns_bounds;
+	
 	int n;
 	int nT;
+	int bound_strides;
 	
 	double model_var;
 	double prior_mu_mean;
@@ -81,6 +84,11 @@ public:
 	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost);
+	
+	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
+	
 	~DecisionPolicy();
 	
 	void disp();
