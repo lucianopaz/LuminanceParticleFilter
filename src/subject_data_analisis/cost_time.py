@@ -32,7 +32,8 @@ class DecisionPolicy():
 		cost = Constant cost of accumulating new evidence
 		store_p = Boolean indicating whether to store the belief transition probability array (memory expensive!)
 		"""
-		self.model_var = model_var*dt
+		self.model_var = model_var
+		self._model_var = model_var*dt
 		self.prior_mu_mean = prior_mu_mean
 		self.prior_mu_var = prior_mu_var
 		self.n = int(n)
@@ -83,13 +84,13 @@ class DecisionPolicy():
 		"""
 		Bayes update of the posterior variance at time t
 		"""
-		return 1./(t/self.model_var+1./self.prior_mu_var)
+		return 1./(t/self._model_var+1./self.prior_mu_var)
 	
 	def post_mu_mean(self,t,x):
 		"""
 		Bayes update of the posterior mean at time t with cumulated sample x
 		"""
-		return (x/self.model_var+self.prior_mu_mean/self.prior_mu_var)*self.post_mu_var(t)
+		return (x/self._model_var+self.prior_mu_mean/self.prior_mu_var)*self.post_mu_var(t)
 	
 	def x2g(self,t,x):
 		"""
@@ -101,7 +102,7 @@ class DecisionPolicy():
 		"""
 		Mapping from belief at time t to cumulated sample x (inverse of x2g)
 		"""
-		return self.model_var*(normcdfinv(g)/np.sqrt(self.post_mu_var(t))-self.prior_mu_mean/self.prior_mu_var)
+		return self._model_var*(normcdfinv(g)/np.sqrt(self.post_mu_var(t))-self.prior_mu_mean/self.prior_mu_var)
 	
 	def invert_belief(self):
 		"""
@@ -125,10 +126,10 @@ class DecisionPolicy():
 		for i,t in enumerate(self.t[:-1]):
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,invg[i,j])
-				p[:,i,j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self.model_var)+\
-						   0.5*(invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
+				p[:,i,j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self._model_var)+\
+						   0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
-						   #~ 0.5*self.model_var/(self.model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
+						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
 		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
 		p = np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0)#/(self.g[1]-self.g[0])
 		return np.transpose(p,(1,2,0))
@@ -147,10 +148,10 @@ class DecisionPolicy():
 			counter+=1
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,invg[i,j])
-				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self.model_var)+\
-						         0.5*(invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
+				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self._model_var)+\
+						         0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
-						   #~ 0.5*self.model_var/(self.model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
+						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
 		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
 		p = (np.exp(p.T-np.max(p,axis=1))/np.sum(np.exp(p.T-np.max(p,axis=1)),axis=0)).T#/(self.g[1]-self.g[0])
 		return p #np.transpose(p,(1,2,0))
@@ -236,10 +237,10 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self.model_var)+\
-					   0.5*post_var_t1*(self.invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self._model_var)+\
+					   0.5*post_var_t1*(self.invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2
 				#~ p[:,j] = 0.5*normcdfinv(self.g)**2*post_var_t1/post_var_t**2-\
-						 #~ 0.5*self.model_var/(self.model_var+post_var_t)*(normcdfinv(self.g)/post_var_t1-normcdfinv(g)/post_var_t-mu_n)**2
+						 #~ 0.5*self._model_var/(self._model_var+post_var_t)*(normcdfinv(self.g)/post_var_t1-normcdfinv(g)/post_var_t-mu_n)**2
 			# We transpose the array after the computation so numpy can correctly broadcast the intermediate operations (sum and max)
 			p = np.transpose(np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0),(1,0))
 			v_explore = np.dot(p,self.value[i+1])-(self.cost[i]+self.rho)*dt
@@ -262,8 +263,8 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self.model_var)+\
-					   0.5*post_var_t1*(self.invg[i+1]/self.model_var+self.prior_mu_mean/self.prior_mu_var)**2
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self._model_var)+\
+					   0.5*post_var_t1*(self.invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2
 			# We transpose the array after the computation so numpy can correctly broadcast the intermediate operations (sum and max)
 			p = np.transpose(np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0),(1,0))
 			v_explore[i] = np.dot(p,self.value[i+1])-(self.cost[i]+self.rho)*dt
@@ -446,7 +447,7 @@ class DecisionPolicy():
 		return g1,g2
 		
 	def Psi(self,mu,bound,itp,tp,x0,t0):
-		normpdf = np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self.model_var/(tp-t0))/np.sqrt(2.*np.math.pi*self.model_var*(tp-t0))
+		normpdf = np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self._model_var/(tp-t0))/np.sqrt(2.*np.math.pi*self._model_var*(tp-t0))
 		bound_prime = (bound[itp+1]-bound[itp])/self.dt if itp<len(bound)-1 else 0.
 		return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0))
 

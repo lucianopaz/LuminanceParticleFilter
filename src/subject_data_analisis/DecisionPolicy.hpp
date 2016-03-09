@@ -4,12 +4,12 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <cstdio>
 
 #ifdef DEBUG
 #ifndef INFO
 #define INFO
 #endif
-#include <cstdio>
 #endif
 
 #define SIGN(x) ((x > 0) - (x < 0))
@@ -94,11 +94,11 @@ public:
 	void disp();
 	
 	inline double post_mu_var(double t){
-		return 1./(t/this->model_var + 1./this->prior_mu_var);
+		return 1./(t/this->_model_var + 1./this->prior_mu_var);
 	}
 	
 	inline double post_mu_mean(double t, double x){
-		return (x/this->model_var+this->prior_mu_mean/this->prior_mu_var)*this->post_mu_var(t);
+		return (x/this->_model_var+this->prior_mu_mean/this->prior_mu_var)*this->post_mu_var(t);
 	}
 	
 	inline double x2g(double t, double x){
@@ -106,7 +106,7 @@ public:
 	}
 	
 	inline double g2x(double t, double g){
-		return this->model_var*(normcdfinv(g,0.,1.)/sqrt(this->post_mu_var(t))-this->prior_mu_mean/this->prior_mu_var);
+		return this->_model_var*(normcdfinv(g,0.,1.)/sqrt(this->post_mu_var(t))-this->prior_mu_mean/this->prior_mu_var);
 	}
 	
 	double backpropagate_value();
@@ -120,6 +120,9 @@ public:
 	void x_lbound(double* xb);
 	double Psi(double mu, double* bound, int itp, double tp, double x0, double t0);
 	void rt(double mu, double* g1, double* g2, double* xub, double* xlb);
+
+protected:
+	double _model_var;
 };
 
 #endif

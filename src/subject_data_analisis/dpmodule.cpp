@@ -21,7 +21,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	DecisionPolicy* dp;
 	
 	static char* kwlist[] = {"decPol", "tolerance","set_rho","set_bounds", NULL};
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "O|dOO", kwlist, &py_dp, &tolerance, &py_set_rho_in_py_dp, &touch_py_bounds))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "O|dOO", kwlist, &py_dp, &tolerance, &py_set_rho_in_py_dp, &py_touch_py_bounds))
 		return NULL;
 	
 	if (tolerance <= 0.0) {
@@ -84,7 +84,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	double cost = 0.;
 	if (PyObject_IsInstance(py_cost,(PyObject*)(&PyArray_Type))){
 		if (!PyArray_IsAnyScalar((PyArrayObject*)py_cost)){
-			PyErr_WarnEx(PyExc_RuntimeWarning,"This extension is only capable of handling integer cost values. It will assume that the cost is constant and equal to the first element of the supplied cost array.",1);
+			PyErr_WarnEx(PyExc_RuntimeWarning,"dp module's function xbounds is only capable of handling integer cost values. It will assume that the cost is constant and equal to the first element of the supplied cost array.",1);
 		}
 		if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
 			PyErr_SetString(PyExc_ValueError,"Supplied cost must be a floating point number that can be casted to double.");
@@ -96,7 +96,6 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	}
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
-		std::cout<<"An error occured while converting attributes to c equivalents"<<std::endl;
 		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
@@ -110,18 +109,15 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		Py_XDECREF(py_cost);
 		return NULL;
 	}
-	std::cout<<"Succesfully converted attributes to c equivalents"<<std::endl;
 	
-	if (touch_py_bounds){
-		std::cout<<"Creating c++ DecisionPolicy that owns its bounds pointers"<<std::endl;
+	if (!touch_py_bounds){
 		dp = new DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
 								reward, penalty, iti, tp, cost);
 	} else {
-		std::cout<<"Creating c++ DecisionPolicy that does not own its bounds pointers"<<std::endl;
 		npy_intp shape[2] = {2,nT};
-		PyObject* py_bounds = PyObject_GetAttrString(py_dp,"bounds");
+		py_bounds = PyObject_GetAttrString(py_dp,"bounds");
 		if (py_bounds==NULL){ // If the attribute bounds does not exist, create it
-			std::cout<<"Creating bounds numpy array"<<std::endl;
+			PyErr_Clear(); // As we are handling the exception that py_dp has no attribute "bounds", we clear the exception state.
 			py_bounds = PyArray_SimpleNew(2,shape,NPY_DOUBLE);
 			if (py_bounds==NULL){
 				PyErr_SetString(PyExc_MemoryError,"An error occured attempting to create the numpy array that would stores the DecisionPolicy instance's bounds attribute. Out of memory.");
@@ -132,9 +128,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 				goto error_cleanup;
 			}
 			must_dec_ref_py_bounds = 0;
-			std::cout<<"Setted py_dp bounds attribute"<<std::endl;
 		} else {
-			std::cout<<"Using existing bounds array"<<std::endl;
 			if (!PyArray_Check((PyArrayObject*)py_bounds)){
 				PyErr_SetString(PyExc_TypeError,"Attribute 'bounds' in DecisionPolicy instance is not a numpy array");
 				goto error_cleanup;
@@ -154,10 +148,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 								reward, penalty, iti, tp, cost,
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)0,(npy_intp)0),
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)1,(npy_intp)0),
-								(int) PyArray_STRIDE((PyArrayObject*)py_bounds,1));
-		if (must_dec_ref_py_bounds){
-			Py_DECREF(py_bounds);
-		}
+								((int) PyArray_STRIDE((PyArrayObject*)py_bounds,1))/sizeof(double)); // We divide by sizeof(double) because strides determines the number of bytes to stride in each dimension. As we cast the supplied void pointer to double*, each element has sizeof(double) bytes instead of 1 byte.
 	}
 	
 	py_out = PyTuple_New(2);
@@ -169,10 +160,8 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		delete(dp);
 		goto error_cleanup;
 	}
-	std::cout<<"Succesfully initiated output tuple and arrays"<<std::endl;
 	
 	dp->iterate_rho_value(tolerance);
-	std::cout<<"Succesfully iterated rho value"<<std::endl;
 	if (set_rho_in_py_dp){
 		if (PyObject_SetAttrString(py_dp,"rho",Py_BuildValue("d",dp->rho))==-1){
 			PyErr_SetString(PyExc_ValueError, "Could not set decisionPolicy property rho");
@@ -180,18 +169,15 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 			goto error_cleanup;
 		}
 	}
-	// Backpropagate and compute bounds
+	// Backpropagate and compute bounds in the diffusion space
 	dp->backpropagate_value();
 	dp->x_ubound((double*) PyArray_DATA((PyArrayObject*) py_xub));
 	dp->x_lbound((double*) PyArray_DATA((PyArrayObject*) py_xlb));
-	std::cout<<"Succesfully setted xbounds to numpy arrays"<<std::endl;
 	PyTuple_SET_ITEM(py_out, 0, py_xub); // Steals a reference to py_xub so no dec_ref must be called on py_xub on cleanup
 	PyTuple_SET_ITEM(py_out, 1, py_xlb); // Steals a reference to py_xlb so no dec_ref must be called on py_xlb on cleanup
 	
-	std::cout<<"Succesfully placed numpy arrays in tuple output"<<std::endl;
 	// normal_cleanup
 	delete(dp);
-	std::cout<<"Deleted c++ dp pointer"<<std::endl;
 	Py_XDECREF(py_model_var);
 	Py_XDECREF(py_prior_mu_mean);
 	Py_XDECREF(py_prior_mu_var);
@@ -204,7 +190,6 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	Py_XDECREF(py_tp);
 	Py_XDECREF(py_cost);
 	if (must_dec_ref_py_bounds) Py_XDECREF(py_bounds);
-	std::cout<<"Succesfully decrefed all instances"<<std::endl;
 	return py_out;
 
 error_cleanup:
@@ -228,7 +213,7 @@ error_cleanup:
 
 static PyMethodDef DPMethods[] = {
     {"xbounds", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
-     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=None)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n"},
+     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=None, set_bounds=None)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lowe_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing."},
     {NULL, NULL, 0, NULL}
 };
 

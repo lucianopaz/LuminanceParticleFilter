@@ -16,7 +16,8 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	***/
 	int i;
 	
-	this->model_var = model_var*dt;
+	this->model_var = model_var;
+	this->_model_var = model_var*dt;
 	this->prior_mu_mean = prior_mu_mean;
 	this->prior_mu_var = prior_mu_var;
 	if (n%2==0){
@@ -60,7 +61,8 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	***/
 	int i;
 	
-	this->model_var = model_var*dt;
+	this->model_var = model_var;
+	this->_model_var = model_var*dt;
 	this->prior_mu_mean = prior_mu_mean;
 	this->prior_mu_var = prior_mu_var;
 	if (n%2==0){
@@ -110,6 +112,7 @@ DecisionPolicy::~DecisionPolicy(){
 
 void DecisionPolicy::disp(){
 	std::cout<<"model_var = "<<model_var<<std::endl;
+	std::cout<<"_model_var = "<<_model_var<<std::endl;
 	std::cout<<"prior_mu_mean = "<<prior_mu_mean<<std::endl;
 	std::cout<<"prior_mu_var = "<<prior_mu_var<<std::endl;
 	std::cout<<"dt = "<<dt<<std::endl;
@@ -120,8 +123,16 @@ void DecisionPolicy::disp(){
 	std::cout<<"iti = "<<iti<<std::endl;
 	std::cout<<"tp = "<<tp<<std::endl;
 	std::cout<<"rho = "<<rho<<std::endl;
-	std::cout<<"n = "<<tp<<std::endl;
-	std::cout<<"nT = "<<rho<<std::endl;
+	std::cout<<"n = "<<n<<std::endl;
+	std::cout<<"nT = "<<nT<<std::endl;
+	std::cout<<"t = "<<t<<std::endl;
+	
+	std::cout<<"owns_bounds = "<<owns_bounds<<std::endl;
+	std::cout<<"bound_strides = "<<bound_strides<<std::endl;
+	std::cout<<"ub = "<<ub<<std::endl;
+	std::cout<<"lb = "<<lb<<std::endl;
+	
+	
 }
 
 double DecisionPolicy::backpropagate_value(){
@@ -191,8 +202,8 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 			norm_p = 0.;
 			maxp = -INFINITY;
 			for (k=0;k<n;k++){
-				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t+model_var)+
-						0.5*pow(invg[fut_invg][k]/model_var+prior_mu_mean/prior_mu_var,2)*post_var_t1;
+				p[k] = -0.5*pow(invg[fut_invg][k]-invg[curr_invg][j]-mu_n,2)/(post_var_t+_model_var)+
+						0.5*pow(invg[fut_invg][k]/_model_var+prior_mu_mean/prior_mu_var,2)*post_var_t1;
 				maxp = p[k]>maxp ? p[k] : maxp;
 				#ifdef DEBUG
 				fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n,post_var_t,post_var_t1);
@@ -436,7 +447,7 @@ void DecisionPolicy::x_lbound(double* xb){
 }
 
 double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double x0, double t0){
-	double normpdf = 0.3989422804014327*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->model_var/(tp-t0))/sqrt(this->model_var*(tp-t0));
+	double normpdf = 0.3989422804014327*exp(-0.5*pow(bound[itp]-x0-mu*(tp-t0),2)/this->_model_var/(tp-t0))/sqrt(this->_model_var*(tp-t0));
 	double bound_prime = itp<int(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
 	return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0));
 }
