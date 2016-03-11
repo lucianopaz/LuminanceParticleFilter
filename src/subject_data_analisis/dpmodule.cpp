@@ -15,6 +15,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	int set_rho_in_py_dp = 0;
 	int touch_py_bounds = 0;
 	int must_dec_ref_py_bounds = 1;
+	bool must_create_py_bounds = false;
 	PyObject* py_out = NULL;
 	PyObject* py_xub = NULL;
 	PyObject* py_xlb = NULL;
@@ -118,6 +119,26 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 		py_bounds = PyObject_GetAttrString(py_dp,"bounds");
 		if (py_bounds==NULL){ // If the attribute bounds does not exist, create it
 			PyErr_Clear(); // As we are handling the exception that py_dp has no attribute "bounds", we clear the exception state.
+			must_create_py_bounds = true;
+		} else if (!PyArray_Check((PyArrayObject*)py_bounds)){
+			// Attribute 'bounds' in DecisionPolicy instance is not a numpy array. We must re create py_bounds
+			Py_DECREF(py_bounds);
+			must_create_py_bounds = true;
+		} else if (PyArray_NDIM((PyArrayObject*)py_bounds)!=2){
+			// Attribute 'bounds' in DecisionPolicy instance does not have the correct shape. We must re create py_bounds
+			Py_DECREF(py_bounds);
+			must_create_py_bounds = true;
+		} else {
+			for (int i=0;i<2;i++){
+				if (shape[i]!=PyArray_SHAPE((PyArrayObject*)py_bounds)[i]){
+					// Attribute 'bounds' in DecisionPolicy instance does not have the correct shape. We must re create py_bounds
+					Py_DECREF(py_bounds);
+					must_create_py_bounds = true;
+					break;
+				}
+			}
+		}
+		if (must_create_py_bounds){
 			py_bounds = PyArray_SimpleNew(2,shape,NPY_DOUBLE);
 			if (py_bounds==NULL){
 				PyErr_SetString(PyExc_MemoryError,"An error occured attempting to create the numpy array that would stores the DecisionPolicy instance's bounds attribute. Out of memory.");
@@ -128,21 +149,6 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 				goto error_cleanup;
 			}
 			must_dec_ref_py_bounds = 0;
-		} else {
-			if (!PyArray_Check((PyArrayObject*)py_bounds)){
-				PyErr_SetString(PyExc_TypeError,"Attribute 'bounds' in DecisionPolicy instance is not a numpy array");
-				goto error_cleanup;
-			}
-			if (PyArray_NDIM((PyArrayObject*)py_bounds)!=2){
-				PyErr_SetString(PyExc_RuntimeError,"Attribute 'bounds' in DecisionPolicy instance does not have the correct shape");
-				goto error_cleanup;
-			}
-			for (int i=0;i<2;i++){
-				if (shape[i]!=PyArray_SHAPE((PyArrayObject*)py_bounds)[i]){
-					PyErr_SetString(PyExc_RuntimeError,"Attribute 'bounds' in DecisionPolicy instance does not have the correct shape");
-					goto error_cleanup;
-				}
-			}
 		}
 		dp = new DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T,
 								reward, penalty, iti, tp, cost,

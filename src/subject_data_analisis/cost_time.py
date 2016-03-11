@@ -8,6 +8,9 @@ from scipy import optimize
 import math, copy
 from matplotlib import pyplot as plt
 from utils import normcdf,normcdfinv
+try:
+	import dp
+
 
 class DecisionPolicy():
 	"""
@@ -33,7 +36,7 @@ class DecisionPolicy():
 		store_p = Boolean indicating whether to store the belief transition probability array (memory expensive!)
 		"""
 		self.model_var = model_var
-		self._model_var = model_var*dt
+		self._model_var = model_var
 		self.prior_mu_mean = prior_mu_mean
 		self.prior_mu_var = prior_mu_var
 		self.n = int(n)
@@ -58,6 +61,19 @@ class DecisionPolicy():
 			if self.store_p:
 				self.p = self.belief_transition_p()
 			self.value_dp()
+	
+	def set_n(self,n):
+		self.n = n
+		if self.n%2==0:
+			self.n+1
+		self.dg = 1./n;
+		self.g = np.linspace(self.dg/2.,1.-self.dg/2.,self.n)
+	def set_dt(self,dt):
+		self.dt = float(dt)
+		self.t = np.arange(0.,float(self.T+self.dt),float(self.dt),np.float)
+	def set_T(self,T):
+		self.T = float(T)
+		self.t = np.arange(0.,float(self.T+self.dt),float(self.dt),np.float)
 	
 	def reset(self):
 		if self.store_p:
@@ -126,7 +142,7 @@ class DecisionPolicy():
 		for i,t in enumerate(self.t[:-1]):
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,invg[i,j])
-				p[:,i,j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self._model_var)+\
+				p[:,i,j] = -0.5*(invg[i+1]-invg[i,j]-mu_n*self.dt)**2/((post_var[i]*self.dt+self._model_var)*self.dt)+\
 						   0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
 						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
@@ -148,7 +164,7 @@ class DecisionPolicy():
 			counter+=1
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,invg[i,j])
-				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n)**2/(post_var[i]+self._model_var)+\
+				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n*self.dt)**2/((post_var[i]*self.dt+self._model_var)*self.dt)+\
 						         0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
 				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
 						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
@@ -237,7 +253,7 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self._model_var)+\
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n*self.dt)**2/((post_var_t*self.dt+self._model_var)*self.dt)+\
 					   0.5*post_var_t1*(self.invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2
 				#~ p[:,j] = 0.5*normcdfinv(self.g)**2*post_var_t1/post_var_t**2-\
 						 #~ 0.5*self._model_var/(self._model_var+post_var_t)*(normcdfinv(self.g)/post_var_t1-normcdfinv(g)/post_var_t-mu_n)**2
@@ -263,7 +279,7 @@ class DecisionPolicy():
 			post_var_t = self.post_mu_var(t)
 			for j,g in enumerate(self.g):
 				mu_n = self.post_mu_mean(t,self.invg[i,j])
-				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n)**2/(post_var_t+self._model_var)+\
+				p[:,j] = -0.5*(self.invg[i+1]-self.invg[i,j]-mu_n*self.dt)**2/((post_var_t*self.dt+self._model_var)*self.dt)+\
 					   0.5*post_var_t1*(self.invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2
 			# We transpose the array after the computation so numpy can correctly broadcast the intermediate operations (sum and max)
 			p = np.transpose(np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0),(1,0))
