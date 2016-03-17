@@ -55,6 +55,26 @@ inline double normcdfinv(double y, double mu, double sigma){
 	return 1.4142135623730951*sigma*erfinv(2.*(y-0.5))+mu;
 }
 
+class DecisionPolicyDescriptor {
+public:
+	double model_var;
+	double prior_mu_mean;
+	double prior_mu_var;
+	int n;
+	double dt;
+	double dg;
+	double T;
+	double reward;
+	double penalty;
+	double iti;
+	double tp;
+	double cost;
+	
+	DecisionPolicyDescriptor(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost);
+};
+
 class DecisionPolicy {
 public:
 	bool owns_bounds;
@@ -89,6 +109,11 @@ public:
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
 	
+	DecisionPolicy(const DecisionPolicyDescriptor& dpc);
+	
+	DecisionPolicy(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
+	
+	
 	~DecisionPolicy();
 	
 	void disp();
@@ -111,8 +136,10 @@ public:
 	
 	double backpropagate_value();
 	double backpropagate_value(double rho, bool compute_bounds);
+	double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2);
 	double value_for_root_finding(double rho);
 	double iterate_rho_value(double tolerance);
+	double iterate_rho_value(double tolerance, double lower_bound, double upper_bound);
 	
 	double* x_ubound();
 	void x_ubound(double* xb);

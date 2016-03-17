@@ -1,5 +1,21 @@
 #include "DecisionPolicy.hpp"
 
+DecisionPolicyDescriptor::DecisionPolicyDescriptor(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost){
+	this->model_var = model_var;
+	this->prior_mu_mean = prior_mu_mean;
+	this->prior_mu_var = prior_mu_var;
+	this->n = n;
+	this->dt = dt;
+	this->T = T;
+	this->reward = reward;
+	this->penalty = penalty;
+	this->iti = iti;
+	this->tp = tp;
+	this->cost = cost;
+}
+
 /***
  * DecisionPolicy is a class that implements the dynamic programing method
  * that computes the value of a given belief state as a function of time.
@@ -87,6 +103,92 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 	this->t = new double[nT];
 	for (i=0;i<nT;i++){
 		this->t[i] = double(i)*dt;
+	}
+	this->owns_bounds = false;
+	this->ub = ub;
+	this->lb = lb;
+	this->bound_strides = bound_strides;
+	
+	#ifdef DEBUG
+	std::cout<<"Created DecisionPolicy instance at "<<this<<std::endl;
+	#endif
+}
+
+DecisionPolicy::DecisionPolicy(const DecisionPolicyDescriptor& dpc){
+	/***
+	 * Constructor that creates its own bound arrays
+	***/
+	int i;
+	
+	this->model_var = dpc.model_var;
+	this->_model_var = dpc.model_var;
+	this->prior_mu_mean = dpc.prior_mu_mean;
+	this->prior_mu_var = dpc.prior_mu_var;
+	if (dpc.n%2==0){
+		this->n = dpc.n+1;
+	} else {
+		this->n = dpc.n;
+	}
+	this->dt = dpc.dt;
+	this->T = dpc.T;
+	this->nT = (int)(this->T/this->dt)+1;
+	this->cost = dpc.cost;
+	this->reward = dpc.reward;
+	this->penalty = dpc.penalty;
+	this->iti = dpc.iti;
+	this->tp = dpc.tp;
+	this->rho = 0.;
+	this->dg = 1./double(this->n);
+	this->g = new double[this->n];
+	for (i=0;i<this->n;i++){
+		this->g[i] = (0.5+double(i))*this->dg;
+	}
+	this->t = new double[this->nT];
+	for (i=0;i<this->nT;i++){
+		this->t[i] = double(i)*this->dt;
+	}
+	this->owns_bounds = true;
+	this->ub = new double[this->nT];
+	this->lb = new double[this->nT];
+	this->bound_strides = 1;
+	
+	#ifdef DEBUG
+	std::cout<<"Created DecisionPolicy instance at "<<this<<std::endl;
+	#endif
+}
+
+DecisionPolicy::DecisionPolicy(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides){
+	/***
+	 * Constructor that creates its own bound arrays
+	***/
+	int i;
+	
+	this->model_var = dpc.model_var;
+	this->_model_var = dpc.model_var;
+	this->prior_mu_mean = dpc.prior_mu_mean;
+	this->prior_mu_var = dpc.prior_mu_var;
+	if (dpc.n%2==0){
+		this->n = dpc.n+1;
+	} else {
+		this->n = dpc.n;
+	}
+	this->dt = dpc.dt;
+	this->T = dpc.T;
+	this->nT = (int)(this->T/this->dt)+1;
+	this->cost = dpc.cost;
+	this->reward = dpc.reward;
+	this->penalty = dpc.penalty;
+	this->iti = dpc.iti;
+	this->tp = dpc.tp;
+	this->rho = 0.;
+	this->dg = 1./double(this->n);
+	this->g = new double[this->n];
+	for (i=0;i<this->n;i++){
+		this->g[i] = (0.5+double(i))*this->dg;
+	}
+	this->t = new double[this->nT];
+	for (i=0;i<this->nT;i++){
+		this->t[i] = double(i)*this->dt;
 	}
 	this->owns_bounds = false;
 	this->ub = ub;
@@ -236,7 +338,7 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 		lb[bound_ind] = 0.;
 		
 		//Speed increase by reducing array access
-		const double t_i = t[i]
+		const double t_i = t[i];
 		post_var_t = post_mu_var(t_i);
 		for (j=0;j<n;j++){
 			v_explore[j] = 0.;
@@ -341,6 +443,200 @@ double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds){
 	return value[int(0.5*n)];
 }
 
+double DecisionPolicy::backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2){
+	/***
+	 * Main function:
+	 * backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2)
+	 * 
+	 * This function applies dynamic programing to determine the value
+	 * of holding belief g at time t. It should be used under two different
+	 * circumstances.
+	 * 1) Iterate rho value until the value of g=0.5 at t=0 is 0
+	 * 2) To compute the decision bounds in g space, once rho has been computed
+	 * 
+	 * This means that the value of belief g at time t is not stored
+	 * during the execution. This is done to improve memory usage and
+	 * execution time.
+	 * 
+	 * This function returns the value of g=0.5 at t=0.
+	 * If compute_bounds=true it also sets the values of the bound arrays
+	 * ub and lb.
+	***/
+	#ifdef DEBUG
+	std::cout<<"Entered backpropagate_value with rho = "<<rho<<std::endl;
+	#endif
+	bool setted_ub = false;
+	int previous_value_zone;
+	int current_value_zone;
+	int i, j, k, bound_ind, curr_invg, fut_invg;
+	double post_var_t1, post_var_t, norm_p, maxp;
+	double p[n];
+	double invg[2][n];
+	
+	this->rho = rho;
+	curr_invg = 0;
+	fut_invg = 1;
+	#ifdef DEBUG
+	FILE *details_file = fopen("details.txt","w");
+	FILE *prob_file = fopen("prob.txt","w");
+	FILE *value_file = fopen("value.txt","w");
+	FILE *v_explore_file = fopen("v_explore.txt","w");
+	#endif
+	// Compute the value at the time limit T, where the subject must decide
+	for (i=0;i<n;i++){
+		// Value of deciding option 1
+		v1[i] = reward*g[i]-penalty*(1.-g[i]) - (iti+(1.-g[i])*tp)*rho;
+		// Value of deciding option 2
+		v2[i] = reward*(1.-g[i])-penalty*g[i] - (iti+g[i]*tp)*rho;
+		// Value of the belief g[i]
+		value[i+(nT-1)*n] = v1[i]>=v2[i] ? v1[i] : v2[i];
+		// We compute invg that is the x(t) that corresponds to having g[i] at time T
+		// and store it to save computations
+		invg[fut_invg][i] = g2x(t[nT-1],g[i]);
+		#ifdef DEBUG
+		if (i<n-1){
+			fprintf(value_file,"%f\t",value[i+(nT-1)*n]);
+		} else {
+			fprintf(value_file,"%f\n",value[i+(nT-1)*n]);
+		}
+		#endif
+		
+		if (compute_bounds){
+			if (v1[i]==v2[i]){
+				// If the values are the same at a given g, then that g is the decision bound
+				this->lb[bound_strides*(nT-1)] = g[i];
+				this->ub[bound_strides*(nT-1)] = g[i];
+			} else if (i>0 && i<n){
+				// If the values do not match, we interpolate the g where the values cross
+				if ((v1[i]>v2[i] && v1[i-1]<v2[i-1]) || (v1[i]<v2[i] && v1[i-1]>v2[i-1])){
+					lb[bound_strides*(nT-1)] = ((v1[i-1]-v2[i-1])*g[i] + (v1[i]-v2[i])*g[i-1]) / (v2[i]-v1[i]+v1[i-1]-v2[i-1]);
+					ub[bound_strides*(nT-1)] = lb[nT-1];
+				}
+			}
+		}
+	}
+	
+	post_var_t1 = post_mu_var(this->t[nT-1]);
+	// Dynamic programing loop that goes backward in time from T->0
+	// Speed increase by precalculating values
+	const double prior_div = prior_mu_mean/prior_mu_var;
+	const double inv_model_var = 1./_model_var;
+	for (i=nT-2;i>=0;i--){
+		#ifdef INFO
+		if (i%100==0) std::cout<<i<<std::endl;
+		#endif
+		setted_ub = false;
+		bound_ind = bound_strides*i;
+		ub[bound_ind] = 1.;
+		lb[bound_ind] = 0.;
+		
+		//Speed increase by reducing array access
+		const double t_i = t[i];
+		post_var_t = post_mu_var(t_i);
+		for (j=0;j<n;j++){
+			v_explore[j+i*n] = 0.;
+			invg[curr_invg][j] = g2x(t_i,g[j]);
+			norm_p = 0.;
+			maxp = -INFINITY;
+			// Speed increase by reducing array access and precalculating values
+			const double mu_n_dt = post_mu_mean(t_i,invg[curr_invg][j])*dt;
+			const double mean_1 = invg[curr_invg][j]+mu_n_dt;
+			const double var_1 = 1./((post_var_t*dt+_model_var)*dt);
+			const double* future_x = invg[fut_invg];
+			
+			// Compute P(g(t+dt)|g(t)) in two steps. First compute the exponent
+			for (k=0;k<n;k++){
+				p[k] = -0.5*pow(future_x[k]-mean_1,2)*var_1+
+						0.5*pow(future_x[k]*inv_model_var+prior_div,2)*post_var_t1;
+				maxp = p[k]>maxp ? p[k] : maxp;
+				#ifdef DEBUG
+				fprintf(details_file,"%f\t%f\t%f\t%f\t%f\n",invg[fut_invg][k],invg[curr_invg][j],mu_n_dt,post_var_t,post_var_t1);
+				#endif
+			}
+			// Then exponentiate and compute the value of exploring
+			for (k=0;k<n;k++){
+				p[k] = exp(p[k]-maxp);
+				norm_p+=p[k];
+				v_explore[j+i*n]+= p[k]*value[k+(i+1)*n];
+			}
+			// Divide the value of exploring by the normalization factor and discount the cost and rho
+			v_explore[j+i*n] = v_explore[j+i*n]/norm_p - (cost+rho)*dt;
+			
+			#ifdef DEBUG
+			for (k=0;k<n-1;k++){
+				fprintf(prob_file,"%f\t",p[k]/norm_p);
+			}
+			fprintf(prob_file,"%f\n",p[k]/norm_p);
+			if (j<n-1){
+				fprintf(v_explore_file,"%f\t",v_explore[j+i*n]);
+			} else {
+				fprintf(v_explore_file,"%f\n",v_explore[j+i*n]);
+			}
+			#endif
+		}
+		// Update temporal values
+		post_var_t1 = post_var_t;
+		curr_invg = (curr_invg+1)%2;
+		fut_invg = (fut_invg+1)%2;
+		// Value computation
+		previous_value_zone = -1;
+		current_value_zone = -1;
+		for (j=0;j<n;j++){
+			if (v1[j]>=v2[j] && v1[j]>=v_explore[j+i*n]){
+				value[j+i*n] = v1[j];
+				current_value_zone = 1;
+			} else if (v2[j]>v1[j] && v2[j]>=v_explore[j+i*n]){
+				value[j+i*n] = v2[j];
+				current_value_zone = 2;
+			} else if (v_explore[j+i*n]>v1[j] && v_explore[j+i*n]>v2[j]){
+				value[j+i*n] = v_explore[j+i*n];
+				current_value_zone = 0;
+			}
+			#ifdef DEBUG
+			if (j<n-1){
+				fprintf(value_file,"%f\t",value[j+i*n]);
+			} else {
+				fprintf(value_file,"%f\n",value[j+i*n]);
+			}
+			#endif
+			// Bound computation
+			if (compute_bounds){
+				if (j>0 && j<n){
+					if (std::abs(v1[j]-v_explore[j+i*n])<1e-8){
+						if (!setted_ub){
+							ub[bound_ind] = g[j];
+							setted_ub = true;
+						}
+					} else if (std::abs(v2[j]-v_explore[j+i*n])<1e-8){
+						lb[bound_ind] = g[j];
+					} else if (current_value_zone!=previous_value_zone){
+						if (current_value_zone==1 && previous_value_zone==0 && !setted_ub){
+							ub[bound_ind] = (g[j-1]*(v1[j]-v_explore[j+i*n]) - g[j]*(v1[j-1]-v_explore[j-1+i*n])) / (v_explore[j-1+i*n]-v_explore[j+i*n]+v1[j]-v1[j-1]);
+						} else if (current_value_zone==1 && previous_value_zone==2){
+							lb[bound_ind] = (g[j-1]*(v1[j]-v2[j]) - g[j]*(v1[j-1]-v2[j-1])) / (v2[j-1]-v2[j]+v1[j]-v1[j-1]);
+							if (!setted_ub){
+								ub[bound_ind] = lb[bound_ind];
+							}
+						} else if (current_value_zone==0 && previous_value_zone==2){
+							lb[bound_ind] = (g[j-1]*(v_explore[j+i*n]-v2[j]) - g[j]*(v_explore[j-1+i*n]-v2[j-1])) / (v2[j-1]-v2[j]+v_explore[j+i*n]-v_explore[j-1+i*n]);
+						}
+					}
+				}
+			}
+			previous_value_zone = current_value_zone;
+		}
+	}
+	
+	#ifdef DEBUG
+	fclose(prob_file);
+	fclose(value_file);
+	fclose(v_explore_file);
+	std::cout<<"Exited backpropagate_value "<<std::endl;
+	#endif
+	return value[int(0.5*n)];
+}
+
+
 double DecisionPolicy::value_for_root_finding(double rho){
 	/***
 	 * Function that serves as a proxy for the value root finding that
@@ -350,6 +646,11 @@ double DecisionPolicy::value_for_root_finding(double rho){
 }
 
 double DecisionPolicy::iterate_rho_value(double tolerance){
+	// Use arbitrary default upper and lower bounds
+	return this->iterate_rho_value(tolerance,-10.,10.);
+}
+
+double DecisionPolicy::iterate_rho_value(double tolerance, double lower_bound, double upper_bound){
 	/***
 	 * Function that implements Brent's algorithm for root finding.
 	 * This function was adapted from brent.cpp written by John Burkardt,
@@ -358,7 +659,7 @@ double DecisionPolicy::iterate_rho_value(double tolerance){
 	 * t=0 equal to 0. It finds a value for rho within a certain tolerance
 	 * for the value of g=0.5 at t=0.
 	***/
-	double lower_bound, upper_bound, low_buffer;
+	double low_buffer;
 	double func_at_low_bound, func_at_up_bound, func_at_low_buffer;
 	double d;
 	double interval;
@@ -369,8 +670,6 @@ double DecisionPolicy::iterate_rho_value(double tolerance){
 	double r;
 	double s;
 	double tol;
-	// Arbitrary default upper and lower bounds
-	lower_bound=-10.; upper_bound = 10.;
 	func_at_low_bound = this->value_for_root_finding(lower_bound);
 	func_at_up_bound = this->value_for_root_finding(upper_bound);
 	if (func_at_low_bound==0){
@@ -384,11 +683,24 @@ double DecisionPolicy::iterate_rho_value(double tolerance){
 			    (func_at_low_bound>func_at_up_bound and func_at_low_bound>0)){
 				lower_bound = upper_bound;
 				upper_bound*=10;
+				if (upper_bound>0){
+					upper_bound*=10;
+				} else if (upper_bound<0) {
+					upper_bound*=-1;
+				} else {
+					upper_bound=1e-6;
+				}
 				func_at_up_bound = this->value_for_root_finding(upper_bound);
 			} else if ((func_at_low_bound>func_at_up_bound and func_at_low_bound<0) ||
 			    (func_at_low_bound<func_at_up_bound and func_at_low_bound>0)){
 				upper_bound = lower_bound;
-				lower_bound*=10;
+				if (lower_bound<0){
+					lower_bound*=10;
+				} else if (lower_bound>0) {
+					lower_bound*=-1;
+				} else {
+					lower_bound=-1e-6;
+				}
 				func_at_low_bound = this->value_for_root_finding(lower_bound);
 			}
 		}

@@ -10,6 +10,9 @@ from matplotlib import pyplot as plt
 from utils import normcdf,normcdfinv
 try:
 	import dp
+	use_cpp_extension = True
+except:
+	use_cpp_extension = False
 
 
 class DecisionPolicy():
@@ -18,8 +21,7 @@ class DecisionPolicy():
 	reward rate and computes the optimal decision bounds
 	"""
 	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.,\
-				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True,\
-				 compute_value=True):
+				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True):
 		"""
 		Constructor input:
 		model_var = True variance of the process that generates samples per unit time. This value is then multiplied by dt.
@@ -55,12 +57,6 @@ class DecisionPolicy():
 		self.iti = iti
 		self.tp = tp
 		self.rho = 0.
-		
-		if compute_value:
-			self.invert_belief()
-			if self.store_p:
-				self.p = self.belief_transition_p()
-			self.value_dp()
 	
 	def set_n(self,n):
 		self.n = n
@@ -144,8 +140,6 @@ class DecisionPolicy():
 				mu_n = self.post_mu_mean(t,invg[i,j])
 				p[:,i,j] = -0.5*(invg[i+1]-invg[i,j]-mu_n*self.dt)**2/((post_var[i]*self.dt+self._model_var)*self.dt)+\
 						   0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
-				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
-						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
 		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
 		p = np.exp(p-np.max(p,axis=0))/np.sum(np.exp(p-np.max(p,axis=0)),axis=0)#/(self.g[1]-self.g[0])
 		return np.transpose(p,(1,2,0))
@@ -166,11 +160,9 @@ class DecisionPolicy():
 				mu_n = self.post_mu_mean(t,invg[i,j])
 				p[counter*self.n+j] = -0.5*(invg[i+1]-invg[i,j]-mu_n*self.dt)**2/((post_var[i]*self.dt+self._model_var)*self.dt)+\
 						         0.5*(invg[i+1]/self._model_var+self.prior_mu_mean/self.prior_mu_var)**2*post_var[i+1]
-				#~ p[:,i,j] = 0.5*normcdfinv(self.g)**2*post_var_t[i+1]/post_var_t**2-\
-						   #~ 0.5*self._model_var/(self._model_var+post_var[i])*(normcdfinv(self.g)/post_var[i+1]-normcdfinv(g)/post_var[i]-mu_n)**2
 		# To avoid overflows, we substract the max value in the numerator and denominator's exponents
 		p = (np.exp(p.T-np.max(p,axis=1))/np.sum(np.exp(p.T-np.max(p,axis=1)),axis=0)).T#/(self.g[1]-self.g[0])
-		return p #np.transpose(p,(1,2,0))
+		return p
 	
 	def value_dp(self,lb=-10.,ub=10.):
 		"""
@@ -320,29 +312,6 @@ class DecisionPolicy():
 		self.bounds[:,-1] = np.array([0.5,0.5])
 		return self.bounds
 		
-	#~ def decision_bounds(self,value=None):
-		#~ """
-		#~ Compute the decision bounds from the value of the beliefs
-		#~ """
-		#~ if value is None:
-			#~ value = self.value
-		#~ self.bounds = np.zeros((2,self.nT))
-		#~ v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
-		#~ v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
-		#~ with np.errstate(invalid='ignore'):
-			#~ decide_1 = np.abs((v1-value)/v1)<1e-9
-			#~ decide_2 = np.abs((v2-value)/v2)<1e-9
-		#~ for i,t in enumerate(self.t):
-			#~ if any(decide_1[i]):
-				#~ bound1 = self.g[decide_1[i].nonzero()[0][0]]
-			#~ else:
-				#~ bound1 = 1.
-			#~ if any(decide_2[i]):
-				#~ bound2 = self.g[decide_2[i].nonzero()[0][-1]]
-			#~ else:
-				#~ bound2 = 0.
-			#~ self.bounds[:,i] = np.array([bound1,bound2])
-		#~ return self.bounds
 	
 	def belief_bound_to_x_bound(self,bounds=None):
 		"""
@@ -369,6 +338,69 @@ class DecisionPolicy():
 		if bounds is None:
 			bounds = self.bounds
 		return normcdfinv(bounds)*np.sqrt(self.post_mu_var(self.t))
+	
+	if use_cpp_extension:
+		def xbounds(self, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None):
+			return dp.xbounds(self,tolerance=tolerance, set_rho=set_rho, set_bounds=set_bounds, return_values=return_values, root_bounds=root_bounds)
+		xbounds.__doc__ = dp.xbounds.__doc__
+		
+		def values(self, rho=None):
+			return dp.values(self,rho=rho)
+		values.__doc__ = dp.values.__doc__
+	else:
+		def xbounds(self, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None):
+			"""
+			Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)
+			
+			(xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None)
+			
+			(xub, xlb, value, v_explore, v1, v2) = xbounds(dp, ..., return_values=True)
+			
+			Computes the decision bounds for the decisionPolicy instance.
+			'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.
+			'set_rho' is ignored in this implementation but necesary for the c++ extension.
+			'set_bounds' is ignored in this implementation but necesary for the c++ extension.
+			If 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.
+			'root_bounds' must be a tuple of two elements: (lower_bound, upper_bound). Both 'lower_bound' and 'upper_bound' must be floats that represent the lower and upper bounds in which to perform the root finding of rho.
+			"""
+			self.invert_belief()
+			if store_p:
+				self.belief_transition_p()
+			if root_bounds is None:
+				root_bounds=(-10.,10.)
+			lower_bound,upper_bound = root_bounds
+			self.value_dp(lb=lower_bound,ub=upper_bound)
+			xb = self.belief_bound_to_x_bound()
+			xub = xb[0]
+			xlb = xb[1]
+			output = (xub,xlb)
+			if return_value:
+				value = self.value
+				v_explore = self.v_explore()
+				v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+				v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
+				output+=(value,v_explore,v1,v2)
+			return output
+	
+		def values(self, rho=None):
+			"""
+			Computes the values for a given reward rate, rho, and decisionPolicy parameters.
+			(value, v_explore, v1, v2) = values(rho=None)
+			
+			Computes the value for a given belief g as a function of time for a supplied reward rate, rho. If rho is set to None, then the decisionPolicy instance's rho attribute will be used.
+			The function returns a tuple of four numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.
+			"""
+			self.invert_belief()
+			if store_p:
+				self.belief_transition_p()
+				self.backpropagate_value(rho=rho)
+			else:
+				self.memory_efficient_backpropagate_value(rho=rho)
+			value = self.value
+			v_explore = self.v_explore()
+			v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+			v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
+			return (value,v_explore,v1,v2)
 	
 	def refine_value(self,dt=None,n=None):
 		"""
