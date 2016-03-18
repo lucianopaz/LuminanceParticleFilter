@@ -37,6 +37,11 @@ def erfinv(y):
 _vectErf = np.vectorize(math.erf,otypes=[np.float])
 _vectErfinv = np.vectorize(erfinv,otypes=[np.float])
 _vectGamma = np.vectorize(math.gamma,otypes=[np.float])
+
+def normpdf(x, mu=0., sigma=1.):
+	u = (x-mu)/sigma
+	return 0.3989422804014327/abs(sigma)*exp(-0.5*u*u)
+
 def normcdf(x,mu=0.,sigma=1.):
 	"""
 	Compute normal cummulative distribution with mean mu and standard

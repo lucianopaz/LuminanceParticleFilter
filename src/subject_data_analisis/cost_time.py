@@ -65,11 +65,20 @@ class DecisionPolicy():
 		self.dg = 1./n;
 		self.g = np.linspace(self.dg/2.,1.-self.dg/2.,self.n)
 	def set_dt(self,dt):
+		oldt = self.t
 		self.dt = float(dt)
 		self.t = np.arange(0.,float(self.T+self.dt),float(self.dt),np.float)
+		self.nT = self.t.shape[0]
+		self.cost = np.interp(self.t, oldt, self.cost)
 	def set_T(self,T):
 		self.T = float(T)
-		self.t = np.arange(0.,float(self.T+self.dt),float(self.dt),np.float)
+		self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
+		old_nT = self.nT
+		self.nT = self.t.shape[0]
+		old_cost = self.cost
+		self.cost = np.zeros_like(self.t)
+		self.cost[:old_nT] = old_cost
+		self.cost[old_nT:] = old_cost[-1]
 	
 	def reset(self):
 		if self.store_p:
@@ -80,13 +89,28 @@ class DecisionPolicy():
 	
 	def copy(self):
 		out = DecisionPolicy(self.model_var,self.prior_mu_mean,self.prior_mu_var,self.n,self.dt,self.T,\
-				 self.reward,self.penalty,self.iti,self.tp,cost=0.05,store_p=self.store_p,compute_value=False)
-		out.invg = copy.deepcopy(self.invg)
+				 self.reward,self.penalty,self.iti,self.tp,cost=0.05,store_p=self.store_p)
+		try:
+			out.invg = copy.deepcopy(self.invg)
+		except:
+			pass
 		if self.store_p:
-			out.p = copy.deepcopy(self.p)
-		out.value = copy.deepcopy(self.value)
-		out.bounds = copy.deepcopy(self.bounds)
-		out.cost = copy.deepcoy(self.cost)
+			try:
+				out.p = copy.deepcopy(self.p)
+			except:
+				pass
+		try:
+			out.value = copy.deepcopy(self.value)
+		except:
+			pass
+		try:
+			out.bounds = copy.deepcopy(self.bounds)
+		except:
+			pass
+		try:
+			out.cost = copy.deepcoy(self.cost)
+		except:
+			pass
 		return out
 	
 	def set_constant_cost(self,cost):
@@ -344,6 +368,10 @@ class DecisionPolicy():
 			return dp.xbounds(self,tolerance=tolerance, set_rho=set_rho, set_bounds=set_bounds, return_values=return_values, root_bounds=root_bounds)
 		xbounds.__doc__ = dp.xbounds.__doc__
 		
+		def xbounds_fixed_rho(self, rho=None, set_bounds=False, return_values=False):
+			return dp.xbounds_fixed_rho(self,rho=rho, set_bounds=set_bounds, return_values=return_values)
+		xbounds_fixed_rho.__doc__ = dp.xbounds_fixed_rho.__doc__
+		
 		def values(self, rho=None):
 			return dp.values(self,rho=rho)
 		values.__doc__ = dp.values.__doc__
@@ -381,6 +409,38 @@ class DecisionPolicy():
 				v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
 				output+=(value,v_explore,v1,v2)
 			return output
+		
+		def xbounds_fixed_rho(self, rho=None, set_bounds=False, return_values=False):
+			"""
+			Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space) without iterating the value of rho
+			
+			(xub, xlb) = xbounds(dp, rho=None, set_bounds=False, return_values=False)
+			
+			(xub, xlb, value, v_explore, v1, v2) = xbounds(dp, ..., return_values=True)
+			
+			Computes the decision bounds for a decisionPolicy instance specified in 'dp' for a given rho value.
+			'rho' is the fixed reward rate value used to compute the decision bounds and values. If rho=None, then the DecisionPolicy instance's rho is used.
+			'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.
+			If 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.
+			"""
+			self.invert_belief()
+			if store_p:
+				self.belief_transition_p()
+				self.backpropagate_value(rho=rho)
+			else:
+				self.memory_efficient_backpropagate_value(rho=rho)
+			self.decision_bounds()
+			xb = self.belief_bound_to_x_bound()
+			xub = xb[0]
+			xlb = xb[1]
+			output = (xub,xlb)
+			if return_value:
+				value = self.value
+				v_explore = self.v_explore()
+				v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
+				v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
+				output+=(value,v_explore,v1,v2)
+			return output
 	
 		def values(self, rho=None):
 			"""
@@ -402,47 +462,114 @@ class DecisionPolicy():
 			v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
 			return (value,v_explore,v1,v2)
 	
-	def refine_value(self,dt=None,n=None):
-		"""
-		This method re-computes the value of the beliefs using the
-		average reward (rho) that was already computed.
-		"""
-		change = False
-		if dt is not None:
-			if dt<self.dt:
-				oldt = self.t.copy()
-				self.t = np.arange(0,self.T+dt,dt,np.float)
-				self.nT = self.t.shape[0]
-				self.cost = np.interp(self.t, oldt, self.cost)
-				change = True
-		if n is not None:
-			#~ print self.value[0,int(0.5*self.n)]
-			n = int(n)
-			if n%2==0:
-				n+=1
-			if n>self.n:
-				self.n = n
-				self.g = np.linspace(0.,1.,self.n)
-				change = True
-		if change:
-			self.invert_belief()
-			if self.store_p:
-				self.p = self.belief_transition_p()
-				self.backpropagate_value(rho=self.rho)
-			else:
-				self.memory_efficient_backpropagate_value(rho=self.rho)
-			val0 = self.value[0,int(0.5*self.n)]
-			#~ print val0
-			if abs(val0)>1e-12:
-				# Must refine the value of self.rho
-				if val0<0:
-					ub = self.rho
-					lb = self.rho-1e-2
+	if use_cpp_extension:
+		def refine_value(self,tolerance=1e-12,dt=None,n=None,T=None):
+			"""
+			This method re-computes the value of the beliefs using the
+			average reward (rho) that was already computed.
+			"""
+			change = False
+			if dt is not None:
+				if dt<self.dt:
+					change = True
+					oldt = self.t.copy()
+					self.dt = float(dt)
+					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
+					self.nT = self.t.shape[0]
+					self.cost = np.interp(self.t, oldt, self.cost)
+			if T is not None:
+				if T>self.T:
+					change = True
+					self.T = float(T)
+					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
+					old_nT = self.nT
+					self.nT = self.t.shape[0]
+					old_cost = self.cost
+					self.cost = np.zeros_like(self.t)
+					self.cost[:old_nT] = old_cost
+					self.cost[old_nT:] = old_cost[-1]
+			if n is not None:
+				#~ print self.value[0,int(0.5*self.n)]
+				n = int(n)
+				if n%2==0:
+					n+=1
+				if n>self.n:
+					change = True
+					self.n = n
+					self.g = np.linspace(0.,1.,self.n)
+			if change:
+				temp = self.xbounds_fixed_rho(set_bounds=True, return_values=True)
+				val0 = temp[2][0,int(0.5*self.n)]
+				if abs(val0)>tolerance:
+					if val0<0:
+						ub = self.rho
+						lb = self.rho-1e-2
+					else:
+						ub = self.rho+1e-2
+						lb = self.rho
+					xbs = self.xbounds(tolerance=tolerance, set_rho=True, set_bounds=True, root_bounds=(lb,ub))
 				else:
-					ub = self.rho+1e-2
-					lb = self.rho
-				self.value_dp(lb,ub)
-			self.decision_bounds()
+					self.value = temp[0]
+					xbs = (temp[0],temp[1])
+			else:
+				xbs = self.belief_bound_to_x_bound()
+				xbs = (xbs[0],xbs[1])
+			return xbs
+	else:
+		def refine_value(self,tolerance=1e-12,dt=None,n=None,T=None):
+			"""
+			This method re-computes the value of the beliefs using the
+			average reward (rho) that was already computed.
+			"""
+			change = False
+			if dt is not None:
+				if dt<self.dt:
+					change = True
+					oldt = self.t.copy()
+					self.t = np.arange(0,self.T+dt,dt,np.float)
+					self.nT = self.t.shape[0]
+					self.cost = np.interp(self.t, oldt, self.cost)
+			if T is not None:
+				if T>self.T:
+					change = True
+					self.T = float(T)
+					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
+					old_nT = self.nT
+					self.nT = self.t.shape[0]
+					old_cost = self.cost
+					self.cost = np.zeros_like(self.t)
+					self.cost[:old_nT] = old_cost
+					self.cost[old_nT:] = old_cost[-1]
+			if n is not None:
+				#~ print self.value[0,int(0.5*self.n)]
+				n = int(n)
+				if n%2==0:
+					n+=1
+				if n>self.n:
+					change = True
+					self.n = n
+					self.g = np.linspace(0.,1.,self.n)
+			if change:
+				self.invert_belief()
+				if self.store_p:
+					self.p = self.belief_transition_p()
+					self.backpropagate_value(rho=self.rho)
+				else:
+					self.memory_efficient_backpropagate_value(rho=self.rho)
+				val0 = self.value[0,int(0.5*self.n)]
+				#~ print val0
+				if abs(val0)>tolerance:
+					# Must refine the value of self.rho
+					if val0<0:
+						ub = self.rho
+						lb = self.rho-1e-2
+					else:
+						ub = self.rho+1e-2
+						lb = self.rho
+					self.value_dp(lb,ub)
+				self.decision_bounds()
+			xb = self.belief_bound_to_x_bound()
+			return (xb[0],xb[1])
 	
 	def compute_decision_bounds(self,cost=None,reward=None,n=51,N=501,type_of_bound='belief'):
 		if type_of_bound.lower() not in ['belief','norm_mu','mu']:
@@ -492,8 +619,10 @@ class DecisionPolicy():
 				g2[i] = 2*self.Psi(mu,bounds[1],i,t,self.prior_mu_mean,t0)-\
 					2*self.dt*np.sum(g1[:i]*self.Psi(mu,bounds[1],i,t,bounds[0][:i],self.t[:i]))-\
 					2*self.dt*np.sum(g2[:i]*self.Psi(mu,bounds[1],i,t,bounds[1][:i],self.t[:i]))
+		g1/=(np.sum(g1)*self.dt)
+		g2/=(np.sum(g2)*self.dt)
 		return g1,g2
-		
+	
 	def Psi(self,mu,bound,itp,tp,x0,t0):
 		normpdf = np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self._model_var/(tp-t0))/np.sqrt(2.*np.math.pi*self._model_var*(tp-t0))
 		bound_prime = (bound[itp+1]-bound[itp])/self.dt if itp<len(bound)-1 else 0.
