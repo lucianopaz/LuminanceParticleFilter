@@ -40,7 +40,7 @@ _vectGamma = np.vectorize(math.gamma,otypes=[np.float])
 
 def normpdf(x, mu=0., sigma=1.):
 	u = (x-mu)/sigma
-	return 0.3989422804014327/abs(sigma)*exp(-0.5*u*u)
+	return 0.3989422804014327/np.abs(sigma)*np.exp(-0.5*u*u)
 
 def normcdf(x,mu=0.,sigma=1.):
 	"""

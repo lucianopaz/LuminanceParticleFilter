@@ -62,6 +62,7 @@ public:
 	double prior_mu_var;
 	int n;
 	double dt;
+	int nT;
 	double dg;
 	double T;
 	double reward;

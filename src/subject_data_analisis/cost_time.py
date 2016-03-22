@@ -364,7 +364,7 @@ class DecisionPolicy():
 		return normcdfinv(bounds)*np.sqrt(self.post_mu_var(self.t))
 	
 	if use_cpp_extension:
-		def xbounds(self, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None):
+		def xbounds(self, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None):
 			return dp.xbounds(self,tolerance=tolerance, set_rho=set_rho, set_bounds=set_bounds, return_values=return_values, root_bounds=root_bounds)
 		xbounds.__doc__ = dp.xbounds.__doc__
 		
@@ -376,7 +376,7 @@ class DecisionPolicy():
 			return dp.values(self,rho=rho)
 		values.__doc__ = dp.values.__doc__
 	else:
-		def xbounds(self, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None):
+		def xbounds(self, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None):
 			"""
 			Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)
 			
@@ -599,43 +599,81 @@ class DecisionPolicy():
 			bounds = self.belief_bound_to_mu_bound(bounds)
 		return bounds
 	
-	def rt(self,mu,bounds=None):
-		if bounds is None:
-			bounds = self.belief_bound_to_x_bound(self.bounds)
-		g1 = np.zeros_like(self.t)
-		g2 = np.zeros_like(self.t)
-		
-		for i,t in enumerate(self.t):
-			if i==0:
-				t0 = t
-				continue
-			elif i==1:
-				g1[i] = -2*self.Psi(mu,bounds[0],i,t,self.prior_mu_mean,t0)
-				g2[i] = 2*self.Psi(mu,bounds[1],i,t,self.prior_mu_mean,t0)
+	if use_cpp_extension:
+		def rt(self,mu,bounds=None):
+			return dp.rt(self,mu,bounds=bounds)
+		rt.__doc__ = dp.rt.__doc__
+	else:
+		def rt(self,mu,bounds=None):
+			if bounds is None:
+				xub,xlb = self.xbounds(set_rho=True, set_bounds=True)
 			else:
-				g1[i] = -2*self.Psi(mu,bounds[0],i,t,self.prior_mu_mean,t0)+\
-					2*self.dt*np.sum(g1[:i]*self.Psi(mu,bounds[0],i,t,bounds[0][:i],self.t[:i]))+\
-					2*self.dt*np.sum(g2[:i]*self.Psi(mu,bounds[0],i,t,bounds[1][:i],self.t[:i]))
-				g2[i] = 2*self.Psi(mu,bounds[1],i,t,self.prior_mu_mean,t0)-\
-					2*self.dt*np.sum(g1[:i]*self.Psi(mu,bounds[1],i,t,bounds[0][:i],self.t[:i]))-\
-					2*self.dt*np.sum(g2[:i]*self.Psi(mu,bounds[1],i,t,bounds[1][:i],self.t[:i]))
-		g1/=(np.sum(g1)*self.dt)
-		g2/=(np.sum(g2)*self.dt)
-		return g1,g2
+				xub,xlb = bounds
+			g1 = np.zeros_like(self.t)
+			g2 = np.zeros_like(self.t)
+			
+			for i,t in enumerate(self.t):
+				if i==0:
+					t0 = t
+					continue
+				elif i==1:
+					g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)
+					g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)
+				else:
+					g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)+\
+						2*self.dt*np.sum(g1[:i]*self.Psi(mu,xub,i,t,xub[:i],self.t[:i]))+\
+						2*self.dt*np.sum(g2[:i]*self.Psi(mu,xub,i,t,xlb[:i],self.t[:i]))
+					g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)-\
+						2*self.dt*np.sum(g1[:i]*self.Psi(mu,xlb,i,t,xub[:i],self.t[:i]))-\
+						2*self.dt*np.sum(g2[:i]*self.Psi(mu,xlb,i,t,xlb[:i],self.t[:i]))
+				if g1[i]<0:
+					g1[i] = 0.
+				if g2[i]<0:
+					g2[i] = 0.
+			# Normalize probability density
+			normalization = np.sum(g1+g2)*self.dt
+			g1/=normalization
+			g2/=normalization
+			return g1,g2
 	
 	def Psi(self,mu,bound,itp,tp,x0,t0):
-		normpdf = np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self._model_var/(tp-t0))/np.sqrt(2.*np.math.pi*self._model_var*(tp-t0))
-		bound_prime = (bound[itp+1]-bound[itp])/self.dt if itp<len(bound)-1 else 0.
-		return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0))
+		normpdf = 0.3989422804014327**np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self._model_var/(tp-t0))/(self._model_var*(tp-t0))
+		#~ bound_prime = (bound[itp+1]-bound[itp])/self.dt if itp<len(bound)-1 else 0.
+		bound_prime = 0.5*(bound[itp+1]-bound[itp-1])/self.dt if itp<len(bound)-1 else 0.
+		return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0)-mu)
+	
+	def rt_nlog_like(self,g,rt):
+		"""
+		Syntax
+		nLL = self.rt_nlog_like(g,rt)
+		
+		Computes the negative log likelihood (nLL) of response time rt given
+		an array of the response time density (g) such as the array
+		returned by the method rt. g must be an array with nT elements.
+		This function does a linear interpolation of the g array values
+		to approximate the nLL for rt's that are not equal to any members
+		of array self.t
+		"""
+		if rt>self.T:
+			raise ValueError("Response time: %f is beyond max time T=%f"%(rt,self.T))
+		elif rt<0:
+			raise ValueError("Response time: %f cannot be below 0"%(rt))
+		if rt==self.T:
+			return -np.log(g[self.nT-1])
+		t_i = int(rt/self.dt)
+		return -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
 
-def sim_rt(mu,sigma,dt,T,xb,reps=10000):
+def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
 	sim = np.zeros(reps)
 	rt = np.zeros(reps)
 	decision = np.zeros(reps)
 	not_decided = np.ones(reps)
+	sigma = np.sqrt(dt*var_rate)
+	if checks:
+		variance = np.zeros(int(T/dt)+1)
 	for i,t in enumerate(np.arange(float(dt),float(T+dt),float(dt),np.float)):
-		sim+= dt*sigma*np.random.randn(reps)
-		print np.min(sim),np.max(sim)
+		sim+= sigma*np.random.randn(reps)
+		variance[i] = np.var(sim)
 		stim = sim+t*mu
 		dec1 = np.logical_and(stim>=xb[0][i+1],not_decided)
 		dec2 = np.logical_and(stim<=xb[1][i+1],not_decided)
@@ -649,7 +687,25 @@ def sim_rt(mu,sigma,dt,T,xb,reps=10000):
 			not_decided[dec2] = 0
 		if not any(not_decided):
 			break
+	out = (rt,decision)
+	if checks:
+		out+=(variance,)
+	return out
+		
 	return rt,decision
+
+def bounds_for_costs(n=20,maxcost=1.):
+	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=10,dt=0.04,reward=1,cost=1./5.,penalty=0,iti=10.,tp=5.,store_p=False)
+	costs = np.linspace(0,maxcost,n)
+	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
+	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
+	
+	for cost,c1,c2 in zip(costs,s1_colors,s2_colors):
+		m.cost = cost
+		xub,xlb = m.xbounds()
+		plt.plot(m.t,xub,color=c1)
+		plt.plot(m.t,xlb,color=c2)
+	plt.show()
 
 
 def tesis_figure():
@@ -719,4 +775,5 @@ def test():
 
 if __name__=="__main__":
 	#~ test()
-	tesis_figure()
+	#~ tesis_figure()
+	bounds_for_costs()

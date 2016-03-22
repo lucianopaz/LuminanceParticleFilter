@@ -92,12 +92,12 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 				   n, dt, T, reward, penalty, iti, tp, cost);
 }
 
-/* method xbounds(decisionPolicy, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False) */
+/* method xbounds(decisionPolicy, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None) */
 static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds){
 	double tolerance = 1e-12;
 	PyObject* py_dp;
-	PyObject* py_set_rho_in_py_dp = Py_False;
-	PyObject* py_touch_py_bounds = Py_False;
+	PyObject* py_set_rho_in_py_dp = Py_True;
+	PyObject* py_touch_py_bounds = Py_True;
 	PyObject* py_ret_values = Py_False;
 	PyObject* py_root_bounds = Py_None;
 	int set_rho_in_py_dp = 0;
@@ -541,13 +541,112 @@ error_cleanup:
 	return NULL;
 }
 
+/* method rt(decisionPolicy, mu, bounds=None) */
+static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
+	PyObject* py_dp;
+	PyObject* py_bounds = Py_None;
+	double mu, rho;
+	bool must_decref_py_bounds = false;
+	PyArrayObject* py_xub, *py_xlb;
+	
+	PyObject* py_out = NULL;
+	PyObject* py_g1 = NULL;
+	PyObject* py_g2 = NULL;
+	DecisionPolicyDescriptor* dpd;
+	
+	static char* kwlist[] = {"decPol", "mu", "bounds", NULL};
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "Od|O", kwlist, &py_dp, &mu, &py_bounds))
+		return NULL;
+	
+	dpd = get_descriptor(py_dp);
+	if (dpd==NULL){
+		// An error occurred while getting the descriptor and the error message was set within get_descriptor
+		return NULL;
+	}
+	npy_intp py_nT[1] = {dpd->nT};
+	
+	PyObject* py_rho = PyObject_GetAttrString(py_dp,"rho");
+	if (py_rho==NULL){
+		PyErr_SetString(PyExc_ValueError, "decisionPolicy instance has no rho value set");
+		return NULL;
+	}
+	rho = PyFloat_AsDouble(py_rho);
+	if (PyErr_Occurred()!=NULL){
+		Py_XDECREF(py_rho);
+		return NULL;
+	}
+	Py_DECREF(py_rho);
+	
+	DecisionPolicy dp = DecisionPolicy(*dpd);
+	dp.rho = rho;
+	
+	if (py_bounds==Py_None) { // Compute xbounds if they are not provided
+		PyObject* args2 = PyTuple_Pack(1,py_dp);
+		py_bounds = dpmod_xbounds(self,args2,NULL);
+		Py_DECREF(args2);
+		if (py_bounds==NULL){
+			return NULL;
+		}
+		must_decref_py_bounds = true;
+	}
+	
+	if (!PyArg_ParseTuple(py_bounds,"O!O!", &PyArray_Type, &py_xub, &PyArray_Type, &py_xlb))
+		goto error_cleanup;
+	if (PyArray_NDIM(py_xub)!=1 || PyArray_NDIM(py_xlb)!=1){
+		// Attribute 'bounds' in DecisionPolicy instance does not have the correct shape. We must re create py_bounds
+		PyErr_SetString(PyExc_ValueError,"Supplied bounds must be numpy arrays with one dimension");
+		goto error_cleanup;
+	} else if (PyArray_SHAPE(py_xub)[0]!=py_nT[0] || PyArray_SHAPE(py_xlb)[0]!=py_nT[0]) {
+		PyErr_Format(PyExc_ValueError,"Supplied bounds must be numpy arrays of shape (%d)",dpd->nT);
+		goto error_cleanup;
+	}
+	
+	py_out = PyTuple_New(2);
+	py_g1 = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
+	py_g2 = PyArray_SimpleNew(1, py_nT, NPY_DOUBLE);
+	
+	if (py_out==NULL || py_g1==NULL || py_g2==NULL){
+		PyErr_SetString(PyExc_MemoryError, "Out of memory");
+		goto error_cleanup;
+	}
+	PyTuple_SET_ITEM(py_out, 0, py_g1); // Steals a reference
+	PyTuple_SET_ITEM(py_out, 1, py_g2); // Steals a reference
+		
+	dp.rt(mu,(double*) PyArray_DATA((PyArrayObject*) py_g1),
+			 (double*) PyArray_DATA((PyArrayObject*) py_g2),
+			 (double*) PyArray_DATA((PyArrayObject*) py_xub),
+			 (double*) PyArray_DATA((PyArrayObject*) py_xlb));
+	
+	delete(dpd);
+	if (must_decref_py_bounds){
+		Py_XDECREF(py_bounds);
+		// The elements in py_bounds are also decref'ed so only calling
+		// decref on the py_bounds instance is sufficient
+	}
+	return py_out;
+
+error_cleanup:
+	delete(dpd);
+	if (must_decref_py_bounds){
+		Py_XDECREF(py_bounds);
+		// The elements in py_bounds are also decref'ed so only calling
+		// decref on the py_bounds instance is sufficient
+	}
+	Py_XDECREF(py_g1);
+	Py_XDECREF(py_g2);
+	Py_XDECREF(py_out);
+	return NULL;
+}
+
 static PyMethodDef DPMethods[] = {
     {"xbounds", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
      "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n'root_bounds' must be a tuple of two elements: (lower_bound, upper_bound). Both 'lower_bound' and 'upper_bound' must be floats that represent the lower and upper bounds in which to perform the root finding of rho."},
     {"xbounds_fixed_rho", (PyCFunction) dpmod_xbounds_fixed_rho, METH_VARARGS | METH_KEYWORDS,
      "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space) without iterating the value of rho\n\n  (xub, xlb) = xbounds_fixed_rho(dp, rho=None, set_bounds=False, return_values=False)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds_fixed_rho(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp' for a given rho value.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'rho' is the fixed reward rate value used to compute the decision bounds and values. If rho=None, then the DecisionPolicy instance's rho is used.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements."},
     {"values", (PyCFunction) dpmod_values, METH_VARARGS | METH_KEYWORDS,
-     "Computes the values for a given reward rate, rho, and decisionPolicy parameters.\n\n(value, v_explore, v1, v2) = values(dp,rho=None)\n\nComputes the value for a given belief g as a function of time for a supplied reward rate, rho. If rho is set to None, then the decisionPolicy instance's rho attribute will be used.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); from python. The function returns a tuple of four numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n"},
+     "Computes the values for a given reward rate, rho, and decisionPolicy parameters.\n\n(value, v_explore, v1, v2) = values(dp,rho=None)\n\nComputes the value for a given belief g as a function of time for a supplied reward rate, rho. If rho is set to None, then the decisionPolicy instance's rho attribute will be used.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); from python. The function returns a tuple of four numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements."},
+    {"rt", (PyCFunction) dpmod_rt, METH_VARARGS | METH_KEYWORDS,
+     "Computes the rt distribution for a given drift rate, mu, decisionPolicy parameters and decision bounds in x space, bounds.\n\n(g1, g2) = values(dp,mu,bounds=None)\n\nComputes the rt distribution for selecting options 1 or 2 for a given drift rate mu and the parameters in the decisionPolicy instance dp. If bounds is None, then xbounds is called with default parameters to compute the decision bounds in x space. To avoid this, supply a tuple (xub,xlb) as the one that is returned by the function xbounds. xub and xlb must be one dimensional numpy arrays with the same elements as dp.t."},
     {NULL, NULL, 0, NULL}
 };
 
