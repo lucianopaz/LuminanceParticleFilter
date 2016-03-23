@@ -1,6 +1,6 @@
 from __future__ import division
 
-import enum, os, sys, math, scipy, pickle
+import enum, os, sys, math, scipy, pickle, cma
 import data_io as io
 import cost_time as ct
 import numpy as np
@@ -37,6 +37,9 @@ patch_sigma = 5.
 model_var = (patch_sigma**2)*2/ISI
 
 def add_dead_time(gs,dt,dead_time_sigma,mode='full'):
+	"""
+	new_gs = add_dead_time(gs,dt,dead_time_sigma,mode='full')
+	"""
 	if dead_time_sigma==0.:
 		return gs
 	g1,g2 = gs
@@ -45,6 +48,8 @@ def add_dead_time(gs,dt,dead_time_sigma,mode='full'):
 	conv_val = np.zeros_like(conv_window)
 	conv_val[conv_window_size//2:] = normpdf(conv_window[conv_window_size//2:],0,dead_time_sigma)
 	conv_val/=(np.sum(conv_val)*dt)
+	#~ print "g1 = ",g1
+	#~ print "conv_val = ", conv_val
 	cg1 = np.convolve(g1,conv_val,mode=mode)
 	cg2 = np.convolve(g2,conv_val,mode=mode)
 	a = int(0.5*(cg1.shape[0]-g1.shape[0]))
@@ -57,7 +62,8 @@ def add_dead_time(gs,dt,dead_time_sigma,mode='full'):
 		ret = (cg1[a:-a],cg2[a:-a])
 	else:
 		ret = (cg1[a:-a-1],cg2[a:-a-1])
-	return ret
+	normalization = np.sum(ret[0]+ret[1])*dt
+	return (ret[0]/normalization,ret[1]/normalization)
 
 def fit(subject,method="two_step"):
 	dat,t,d = subject.load_data()
@@ -68,40 +74,65 @@ def fit(subject,method="two_step"):
 	
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
 	if method=="two_step":
-		m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=100,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
-		return scipy.optimize.fmin(two_step_merit,[0.],args=(m,dat,mu,mu_indeces),full_output=True)
+		options = cma.CMAOptions({'bounds':[0.,10.]})
+		res = cma.fmin(two_step_merit, [0.2], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		return res[:7]
+		#~ return scipy.optimize.fmin(two_step_merit,[1.],args=(m,dat,mu,mu_indeces),full_output=True)
 	else:
-		m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=100,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
-		return scipy.optimize.fmin(full_merit,[0.,0.],args=(m,dat,mu,mu_indeces),full_output=True)
+		options = cma.CMAOptions({'bounds':[np.array([0.,0.,0.]),np.array([10.,3.,1.])]})
+		res = cma.fmin(full_merit, [0.2,0.5,0.1], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		return res[:7]
+		#~ return scipy.optimize.fmin(full_merit,[0.,1.,0.1],args=(m,dat,mu,mu_indeces),full_output=True)
 
-def dead_time_merit(dead_time_sigma,xub,xlb,m,dat,mu,mu_indeces):
+def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
+	dead_time_sigma = params[0]
+	phase_out_prob = params[1]
+	max_RT = np.max(dat[:,1])
+	phase_out_likelihood = phase_out_prob/max_RT*1e3
+	
 	nlog_likelihood = 0.
-	for index,drift in enumerate(mu):
-		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time_sigma[0])
+	for index,(drift,g1,g2) in enumerate(zip(mu,g1s,g2s)):
+		rt1_likelihood,rt2_likelihood = add_dead_time((g1,g2),m.dt,dead_time_sigma)
 		for drift_trial in dat[mu_indeces==index]:
 			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
 			perf = drift_trial[2]
 			if perf==1:
-				nlog_likelihood+=m.rt_nlog_like(g1,rt)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt1_likelihood,rt))*(1-phase_out_prob)+phase_out_likelihood)
 			else:
-				nlog_likelihood+=m.rt_nlog_like(g2,rt)
-	print nlog_likelihood
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt2_likelihood,rt))*(1-phase_out_prob)+phase_out_likelihood)
 	return nlog_likelihood
 
 def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
 	m.cost = cost[0]
 	xub,xlb = m.xbounds()
-	dead_time_sigma,nlog_likelihood,niter,funcalls,warnflag = scipy.optimize.fmin(dead_time_merit,[0.],args=(xub,xlb,m,dat,mu,mu_indeces),full_output=True)
+	g1s = []
+	g2s = []
+	for drift in mu:
+		g1,g2 = m.rt(drift,bounds=(xub,xlb))
+		g1s.append(g1)
+		g2s.append(g2)
+	options = cma.CMAOptions({'bounds':[np.array([0.,0.]),np.array([3.,1.])]})
+	res = cma.fmin(dead_time_merit, [0.5,0.1], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
+	params = res[0]
+	nlog_likelihood = res[1]
+	#~ params,nlog_likelihood,niter,nfuncalls,warnflag =\
+		#~ scipy.optimize.fmin(dead_time_merit,[1.,0.1],args=(g1s,g2s,m,dat,mu,mu_indeces),\
+							#~ full_output=True,disp=False)
 	if output_list is not None:
 		del output_list[:]
 		output_list.append(cost)
-		output_list.append(dead_time_sigma)
+		output_list.append(params[0])
+		output_list.append(params[1])
+	print cost[0],params[0],params[1],nlog_likelihood
 	return nlog_likelihood
 
 def full_merit(params,m,dat,mu,mu_indeces):
 	cost = params[0]
 	dead_time_sigma = params[1]
+	phase_out_prob = params[2]
+	max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
 	m.cost = cost
@@ -112,18 +143,21 @@ def full_merit(params,m,dat,mu,mu_indeces):
 			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
 			perf = drift_trial[2]
 			if perf==1:
-				nlog_likelihood+=m.rt_nlog_like(g1,rt)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+phase_out_prob/max_RT*1e3)
 			else:
-				nlog_likelihood+=m.rt_nlog_like(g2,rt)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+phase_out_prob/max_RT*1e3)
+	print nlog_likelihood
 	return nlog_likelihood
 
 if __name__=="__main__":
 	if len(sys.argv)>1:
-		task = int(sys.argv[1])-1
+		task = int(sys.argv[1])
 		ntasks = int(sys.argv[2])
+		if loc==Location.cluster:
+			task-=1
 	else:
 		task = 0
 		ntasks = 1
 	for i,s in enumerate(io.unique_subjects(data_dir)):
 		if (i-task)%ntasks==0:
-			pickle.dump(fit(s),"fit_subject_"+s.id,pickle.HIGHEST_PROTOCOL)
+			pickle.dump(fit(s),"fit_subject_"+str(s.id),pickle.HIGHEST_PROTOCOL)

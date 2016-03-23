@@ -862,6 +862,7 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	double t0,tj,ti,normalization;
 	bool delete_xub = false;
 	bool delete_xlb = false;
+	bool bounds_touched = false;
 	if (xub==NULL){
 		xub = this->x_ubound();
 		delete_xub = true;
@@ -882,22 +883,30 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	if (g2[1]<0.) g2[1] = 0.;
 	normalization = g1[1]+g2[1];
 	for (i=2;i<tnT;++i){
-		ti = this->t[i];
-		g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
-		g2[i] = this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
-		for (j=1;j<i;++j){
-			tj = this->t[j];
-			g1[i]+=this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
-							 g2[j]*this->Psi(mu,xub,i,ti,xlb[j],tj));
-			g2[i]-=this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
-							 g2[j]*this->Psi(mu,xlb,i,ti,xlb[j],tj));
+		if (bounds_touched){
+			g1[i] = 0.;
+			g2[i] = 0.;
+		} else {
+			ti = this->t[i];
+			g1[i] = -this->Psi(mu,xub,i,ti,this->prior_mu_mean,t0);
+			g2[i] = this->Psi(mu,xlb,i,ti,this->prior_mu_mean,t0);
+			for (j=1;j<i;++j){
+				tj = this->t[j];
+				g1[i]+=this->dt*(g1[j]*this->Psi(mu,xub,i,ti,xub[j],tj)+
+								 g2[j]*this->Psi(mu,xub,i,ti,xlb[j],tj));
+				g2[i]-=this->dt*(g1[j]*this->Psi(mu,xlb,i,ti,xub[j],tj)+
+								 g2[j]*this->Psi(mu,xlb,i,ti,xlb[j],tj));
+			}
+			g1[i]*=2.;
+			g2[i]*=2.;
+			// Because of numerical instabilities, we must take care that g1 and g2 are always positive
+			if (g1[i]<0.) g1[i] = 0.;
+			if (g2[i]<0.) g2[i] = 0.;
+			normalization+= g1[i]+g2[i];
 		}
-		g1[i]*=2.;
-		g2[i]*=2.;
-		// Because of numerical instabilities, we must take care that g1 and g2 are always positive
-		if (g1[i]<0.) g1[i] = 0.;
-		if (g2[i]<0.) g2[i] = 0.;
-		normalization+= g1[i]+g2[i];
+		if (xub[i]<=xlb[i]){
+			bounds_touched = true;
+		}
 	}
 	normalization*=this->dt;
 	for (i=0;i<tnT;++i){

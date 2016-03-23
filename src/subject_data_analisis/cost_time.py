@@ -611,25 +611,32 @@ class DecisionPolicy():
 				xub,xlb = bounds
 			g1 = np.zeros_like(self.t)
 			g2 = np.zeros_like(self.t)
+			bounds_touched = False
 			
 			for i,t in enumerate(self.t):
-				if i==0:
-					t0 = t
-					continue
-				elif i==1:
-					g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)
-					g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)
-				else:
-					g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)+\
-						2*self.dt*np.sum(g1[:i]*self.Psi(mu,xub,i,t,xub[:i],self.t[:i]))+\
-						2*self.dt*np.sum(g2[:i]*self.Psi(mu,xub,i,t,xlb[:i],self.t[:i]))
-					g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)-\
-						2*self.dt*np.sum(g1[:i]*self.Psi(mu,xlb,i,t,xub[:i],self.t[:i]))-\
-						2*self.dt*np.sum(g2[:i]*self.Psi(mu,xlb,i,t,xlb[:i],self.t[:i]))
-				if g1[i]<0:
+				if bounds_touched:
 					g1[i] = 0.
-				if g2[i]<0:
 					g2[i] = 0.
+				else:
+					if i==0:
+						t0 = t
+						continue
+					elif i==1:
+						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)
+						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)
+					else:
+						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)+\
+							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xub,i,t,xub[:i],self.t[:i]))+\
+							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xub,i,t,xlb[:i],self.t[:i]))
+						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)-\
+							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xlb,i,t,xub[:i],self.t[:i]))-\
+							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xlb,i,t,xlb[:i],self.t[:i]))
+					if g1[i]<0:
+						g1[i] = 0.
+					if g2[i]<0:
+						g2[i] = 0.
+				if xub[i]<=xlb:
+					bounds_touched = True
 			# Normalize probability density
 			normalization = np.sum(g1+g2)*self.dt
 			g1/=normalization
@@ -661,7 +668,17 @@ class DecisionPolicy():
 		if rt==self.T:
 			return -np.log(g[self.nT-1])
 		t_i = int(rt/self.dt)
-		return -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
+		if self.dt*(rt-self.t[t_i])==0:
+			return -np.log(g[t_i])
+		ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
+		#~ oldstate = np.seterr(divide='raise')
+		#~ try:
+			#~ ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
+		#~ except:
+			#~ print t_i,g[t_i],g[t_i+1],rt,self.t[t_i],g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i])
+			#~ ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
+		#~ np.seterr(**oldstate)
+		return ret
 
 def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
 	sim = np.zeros(reps)
