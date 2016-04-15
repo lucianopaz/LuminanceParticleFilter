@@ -23,3 +23,6 @@ lib/*
 
 # Fits directory
 fits/*
+
+# Cluster job files
+*.qsub

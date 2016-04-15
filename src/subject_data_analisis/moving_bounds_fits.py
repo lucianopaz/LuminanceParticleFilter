@@ -5,6 +5,7 @@ import data_io as io
 import cost_time as ct
 import numpy as np
 from utils import normpdf
+from matplotlib import pyplot
 
 if np.__version__<'1.9':
 	orig_unique = np.unique
@@ -180,6 +181,67 @@ def full_merit(params,m,dat,mu,mu_indeces):
 	print nlog_likelihood
 	return nlog_likelihood
 
+def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT):
+	rt = {'full':None}
+	m.cost = cost
+	phased_out_rt = zeros_like(m.t)
+	max_RT = m.t[np.ceil(max_RT/m.dt)]
+	phased_out_rt[m.t<max_RT] = 1./max_RT
+	for index,drift in enumerate(mu):
+		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time,dead_time_sigma)
+		g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
+		g2 = g2*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
+		rt[drift] = np.array([g1,g2])
+		if rt['full']:
+			rt['full']+=rt[drift]*mu_prob[index]
+		else:
+			rt['full']=copy(rt[drift]*mu_prob[index])
+	return rt
+
+def plot_fit(subject,method='full'):
+	f = open('fits/inference'+method+'_fit_subject_'+str(subject.id),'r')
+	out = pickle.load(f)
+	try:
+		cost = out[0]['cost']
+		dead_time = out[0]['dead_time']
+		dead_time_sigma = out[0]['dead_time_sigma']
+		phase_out_prob = out[0]['phase_out_prob']
+	except TypeError:
+		cost = out[0][0]
+		dead_time = 0.
+		dead_time_sigma = out[0][1]
+		phase_out_prob = out[0][2]
+	
+	dat,t,d = subject.load_data()
+	rt = dat[:,1]
+	max_RT = np.max(rt)
+	perf = dat[:,2]
+	temp,edges = np.histogram(rt,100)
+	hit_rt,temp = np.histogram(rt[perf==1],edges)
+	miss_rt,temp = np.histogram(rt[perf==0],edges)
+	xh = [0.5*(x+y) for x,y in zip(edges[1:],edges[-1:])]
+	
+	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
+	mu_prob = count.astype(np.float64)
+	mu_prob/=np.sum(mu_prob)
+	mus = np.concatenate((-mu[::-1],mu))
+	counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
+	p = counts/np.sum(counts)
+	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
+	
+	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT)
+	
+	plt.plot(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt')
+	plt.plot(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt')
+	plt.plot(m.t,rt['full_rt'][0],label='Theorical hit rt')
+	plt.plot(m.t,-rt['full_rt'][1],label='Theorical miss rt')
+	plt.xlabel('T [s]')
+	plt.ylabel('Prob density')
+	plt.legend()
+	plt.show(True)
+
+
 if __name__=="__main__":
 	if len(sys.argv)>1:
 		task = int(sys.argv[1])
@@ -199,4 +261,5 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			pickle.dump(fit(s,method=method),"inference_"+method+"_fit_subject_"+str(s.id),pickle.HIGHEST_PROTOCOL)
+			#~ pickle.dump(fit(s,method=method),"inference_"+method+"_fit_subject_"+str(s.id),pickle.HIGHEST_PROTOCOL)
+			plot_fit(s,method=method)
