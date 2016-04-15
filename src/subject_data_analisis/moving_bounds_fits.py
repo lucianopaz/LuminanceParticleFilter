@@ -261,5 +261,7 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			#~ pickle.dump(fit(s,method=method),"inference_"+method+"_fit_subject_"+str(s.id),pickle.HIGHEST_PROTOCOL)
+			f = open("inference_"+method+"_fit_subject_"+str(s.id),'w')
+			pickle.dump(fit(s,method=method),f,pickle.HIGHEST_PROTOCOL)
+			f.close()
 			plot_fit(s,method=method)
