@@ -20,3 +20,6 @@
 # Build and lib directories
 build/*
 lib/*
+
+# Fits directory
+fits/*
