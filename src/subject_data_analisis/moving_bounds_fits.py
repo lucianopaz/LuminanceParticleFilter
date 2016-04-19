@@ -5,7 +5,8 @@ import data_io as io
 import cost_time as ct
 import numpy as np
 from utils import normpdf
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 if np.__version__<'1.9':
 	orig_unique = np.unique
@@ -121,8 +122,8 @@ def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 	dead_time = params[0]
 	dead_time_sigma = params[1]
 	phase_out_prob = params[2]
-	max_RT = np.max(dat[:,1])
-	phase_out_likelihood = phase_out_prob/max_RT*1e3
+	max_RT = np.max(dat[:,1])*1e-3
+	phase_out_likelihood = phase_out_prob/max_RT
 	
 	nlog_likelihood = 0.
 	for index,(drift,g1,g2) in enumerate(zip(mu,g1s,g2s)):
@@ -164,7 +165,7 @@ def full_merit(params,m,dat,mu,mu_indeces):
 	dead_time = params[1]
 	dead_time_sigma = params[2]
 	phase_out_prob = params[3]
-	max_RT = np.max(dat[:,1])
+	max_RT = np.max(dat[:,1])*1e-3
 	
 	nlog_likelihood = 0.
 	m.cost = cost
@@ -175,31 +176,31 @@ def full_merit(params,m,dat,mu,mu_indeces):
 			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
 			perf = drift_trial[2]
 			if perf==1:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+phase_out_prob/max_RT*1e3)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+phase_out_prob/max_RT)
 			else:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+phase_out_prob/max_RT*1e3)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+phase_out_prob/max_RT)
 	print nlog_likelihood
 	return nlog_likelihood
 
 def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT):
-	rt = {'full':None}
+	rt = {'full':np.zeros((2,m.t.shape[0]))}
 	m.cost = cost
-	phased_out_rt = zeros_like(m.t)
-	max_RT = m.t[np.ceil(max_RT/m.dt)]
-	phased_out_rt[m.t<max_RT] = 1./max_RT
+	phased_out_rt = np.zeros_like(m.t)
+	_max_RT = m.t[np.ceil(max_RT/m.dt)]
+	_dead_time = m.t[np.floor(dead_time/m.dt)]
+	phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
+	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
+	xub,xlb = m.xbounds()
 	for index,drift in enumerate(mu):
 		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time,dead_time_sigma)
 		g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
 		g2 = g2*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
 		rt[drift] = np.array([g1,g2])
-		if rt['full']:
-			rt['full']+=rt[drift]*mu_prob[index]
-		else:
-			rt['full']=copy(rt[drift]*mu_prob[index])
+		rt['full']+=rt[drift]*mu_prob[index]
 	return rt
 
-def plot_fit(subject,method='full'):
-	f = open('fits/inference'+method+'_fit_subject_'+str(subject.id),'r')
+def plot_fit(subject,method='full',save=None):
+	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id),'r')
 	out = pickle.load(f)
 	try:
 		cost = out[0]['cost']
@@ -213,13 +214,19 @@ def plot_fit(subject,method='full'):
 		phase_out_prob = out[0][2]
 	
 	dat,t,d = subject.load_data()
-	rt = dat[:,1]
+	rt = dat[:,1]*1e-3
 	max_RT = np.max(rt)
 	perf = dat[:,2]
 	temp,edges = np.histogram(rt,100)
 	hit_rt,temp = np.histogram(rt[perf==1],edges)
 	miss_rt,temp = np.histogram(rt[perf==0],edges)
-	xh = [0.5*(x+y) for x,y in zip(edges[1:],edges[-1:])]
+	xh = np.array([0.5*(x+y) for x,y in zip(edges[1:],edges[:-1])])
+	hit_rt = hit_rt.astype(np.float64)
+	miss_rt = miss_rt.astype(np.float64)
+	normalization = np.sum(hit_rt+miss_rt)*(xh[1]-xh[0])
+	hit_rt/=normalization
+	miss_rt/=normalization
+	
 	
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mu_prob = count.astype(np.float64)
@@ -232,17 +239,25 @@ def plot_fit(subject,method='full'):
 	
 	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT)
 	
+	plt.figure()
 	plt.plot(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt')
 	plt.plot(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt')
-	plt.plot(m.t,rt['full_rt'][0],label='Theorical hit rt')
-	plt.plot(m.t,-rt['full_rt'][1],label='Theorical miss rt')
+	plt.plot(m.t,sim_rt['full'][0],label='Theorical hit rt')
+	plt.plot(m.t,-sim_rt['full'][1],label='Theorical miss rt')
+	plt.xlim([0,5])
 	plt.xlabel('T [s]')
 	plt.ylabel('Prob density')
 	plt.legend()
-	plt.show(True)
-
+	if save:
+		save.savefig()
+	else:
+		plt.show(True)
 
 if __name__=="__main__":
+	task = 0
+	ntasks = 1
+	method = 'two_step'
+	save = None
 	if len(sys.argv)>1:
 		task = int(sys.argv[1])
 		ntasks = int(sys.argv[2])
@@ -250,18 +265,15 @@ if __name__=="__main__":
 			task-=1
 		if len(sys.argv)>3:
 			method = sys.argv[3]
-		else:
-			method = 'two_step'
-	else:
-		task = 0
-		ntasks = 1
-		method = 'two_step'
+			if len(sys.argv)>4:
+				save = PdfPages('../../figs/inference_fits_'+method+'.pdf')
 	
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			f = open("inference_"+method+"_fit_subject_"+str(s.id),'w')
-			pickle.dump(fit(s,method=method),f,pickle.HIGHEST_PROTOCOL)
-			f.close()
-			plot_fit(s,method=method)
+			#~ f = open("inference_fit_"+method+"_subject_"+str(s.id),'w')
+			#~ pickle.dump(fit(s,method=method),f,pickle.HIGHEST_PROTOCOL)
+			#~ f.close()
+			plot_fit(s,method=method,save=save)
+	save.close()

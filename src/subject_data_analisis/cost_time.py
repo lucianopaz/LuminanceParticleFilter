@@ -7,6 +7,7 @@ from scipy import io
 from scipy import optimize
 import math, copy
 from matplotlib import pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from utils import normcdf,normcdfinv
 try:
 	import dp
@@ -722,25 +723,43 @@ def bounds_for_costs(n=20,maxcost=1.):
 		xub,xlb = m.xbounds()
 		plt.plot(m.t,xub,color=c1)
 		plt.plot(m.t,xlb,color=c2)
+	
+	pp = PdfPages('../../figs/bounds_cost.pdf')
+	pp.savefig()
+	pp.close()
+	
 	plt.show()
 
 
 def tesis_figure():
-	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=20,n=51,T=100.,\
-					   reward=1,cost=5,penalty=0,iti=10.,tp=5.,store_p=False)
+	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=50,dt=0.01,reward=1,penalty=0,iti=10.,tp=5.)
+	m.cost = 0.1
+	m.xbounds()
 	m.refine_value(n=501)
+	xub,xlb,value,v_explore,v1,v2 = m.xbounds_fixed_rho(set_bounds=True,return_values=True)
+	xb = np.array([xub,xlb])
 	b = m.bounds
-	xb = m.belief_bound_to_x_bound(b)
-	io.savemat('tesis_figure_data3',{'value':m.value,'gb':b,'xb':xb,'v_explore':m.v_explore(),'t':m.t,'g':m.g}) 
+	print xb.shape, b.shape
+	io.savemat('tesis_figure_data4',{'value':value,'gb':b,'xb':xb,'v_explore':v_explore,'v1':v1,'v2':v2,'t':m.t,'g':m.g}) 
 	
 	plt.figure(figsize=(11,8))
-	plt.subplot(121)
-	plt.imshow(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
+	plt.subplot(221)
+	plt.imshow(value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
 	#~ plt.contourf(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
-	cbar = plt.colorbar(orientation='horizontal')
+	cbar = plt.colorbar(orientation='vertical')
 	cbar.set_label('Value')
 	plt.ylabel('belief')
 	plt.xlabel('T [s]')
+	
+	plt.subplot(223)
+	plt.plot(m.g,np.max(np.array([v1,v2]),axis=0),linestyle='--',color='k',linewidth=3)
+	inds = np.array([0,100,250,500,len(m.t)-2])
+	cmap = plt.get_cmap('RdYlGn')
+	for ind,cmap_ind in zip(inds,1-inds.astype(np.float64)/float((len(m.t)-1)*10./m.T)):
+		plt.plot(m.g,v_explore[ind],color=cmap(cmap_ind),linewidth=2)
+	plt.xlabel('Belief')
+	plt.ylabel('$\tilde V$')
+	
 	plt.subplot(222)
 	plt.plot(m.t,b.T)
 	plt.ylabel('Belief bound')
@@ -748,6 +767,11 @@ def tesis_figure():
 	plt.plot(m.t,xb.T)
 	plt.ylabel('$x(t)$ bound')
 	plt.xlabel('T [s]')
+	
+	pp = PdfPages('../../figs/inference_value.pdf')
+	pp.savefig()
+	pp.close()
+	
 	plt.show()
 
 def test():
