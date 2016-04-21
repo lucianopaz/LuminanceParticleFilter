@@ -680,6 +680,11 @@ class DecisionPolicy():
 			#~ ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
 		#~ np.seterr(**oldstate)
 		return ret
+	
+	def log_odds(self):
+		ret = np.log(self.bounds)-np.log(1-self.bounds)
+		ret[1]*=-1
+		return ret
 
 def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
 	sim = np.zeros(reps)

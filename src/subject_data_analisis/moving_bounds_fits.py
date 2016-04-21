@@ -53,9 +53,9 @@ elif loc==Location.cluster:
 	data_dir='/homedtic/lpaz/DecisionConfidenceKernels/data'
 elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
-ISI = 0.04
-distractor = 50.
-patch_sigma = 5.
+ISI = 0.04 #seconds
+distractor = 50. # cd/m^2
+patch_sigma = 5. # cd/m^2
 model_var = (patch_sigma**2)*2/ISI
 
 def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
@@ -93,7 +93,13 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
-def fit(subject,method="two_step"):
+def log_odds_likelihood(gs,confidence_params,log_odds,dt,dead_time,dead_time_sigma,phase_out_prob):
+	if len(confidence_params)==1:
+		p = (1.-phase_out_prob)*np.ones_like(gs)
+		p[log_odds<confidence_params[0]] = 0.
+		return add_dead_time(p,dt,dead_time,dead_time_sigma)
+
+def fit(subject,method="full"):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -110,13 +116,13 @@ def fit(subject,method="two_step"):
 		two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
 		res[0] = {'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]}
 		return res[:7]
-		#~ return scipy.optimize.fmin(two_step_merit,[1.],args=(m,dat,mu,mu_indeces),full_output=True)
-	else:
+	elif method=='full':
 		options = cma.CMAOptions({'bounds':[np.array([0.,0.,0.,0.]),np.array([10.,0.4,3.,1.])]})
 		res = cma.fmin(full_merit, [0.2,0.1,0.5,0.1], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res[0] = {'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]}
 		return res[:7]
-		#~ return scipy.optimize.fmin(full_merit,[0.,1.,0.1],args=(m,dat,mu,mu_indeces),full_output=True)
+	else:
+		raise ValueError('Unknown method: {0}'.format(method))
 
 def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 	dead_time = params[0]
@@ -200,7 +206,7 @@ def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,
 	return rt
 
 def plot_fit(subject,method='full',save=None):
-	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id),'r')
+	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'.pkl','r')
 	out = pickle.load(f)
 	try:
 		cost = out[0]['cost']
@@ -217,16 +223,30 @@ def plot_fit(subject,method='full',save=None):
 	rt = dat[:,1]*1e-3
 	max_RT = np.max(rt)
 	perf = dat[:,2]
+	conf = dat[:,3]
 	temp,edges = np.histogram(rt,100)
-	hit_rt,temp = np.histogram(rt[perf==1],edges)
-	miss_rt,temp = np.histogram(rt[perf==0],edges)
+	
+	high_hit_rt,temp = np.histogram(rt[np.logical_and(perf==1,conf==2)],edges)
+	low_hit_rt,temp = np.histogram(rt[np.logical_and(perf==1,conf==1)],edges)
+	high_miss_rt,temp = np.histogram(rt[np.logical_and(perf==0,conf==2)],edges)
+	low_miss_rt,temp = np.histogram(rt[np.logical_and(perf==0,conf==1)],edges)
+	
+	high_hit_rt = high_hit_rt.astype(np.float64)
+	low_hit_rt = low_hit_rt.astype(np.float64)
+	high_miss_rt = high_miss_rt.astype(np.float64)
+	low_miss_rt = low_miss_rt.astype(np.float64)
+	
+	hit_rt = high_hit_rt+low_hit_rt
+	miss_rt = high_miss_rt+low_miss_rt
+	
 	xh = np.array([0.5*(x+y) for x,y in zip(edges[1:],edges[:-1])])
-	hit_rt = hit_rt.astype(np.float64)
-	miss_rt = miss_rt.astype(np.float64)
+	
 	normalization = np.sum(hit_rt+miss_rt)*(xh[1]-xh[0])
 	hit_rt/=normalization
 	miss_rt/=normalization
 	
+	high_hit_rt/=(np.sum(high_hit_rt+low_hit_rt)*(xh[1]-xh[0]))
+	high_miss_rt/=(np.sum(high_miss_rt+low_miss_rt)*(xh[1]-xh[0]))
 	
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mu_prob = count.astype(np.float64)
@@ -240,6 +260,7 @@ def plot_fit(subject,method='full',save=None):
 	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT)
 	
 	plt.figure()
+	plt.subplot(121)
 	plt.plot(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt')
 	plt.plot(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt')
 	plt.plot(m.t,sim_rt['full'][0],label='Theorical hit rt')
@@ -248,6 +269,17 @@ def plot_fit(subject,method='full',save=None):
 	plt.xlabel('T [s]')
 	plt.ylabel('Prob density')
 	plt.legend()
+	
+	log_odds = m.log_odds()
+	high_conf_thresh = 0.6
+	confidence_params = [high_conf_thresh]
+	sim_high_likelihood = log_odds_likelihood(sim_rt['full'],confidence_params,log_odds,m.dt,dead_time,dead_time_sigma,phase_out_prob)
+	print np.sum(sim_high_likelihood)*m.dt
+	plt.subplot(122)
+	plt.plot(xh,high_hit_rt,label='Subject '+str(subject.id)+' high hit')
+	plt.plot(xh,-high_miss_rt,label='Subject '+str(subject.id)+' high miss')
+	plt.plot(m.t,sim_high_likelihood[0],label='Theorical high hit')
+	plt.plot(m.t,-sim_high_likelihood[1],label='Theorical high miss')
 	if save:
 		save.savefig()
 	else:
@@ -256,7 +288,7 @@ def plot_fit(subject,method='full',save=None):
 if __name__=="__main__":
 	task = 0
 	ntasks = 1
-	method = 'two_step'
+	method = 'full'
 	save = None
 	if len(sys.argv)>1:
 		task = int(sys.argv[1])
@@ -272,8 +304,10 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			#~ f = open("inference_fit_"+method+"_subject_"+str(s.id),'w')
+			#~ f = open("inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
 			#~ pickle.dump(fit(s,method=method),f,pickle.HIGHEST_PROTOCOL)
 			#~ f.close()
 			plot_fit(s,method=method,save=save)
-	save.close()
+			#~ break
+	if save:
+		save.close()
