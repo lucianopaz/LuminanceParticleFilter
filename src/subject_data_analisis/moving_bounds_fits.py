@@ -64,26 +64,26 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	"""
 	if dead_time_sigma==0.:
 		return gs
-	g1,g2 = gs
+	gs = np.array(gs)
 	conv_window = np.linspace(-dead_time_sigma*6,dead_time_sigma*6,int(math.ceil(dead_time_sigma*12/dt))+1)
 	conv_window_size = conv_window.shape[0]
 	conv_val = np.zeros_like(conv_window)
 	conv_val[conv_window_size//2:] = normpdf(conv_window[conv_window_size//2:],0,dead_time_sigma)
 	conv_val/=(np.sum(conv_val)*dt)
-	#~ print "g1 = ",g1
-	#~ print "conv_val = ", conv_val
-	cg1 = np.convolve(g1,conv_val,mode=mode)
-	cg2 = np.convolve(g2,conv_val,mode=mode)
-	a = int(0.5*(cg1.shape[0]-g1.shape[0]))
+	cgs = []
+	for g in gs:
+		cgs.append(np.convolve(g,conv_val,mode=mode))
+	cgs = np.array(cgs)
+	a = int(0.5*(cgs.shape[1]-gs.shape[1]))
 	if a==0:
-		if cg1.shape[0]==g1.shape[0]:
-			ret = np.array([cg1,cg2])
+		if cgs.shape[1]==gs.shape[1]:
+			ret = cgs[:]
 		else:
-			ret = np.array([cg1[:-1],cg2[:-1]])
-	elif a==0.5*(cg1.shape[0]-g1.shape[0]):
-		ret = np.array([cg1[a:-a],cg2[a:-a]])
+			ret = cgs[:,:-1]
+	elif a==0.5*(cgs.shape[1]-gs.shape[1]):
+		ret = cgs[:,a:-a]
 	else:
-		ret = np.array([cg1[a:-a-1],cg2[a:-a-1]])
+		ret = cgs[:,a:-a-1]
 	dead_time_shift = math.floor(dead_time/dt)
 	output = np.zeros_like(ret)
 	if dead_time_shift==0:
@@ -95,9 +95,13 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 
 def log_odds_likelihood(gs,confidence_params,log_odds,dt,dead_time,dead_time_sigma,phase_out_prob):
 	if len(confidence_params)==1:
-		p = (1.-phase_out_prob)*np.ones_like(gs)
-		p[log_odds<confidence_params[0]] = 0.
-		return add_dead_time(p,dt,dead_time,dead_time_sigma)
+		phigh = (1.-phase_out_prob)*np.ones_like(gs)
+		phigh[log_odds<confidence_params[0]] = 0.
+		plow = 1.-phigh
+		phigh*=gs
+		plow*=gs
+	print phigh.shape, plow.shape, np.concatenate((phigh,plow)).shape
+	return add_dead_time(np.concatenate((phigh,plow)),dt,dead_time,dead_time_sigma)
 
 def fit(subject,method="full"):
 	dat,t,d = subject.load_data()
@@ -188,8 +192,8 @@ def full_merit(params,m,dat,mu,mu_indeces):
 	print nlog_likelihood
 	return nlog_likelihood
 
-def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT):
-	rt = {'full':np.zeros((2,m.t.shape[0]))}
+def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None):
+	rt = {'full':{'all':np.zeros((2,m.t.shape[0])),'high':np.zeros((2,m.t.shape[0])),'low':np.zeros((2,m.t.shape[0]))}}
 	m.cost = cost
 	phased_out_rt = np.zeros_like(m.t)
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
@@ -198,11 +202,28 @@ def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,
 	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
 	xub,xlb = m.xbounds()
 	for index,drift in enumerate(mu):
+		g = m.rt(drift,bounds=(xub,xlb))
 		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time,dead_time_sigma)
 		g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
 		g2 = g2*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
-		rt[drift] = np.array([g1,g2])
-		rt['full']+=rt[drift]*mu_prob[index]
+		rt[drift] = {}
+		rt[drift]['all'] = np.array([g1,g2])
+		rt['full']['all']+=rt[drift]['all']*mu_prob[index]
+		if confidence_params:
+			phigh = (1.-phase_out_prob)*np.ones_like(g)
+			phigh[m.log_odds()<confidence_params[0]] = 0.
+			plow = 1.-phigh
+			phigh*=g
+			plow*=g
+			g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((phigh,plow)),m.dt,dead_time,dead_time_sigma)
+			g1h = g1h*(1-phase_out_prob)
+			g2h = g2h*(1-phase_out_prob)
+			g1l = g1l*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
+			g2l = g2l*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
+			rt[drift]['high'] = np.array([g1h,g2h])
+			rt[drift]['low'] = np.array([g1l,g2l])
+			rt['full']['high']+= rt[drift]['high']*mu_prob[index]
+			rt['full']['low']+= rt[drift]['low']*mu_prob[index]
 	return rt
 
 def plot_fit(subject,method='full',save=None):
@@ -245,8 +266,12 @@ def plot_fit(subject,method='full',save=None):
 	hit_rt/=normalization
 	miss_rt/=normalization
 	
-	high_hit_rt/=(np.sum(high_hit_rt+low_hit_rt)*(xh[1]-xh[0]))
-	high_miss_rt/=(np.sum(high_miss_rt+low_miss_rt)*(xh[1]-xh[0]))
+	high_hit_rt/=normalization
+	high_miss_rt/=normalization
+	low_hit_rt/=normalization
+	low_miss_rt/=normalization
+	#~ high_hit_rt/=(np.sum(high_hit_rt+low_hit_rt)*(xh[1]-xh[0]))
+	#~ high_miss_rt/=(np.sum(high_miss_rt+low_miss_rt)*(xh[1]-xh[0]))
 	
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mu_prob = count.astype(np.float64)
@@ -257,29 +282,31 @@ def plot_fit(subject,method='full',save=None):
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
 	
-	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT)
+	high_conf_thresh = 0.8
+	confidence_params = [high_conf_thresh]
+	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params)
 	
 	plt.figure()
 	plt.subplot(121)
 	plt.plot(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt')
 	plt.plot(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt')
-	plt.plot(m.t,sim_rt['full'][0],label='Theorical hit rt')
-	plt.plot(m.t,-sim_rt['full'][1],label='Theorical miss rt')
+	plt.plot(m.t,sim_rt['full']['all'][0],label='Theorical hit rt')
+	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theorical miss rt')
 	plt.xlim([0,5])
 	plt.xlabel('T [s]')
 	plt.ylabel('Prob density')
 	plt.legend()
 	
-	log_odds = m.log_odds()
-	high_conf_thresh = 0.6
-	confidence_params = [high_conf_thresh]
-	sim_high_likelihood = log_odds_likelihood(sim_rt['full'],confidence_params,log_odds,m.dt,dead_time,dead_time_sigma,phase_out_prob)
-	print np.sum(sim_high_likelihood)*m.dt
-	plt.subplot(122)
+	plt.subplot(222)
 	plt.plot(xh,high_hit_rt,label='Subject '+str(subject.id)+' high hit')
 	plt.plot(xh,-high_miss_rt,label='Subject '+str(subject.id)+' high miss')
-	plt.plot(m.t,sim_high_likelihood[0],label='Theorical high hit')
-	plt.plot(m.t,-sim_high_likelihood[1],label='Theorical high miss')
+	plt.plot(m.t,sim_rt['full']['high'][0],label='Theorical high hit')
+	plt.plot(m.t,-sim_rt['full']['high'][1],label='Theorical high miss')
+	plt.subplot(224)
+	plt.plot(xh,low_hit_rt,label='Subject '+str(subject.id)+' high hit')
+	plt.plot(xh,-low_miss_rt,label='Subject '+str(subject.id)+' high miss')
+	plt.plot(m.t,sim_rt['full']['low'][0],label='Theorical high hit')
+	plt.plot(m.t,-sim_rt['full']['low'][1],label='Theorical high miss')
 	if save:
 		save.savefig()
 	else:
