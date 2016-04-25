@@ -5,6 +5,7 @@ import data_io as io
 import cost_time as ct
 import numpy as np
 from utils import normpdf
+import matplotlib as mt
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -125,8 +126,16 @@ def fit(subject,method="full"):
 		res = cma.fmin(full_merit, [0.2,0.1,0.5,0.1], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res[0] = {'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]}
 		return res[:7]
+	elif method=='confidence_only':
+		f = open('fits/inference_fit_full_subject_'+str(subject.id)+'.pkl','r')
+		out = pickle.load(f)
+		f.close()
+		options = cma.CMAOptions({'bounds':[np.array([0.]),np.array([3.])]})
+		res = cma.fmin(confidence_merit, [0.2], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
+		return res[:7]
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
+
 
 def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 	dead_time = params[0]
@@ -142,9 +151,9 @@ def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
 			perf = drift_trial[2]
 			if perf==1:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt1_likelihood,rt))*(1-phase_out_prob)+phase_out_likelihood)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt1_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
 			else:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt2_likelihood,rt))*(1-phase_out_prob)+phase_out_likelihood)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt2_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
 	return nlog_likelihood
 
 def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
@@ -186,10 +195,38 @@ def full_merit(params,m,dat,mu,mu_indeces):
 			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
 			perf = drift_trial[2]
 			if perf==1:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+phase_out_prob/max_RT)
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 			else:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+phase_out_prob/max_RT)
-	print nlog_likelihood
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
+	return nlog_likelihood
+
+def confidence_merit(params,m,dat,mu,mu_indeces,decision_parameters):
+	cost = decision_parameters['cost']
+	dead_time = decision_parameters['dead_time']
+	dead_time_sigma = decision_parameters['dead_time_sigma']
+	phase_out_prob = decision_parameters['phase_out_prob']
+	max_RT = np.max(dat[:,1])*1e-3
+	
+	nlog_likelihood = 0.
+	m.cost = cost
+	xub,xlb = m.xbounds()
+	
+	phigh = (1.-0.5*phase_out_prob)*np.ones((2,xub.shape[0]))
+	phigh[m.log_odds()<params[0]] = 0.
+	plow = 1.-phigh
+	for index,drift in enumerate(mu):
+		gs = np.array(m.rt(drift,bounds=(xub,xlb)))
+		confidence_rt = np.concatenate((phigh*gs,plow*gs))
+		g1h,g2h,g1l,g2l = add_dead_time(confidence_rt,m.dt,dead_time,dead_time_sigma)
+		gh = g1h+g2h
+		gl = g1l+g2l
+		for drift_trial in dat[mu_indeces==index]:
+			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			conf = drift_trial[3]-1
+			if conf==1:
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gh,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
+			else:
+				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gl,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 	return nlog_likelihood
 
 def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None):
@@ -229,6 +266,7 @@ def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,
 def plot_fit(subject,method='full',save=None):
 	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'.pkl','r')
 	out = pickle.load(f)
+	f.close()
 	try:
 		cost = out[0]['cost']
 		dead_time = out[0]['dead_time']
@@ -282,31 +320,48 @@ def plot_fit(subject,method='full',save=None):
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
 	
-	high_conf_thresh = 0.8
+	
+	try:
+		f = open("inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
+		out = pickle.load(f)
+		f.close()
+		high_conf_thresh = out[0][0]
+	except:
+		high_conf_thresh = 0.8
 	confidence_params = [high_conf_thresh]
 	sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params)
 	
+	mxlim = np.ceil(max_RT)
+	mt.rc('axes', color_cycle=['b','r'])
 	plt.figure()
 	plt.subplot(121)
-	plt.plot(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt')
-	plt.plot(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt')
-	plt.plot(m.t,sim_rt['full']['all'][0],label='Theorical hit rt')
-	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theorical miss rt')
-	plt.xlim([0,5])
+	plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post')
+	plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post')
+	plt.plot(m.t,sim_rt['full']['all'][0],label='Theorical hit rt',linewidth=2)
+	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theorical miss rt',linewidth=2)
+	plt.xlim([0,mxlim])
 	plt.xlabel('T [s]')
 	plt.ylabel('Prob density')
 	plt.legend()
+	plt.subplot(122)
+	plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post')
+	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post')
+	plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theorical high',linewidth=2)
+	plt.plot(m.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theorical low',linewidth=2)
+	plt.xlim([0,mxlim])
+	plt.xlabel('T [s]')
+	plt.legend()
 	
-	plt.subplot(222)
-	plt.plot(xh,high_hit_rt,label='Subject '+str(subject.id)+' high hit')
-	plt.plot(xh,-high_miss_rt,label='Subject '+str(subject.id)+' high miss')
-	plt.plot(m.t,sim_rt['full']['high'][0],label='Theorical high hit')
-	plt.plot(m.t,-sim_rt['full']['high'][1],label='Theorical high miss')
-	plt.subplot(224)
-	plt.plot(xh,low_hit_rt,label='Subject '+str(subject.id)+' high hit')
-	plt.plot(xh,-low_miss_rt,label='Subject '+str(subject.id)+' high miss')
-	plt.plot(m.t,sim_rt['full']['low'][0],label='Theorical high hit')
-	plt.plot(m.t,-sim_rt['full']['low'][1],label='Theorical high miss')
+	#~ plt.subplot(222)
+	#~ plt.plot(xh,high_hit_rt,label='Subject '+str(subject.id)+' high hit')
+	#~ plt.plot(xh,-high_miss_rt,label='Subject '+str(subject.id)+' high miss')
+	#~ plt.plot(m.t,sim_rt['full']['high'][0],label='Theorical high hit')
+	#~ plt.plot(m.t,-sim_rt['full']['high'][1],label='Theorical high miss')
+	#~ plt.subplot(224)
+	#~ plt.plot(xh,low_hit_rt,label='Subject '+str(subject.id)+' high hit')
+	#~ plt.plot(xh,-low_miss_rt,label='Subject '+str(subject.id)+' high miss')
+	#~ plt.plot(m.t,sim_rt['full']['low'][0],label='Theorical high hit')
+	#~ plt.plot(m.t,-sim_rt['full']['low'][1],label='Theorical high miss')
 	if save:
 		save.savefig()
 	else:
@@ -331,8 +386,11 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			#~ f = open("inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
+			#~ f = open("inference/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
 			#~ pickle.dump(fit(s,method=method),f,pickle.HIGHEST_PROTOCOL)
+			#~ f.close()
+			#~ f = open("inference/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
+			#~ pickle.dump(fit(s,method='confidence_only'),f,pickle.HIGHEST_PROTOCOL)
 			#~ f.close()
 			plot_fit(s,method=method,save=save)
 			#~ break
