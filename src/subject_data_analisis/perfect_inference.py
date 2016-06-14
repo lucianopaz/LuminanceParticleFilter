@@ -4,7 +4,7 @@
 
 from __future__ import division
 import numpy as np
-import itertools, math
+import itertools, math, copy
 
 class onlineMeanVar():
 	def __init__(self):
@@ -46,6 +46,12 @@ class PerfectInference(object):
 		pass
 	def batchInference(self,targetSignalArr,distractorSignalArr):
 		pass
+	def set_symmetric_threshold(self,threshold):
+		self.upper_threshold = copy.copy(threshold)
+		self.lower_threshold = copy.copy(-threshold)
+	def set_asymmetric_threshold(self,thresholds):
+		self.upper_threshold = copy.copy(thresholds[0])
+		self.lower_threshold = copy.copy(thresholds[1])
 
 class KnownVarPerfectInference(PerfectInference):
 	"""
@@ -53,7 +59,7 @@ class KnownVarPerfectInference(PerfectInference):
 	classification task with known model variance
 	"""
 	def __init__(self,model_var_t=1.,model_var_d=1.,prior_mu_t=0.,prior_mu_d=0.,prior_va_t=1.,prior_va_d=1.,\
-				threshold=5.,ISI=1.):
+				lower_threshold=-5.,upper_threshold=5.,ISI=1.):
 		"""
 		Known variance perfect inference constructor
 		Syntax:
@@ -67,7 +73,8 @@ class KnownVarPerfectInference(PerfectInference):
 		 - prior_mu_d:  Mean of the distractor prior distribution
 		 - prior_va_t:  Variance of the target prior distribution
 		 - prior_va_d:  Variance of the distractor prior distribution
-		 - threshold:   Decision threshold
+		 - lower_threshold:   Decision threshold for selecting distractor
+		 - upper_threshold:   Decision threshold for selecting target
 		 - ISI:         Inter stimulus interval (ISI). Represents the
 		                time between changes of the target and distractor
 		                stimuli.
@@ -79,7 +86,8 @@ class KnownVarPerfectInference(PerfectInference):
 		self.prior_va_t = float(prior_va_t)
 		self.prior_va_d = float(prior_va_d)
 		
-		self.threshold = float(threshold)
+		self.lower_threshold = float(lower_threshold)
+		self.upper_threshold = float(upper_threshold)
 		self.ISI = float(ISI)
 		self.signals = []
 	
@@ -93,7 +101,8 @@ class KnownVarPerfectInference(PerfectInference):
 	def copy(self):
 		output = KnownVarPerfectInference(model_var_t=self.var_t,model_var_d=self.var_d,\
 				prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,prior_va_t=self.prior_va_t,\
-				prior_va_d=self.prior_va_d,threshold=self.threshold,ISI=self.ISI)
+				prior_va_d=self.prior_va_d,lower_threshold=self.lower_threshold,\
+				upper_threshold=self.upper_threshold,ISI=self.ISI)
 		output.signals = self.signals.copy()
 		return output
 	
@@ -117,14 +126,17 @@ class KnownVarPerfectInference(PerfectInference):
 			post_mu_d = (self.prior_mu_d/self.prior_va_d+cd/self.var_d)*post_va_d
 			
 			criterium = self.criteria(post_mu_t,post_mu_d,post_va_t,post_va_d)
-			if abs(criterium)>=self.threshold:
+			if criterium>=self.upper_threshold:
 				decided = True
+				performance = 1
+			elif criterium<=self.lower_threshold:
+				decided = True
+				performance = 0
 			if storeSignals:
 				self.signals.append([t,d])
 		if not decided:
 			ret = decided,np.nan,np.nan,np.nan,n*self.ISI
 		else:
-			performance = 1 if criterium>0 else 0
 			ret = decided,performance,criterium,n*self.ISI
 		return ret
 	
@@ -148,6 +160,12 @@ class KnownVarPerfectInference(PerfectInference):
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		if isinstance(self.upper_threshold,np.ndarray):
+			upper_threshold = self.upper_threshold[:(targetSignalArr.shape[-1]+1)]
+			lower_threshold = self.lower_threshold[:(targetSignalArr.shape[-1]+1)]
+		else:
+			upper_threshold = self.upper_threshold
+			lower_threshold = self.lower_threshold
 		s = list(targetSignalArr.shape)
 		s[1]+=1
 		post_mu_t = self.prior_mu_t*np.ones(tuple(s))
@@ -166,17 +184,36 @@ class KnownVarPerfectInference(PerfectInference):
 		if returnPosterior:
 			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'var_t':np.nan*np.zeros(s[0]),'var_d':np.nan*np.zeros(s[0])}
 		for trial,cr in enumerate(criterium):
-			try:
-				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
-				performance = 1 if cr[dt]>0 else 0
-				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+			dt1 = np.flatnonzero(cr>=upper_threshold)
+			dt2 = np.flatnonzero(cr<=lower_threshold)
+			if dt1.size==0 and dt2.size==0:
+				decided = False
+				performance = np.nan
+				crit = np.nan
+				RT = (s[1]-1)*self.ISI
+			else:
+				decided = True
+				if dt1.size!=0 and dt2.size==0:
+					performance = 1
+					dt = dt1[0]
+				elif dt1.size==0 and dt2.size!=0:
+					performance = 0
+					dt = dt2[0]
+				else:
+					if dt1[0]<dt2[0]:
+						performance = 1
+						dt = dt1[0]
+					else:
+						performance = 0
+						dt = dt2[0]
+				crit = cr[dt]
+				RT = dt*self.ISI
 				if returnPosterior:
 					posterior['mu_t'][trial] = post_mu_t[trial,dt]
 					posterior['mu_d'][trial] = post_mu_d[trial,dt]
 					posterior['var_t'][trial] = post_va_t[trial,dt]
-					posterior['var_d'][trial] = post_va_t[trial,dt]
-			except IndexError:
-				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+					posterior['var_d'][trial] = post_va_d[trial,dt]
+			ret[trial] = np.array([decided,performance,crit,RT])
 		ret = (ret,)
 		if returnPosterior:
 			ret+= (posterior,)
@@ -194,7 +231,7 @@ class UnknownVarPerfectInference(PerfectInference):
 	and the precision (1/Var)
 	"""
 	def __init__(self,prior_mu_t=0.,prior_mu_d=0.,prior_nu_t=1.,prior_nu_d=1.,\
-				prior_a_t=1.,prior_a_d=1.,prior_b_t=1.,prior_b_d=1.,threshold=5.,ISI=1.):
+				prior_a_t=1.,prior_a_d=1.,prior_b_t=1.,prior_b_d=1.,lower_threshold=-5.,upper_threshold=5.,ISI=1.):
 		"""
 		Unknown variance perfect inference constructor
 		Syntax:
@@ -202,18 +239,19 @@ class UnknownVarPerfectInference(PerfectInference):
 				prior_a_t=1.,prior_a_d=1.,prior_b_t=1.,prior_b_d=1.,threshold=5.,ISI=1.)
 		
 		Input:
-		 - prior_mu_t:  Mean of the target prior distribution
-		 - prior_mu_d:  Mean of the distractor prior distribution
-		 - prior_nu_t:  Nu (sometime lambda) of the target prior distribution
-		 - prior_nu_d:  Nu (sometime lambda) of the distractor prior distribution
-		 - prior_a_t:   Alpha of the target prior distribution
-		 - prior_a_d:   Alpha of the distractor prior distribution
-		 - prior_b_t:   Beta of the target prior distribution
-		 - prior_b_d:   Beta of the distractor prior distribution
-		 - threshold:   Decision threshold
-		 - ISI:         Inter stimulus interval (ISI). Represents the
-		                time between changes of the target and distractor
-		                stimuli.
+		 - prior_mu_t:        Mean of the target prior distribution
+		 - prior_mu_d:        Mean of the distractor prior distribution
+		 - prior_nu_t:        Nu (sometime lambda) of the target prior distribution
+		 - prior_nu_d:        Nu (sometime lambda) of the distractor prior distribution
+		 - prior_a_t:         Alpha of the target prior distribution
+		 - prior_a_d:         Alpha of the distractor prior distribution
+		 - prior_b_t:         Beta of the target prior distribution
+		 - prior_b_d:         Beta of the distractor prior distribution
+		 - lower_threshold:   Decision threshold for selecting distractor
+		 - upper_threshold:   Decision threshold for selecting target
+		 - ISI:               Inter stimulus interval (ISI). Represents
+		                      the time between changes of the target and
+		                      distractor stimuli.
 		"""
 		self.prior_mu_t = float(prior_mu_t)
 		self.prior_mu_d = float(prior_mu_d)
@@ -225,7 +263,8 @@ class UnknownVarPerfectInference(PerfectInference):
 		self.prior_b_d = float(prior_b_d)
 		
 		self.ISI = float(ISI)
-		self.threshold = float(threshold)
+		self.upper_threshold = float(upper_threshold)
+		self.lower_threshold = float(lower_threshold)
 		self.signals = []
 	
 	def criteria(self,post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d):
@@ -256,7 +295,7 @@ class UnknownVarPerfectInference(PerfectInference):
 		output = KnownVarPerfectInference(prior_mu_t=self.prior_mu_t,prior_mu_d=self.prior_mu_d,\
 				prior_nu_t=self.prior_nu_t,prior_nu_d=self.prior_nu_d,prior_a_t=self.prior_a_t,\
 				prior_a_d=self.prior_a_d,prior_b_t=self.prior_b_t,prior_b_d=self.prior_b_d,\
-				threshold=self.threshold,ISI=self.ISI)
+				lower_threshold=self.lower_threshold,upper_threshold=self.upper_threshold,ISI=self.ISI)
 		output.signals = self.signals.copy()
 		return output
 	
@@ -290,14 +329,17 @@ class UnknownVarPerfectInference(PerfectInference):
 			post_b_d =  self.prior_b_d+0.5*d_var+0.5*n*self.prior_nu_d*(d_mean-self.prior_mu_d)**2/(self.prior_nu_d+n)
 			
 			criterium = self.criteria(post_mu_t,post_mu_d,post_nu_t,post_nu_d,post_a_t,post_a_d,post_b_t,post_b_d)
-			if abs(criterium)>=self.threshold:
+			if criterium>=self.upper_threshold:
 				decided = True
+				performance = 1
+			elif criterium<=self.lower_threshold:
+				decided = True
+				performance = 0
 			if storeSignals:
 				self.signals.append([t,d])
 		if not decided:
 			ret = decided,np.nan,np.nan,n*self.ISI
 		else:
-			performance = 1 if criterium>0 else 0
 			ret = decided,performance,criterium,n*self.ISI
 		return ret
 	
@@ -338,6 +380,12 @@ class UnknownVarPerfectInference(PerfectInference):
 	def batchInference(self,targetSignalArr,distractorSignalArr,returnPosterior=False,returnCriteria=False):
 		if targetSignalArr.shape!=distractorSignalArr.shape:
 			raise(ValueError("Target and distractor signal arrays must be numpy arrays with the same shape"))
+		if isinstance(self.upper_threshold,np.ndarray):
+			upper_threshold = self.upper_threshold[:(targetSignalArr.shape[-1]+1)]
+			lower_threshold = self.lower_threshold[:(targetSignalArr.shape[-1]+1)]
+		else:
+			upper_threshold = self.upper_threshold
+			lower_threshold = self.lower_threshold
 		s = list(targetSignalArr.shape)
 		s[1]+=1
 		post_nu_t = self.prior_nu_t*np.ones(tuple(s))
@@ -372,10 +420,36 @@ class UnknownVarPerfectInference(PerfectInference):
 		if returnPosterior:
 			posterior = {'mu_t':np.nan*np.zeros(s[0]),'mu_d':np.nan*np.zeros(s[0]),'nu_t':np.nan*np.zeros(s[0]),'nu_d':np.nan*np.zeros(s[0]),'b_t':np.nan*np.zeros(s[0]),'b_d':np.nan*np.zeros(s[0]),'a_t':np.nan*np.zeros(s[0]),'a_d':np.nan*np.zeros(s[0])}
 		for trial,cr in enumerate(criterium):
-			try:
-				dt = np.flatnonzero(np.abs(cr)>=self.threshold)[0]
-				performance = 1 if cr[dt]>0 else 0
-				ret[trial] = np.array([True,performance,cr[dt],dt*self.ISI])
+			dt1 = np.flatnonzero(cr>=upper_threshold)
+			dt2 = np.flatnonzero(cr<=lower_threshold)
+			if dt1.size==0 and dt2.size==0:
+				decided = False
+				performance = np.nan
+				crit = np.nan
+				RT = (s[1]-1)*self.ISI
+			else:
+				decided = True
+				if dt1.size!=0 and dt2.size==0:
+					performance = 1
+					dt = dt1[0]
+					crit = cr[dt]
+					RT = dt1[0]*self.ISI
+				elif dt1.size==0 and dt2.size!=0:
+					performance = 0
+					dt = dt2[0]
+					crit = cr[dt]
+					RT = dt*self.ISI
+				else:
+					if dt1[0]<dt2[0]:
+						dt = dt1[0]
+						performance = 1
+						crit = cr[dt]
+						RT = dt*self.ISI
+					else:
+						dt = dt2[0]
+						performance = 0
+						crit = cr[dt]
+						RT = dt*self.ISI
 				if returnPosterior:
 					posterior['mu_t'][trial] = post_mu_t[trial,dt]
 					posterior['mu_d'][trial] = post_mu_d[trial,dt]
@@ -385,8 +459,7 @@ class UnknownVarPerfectInference(PerfectInference):
 					posterior['a_d'][trial] = post_a_t[trial,dt]
 					posterior['b_t'][trial] = post_b_t[trial,dt]
 					posterior['b_d'][trial] = post_b_t[trial,dt]
-			except IndexError:
-				ret[trial] = np.array([False,np.nan,np.nan,(s[1]-1)*self.ISI])
+			ret[trial] = np.array([decided,performance,crit,RT])
 		ret = (ret,)
 		if returnPosterior:
 			ret+= (posterior,)
@@ -453,8 +526,9 @@ def matlab_comparison():
 	import kernels as ke
 	aux = io.loadmat('mat_py_comp.mat')
 	model = KnownVarPerfectInference(model_var_t=aux['sigma'][0][0]**2,model_var_d=aux['sigma'][0][0]**2,\
-				prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
-				threshold=aux['threshold'][0][0],ISI=aux['ISI'][0][0])
+			prior_mu_t=aux['pr_mu_t'][0][0],prior_mu_d=aux['pr_mu_d'][0][0],prior_va_t=aux['pr_va_t'][0][0],prior_va_d=aux['pr_va_d'][0][0],\
+			ISI=aux['ISI'][0][0])
+	model.set_symmetric_threshold(aux['threshold'][0][0])
 	target = aux['target']
 	distractor = aux['distractor']
 	mat_ret = aux['ret']

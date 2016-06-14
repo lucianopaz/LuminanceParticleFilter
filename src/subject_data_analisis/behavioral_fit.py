@@ -7,6 +7,8 @@ import numpy as np
 import kernels as ke
 import data_io as io
 import perfect_inference as pe
+import cost_time as ct
+from utils import normcdf,normcdfinv
 try:
 	import matplotlib as mt
 	from matplotlib import pyplot as plt
@@ -15,18 +17,6 @@ try:
 except:
 	loaded_plot_libs = False
 import sys, itertools, math, cma, os, pickle, warnings
-
-_vectErf = np.vectorize(math.erf,otypes=[np.float])
-def normcdf(x,mu=0.,sigma=1.):
-	"""
-	Compute normal cummulative distribution with mean mu and standard
-	deviation sigma. x can be a numpy array.
-	"""
-	try:
-		new_x = (x-mu)/sigma
-	except ZeroDivisionError:
-		new_x = np.sign(x-mu)*np.inf
-	return 0.5 + 0.5*_vectErf(new_x / np.sqrt(2.0))
 
 def conv_hist(h,p,ISI,mode='full'):
 	conv_window = np.linspace(-p*6,p*6,int(math.ceil(p*12/ISI))+1)
@@ -81,7 +71,7 @@ def rt_merit(params,subject_rt,model,target,distractor,ISI):
 	response times. This assumes that the subject and the model viewed
 	exactly the same stimuli, allowing trial to trial comparison of RT.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt = simulation[:,3]+params[1]
 	return np.sum((subject_rt-simulated_rt)**2)
@@ -94,7 +84,7 @@ def rt_histogram_merit(params,subject_rt,bin_edges,model,target,distractor):
 	between response time pairs as rt_merit. This function can be used
 	even when the model and the subject did not see the same stimuli.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	return np.sum((subject_rt_histogram-simulated_rt_histogram)**2)
@@ -104,7 +94,7 @@ def rt_histogram_merit_variable_deadtime(params,subject_rt_histogram,bin_edges,m
 	The same as rt_histogram but allowing for random time shifts added
 	to the model decision times.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt_histogram,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
 	# Include a normal fluctuation to the simulated_rt with width params[2]
@@ -118,7 +108,7 @@ def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distra
 	decision kernels. Only take into account the first 1000ms of
 	the kernel.
 	"""
-	model.threshold = params[0]
+	model.set_symmetric_threshold(params[0])
 	simulation = model.batchInference(target,distractor)
 	selection = 1.-simulation[:,1]
 	fluctuations = np.transpose(np.array([target.T-targetmean,distractor.T-distractormean]),(2,0,1))
@@ -126,7 +116,7 @@ def kernel_merit(params,subject_kernel,model,target,distractor,targetmean,distra
 	return np.sum((subject_kernel-sim_kernel[:,:25])**2)
 
 class Objective():
-	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.,likelihood=False):
+	def __init__(self,weight_rt=0.,weight_rtd=0.,weight_k=0.,weight_p=0.,likelihood=False,variable_list=['threshold','dead_time','dead_time_sigma'],fixed_values={}):
 		self._rt = 0.
 		self._rtd = 0.
 		self._k = 0.
@@ -153,30 +143,61 @@ class Objective():
 				self._p = weight_p
 				name.append('performance')
 			self.name = '-'.join([str(n) for n in list(name)])
+		self.fixed_threshold = True
+		self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None,'cost':None,'reward':None,'prior_mu_mean':None,'prior_mu_var':None}
+		for v in variable_list:
+			if v.lower() not in self.fittable_variables:
+				raise ValueError("Unknown variable '%s' being fitted",v)
+			if v.lower() in ['cost','reward']:
+				self.fixed_threshold = False
+		self.variable_list = [v.lower() for v in variable_list]
+		if ('cost' in self.variable_list or 'reward' in self.variable_list) and 'threshold' in self.variable_list:
+			raise ValueError("Cannot fit cost and reward, and a fixed threshold value. cost and reward are used with the decision_policy to compute a time varying threshold.")
+		for v in fixed_values.keys():
+			if v.lower() not in self.fittable_variables.keys():
+				raise ValueError("Unknown variable '%s' being fixed",v.lower())
+			if v.lower() in ['cost','reward']:
+				self.fixed_threshold = False
+			self.fittable_variables[v.lower()] = fixed_values[v]
 	
-	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean):
-		if likelihood:
-			lp = len(params)
-			model.threshold = params[0]
-			dead_time_sigma = 1
-			dead_time = 0
-			if lp>1:
-				dead_time = params[1]
-				if lp>2:
-					dead_time_sigma = params[2]
-			simulation = model.batchInference(target,distractor)
-			output = np.sum(((subject_rt-simulation[:,3]-params[1])/dead_time_sigma)**2)
+	def call_params_to_variables(self,params):
+		if len(params)!=len(self.variable_list):
+			raise ValueError("Supplied parameter values must have the same number of elements as the variable_list being fitted.")
+		for p,v in zip(params,self.variable_list):
+			self.fittable_variables[v] = p
+	
+	def fittable_variables_to_tuple(self,params=None):
+		if params is not None:
+			self.call_params_to_variables(params)
+		return (self.fittable_variables['threshold'],self.fittable_variables['dead_time'],\
+				self.fittable_variables['dead_time_sigma'],self.fittable_variables['cost'],\
+				self.fittable_variables['reward'],self.fittable_variables['prior_mu_mean'],\
+				self.fittable_variables['prior_mu_var'])
+	
+	def __call__(self,params,subject_rt,subject_rtd,subject_kernel,subject_performance,model,bin_edges,target,distractor,targetmean,distractormean,decision_policy=None):
+		self.call_params_to_variables(params)
+		if self.fixed_threshold:
+			model.set_symmetric_threshold(self.fittable_variables['threshold'])
+		else:
+			if self.fittable_variables['cost'] is not None:
+				decision_policy.set_constant_cost(self.fittable_variables['cost'])
+			if self.fittable_variables['reward'] is not None:
+				decision_policy.reward = self.fittable_variables['reward']
+			model.set_asymmetric_threshold(decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
+		dead_time_sigma = 1. if (self.fittable_variables['dead_time_sigma'] is None) else self.fittable_variables['dead_time_sigma']
+		dead_time = 0 if (self.fittable_variables['dead_time'] is None) else self.fittable_variables['dead_time']
+		simulation = model.batchInference(target,distractor)
+		if self.likelihood:
+			output = np.sum(((subject_rt-simulation[:,3]-dead_time)/dead_time_sigma)**2)
 		else:
 			output = 0.
-			model.threshold = params[0]
-			simulation = model.batchInference(target,distractor)
 			if self._rt:
-				output+= self._rt * np.sum((subject_rt-simulation[:,3]-params[1])**2)
+				output+= self._rt * np.sum((subject_rt-simulation[:,3]-dead_time)**2)
 			if self._rtd:
 				# Squared difference between rt histograms
-				simulated_rtd,_ = np.histogram(simulation[:,3]+params[1],bin_edges,density=True)
+				simulated_rtd,_ = np.histogram(simulation[:,3]+dead_time,bin_edges,density=True)
 				if len(params)>2:
-					simulated_rtd = conv_hist(simulated_rtd,params[2],model.ISI)
+					simulated_rtd = conv_hist(simulated_rtd,dead_time_sigma,model.ISI)
 				output+= self._rtd * np.sum((subject_rtd-simulated_rtd)**2)
 			if self._k:
 				# Squared difference between decision kernels
@@ -195,7 +216,9 @@ class Objective():
 		return output
 	
 	def __getstate__(self):
-		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p}
+		return {'name':self.name,'likelihood':self.likelihood,'_rt':self._rt,'_rtd':self._rtd,'_k':self._k,'_p':self._p,\
+				'fixed_threshold':self.fixed_threshold,'fittable_variables':self.fittable_variables,\
+				'variable_list':self.variable_list}
 	
 	def __setstate__(self,state):
 		self.name = state['name']
@@ -204,6 +227,14 @@ class Objective():
 		self._rtd = state['_rtd']
 		self._k = state['_k']
 		self._p = state['_p']
+		if 'fixed_threshold' not in state.keys():
+			self.fixed_threshold = True
+			self.fittable_variables = {'threshold':None,'dead_time':None,'dead_time_sigma':None}
+			self.variable_list = ['threshold','dead_time','dead_time_sigma']
+		else:
+			self.fixed_threshold = state['fixed_threshold']
+			self.fittable_variables = state['fittable_variables']
+			self.variable_list = state['variable_list']
 
 def load_fitter(filename):
 	if not filename.endswith('.pkl'):
@@ -229,7 +260,7 @@ def resave(directory='fits/'):
 		print fitter2.__getstate__()
 
 class Fitter():
-	def __init__(self,subject,model=None,objective='rt distribution',initial_parameters=None,ubounds=None,\
+	def __init__(self,subject,model=None,decision_policy=None,objective='rt distribution',initial_parameters=None,ubounds=None,\
 				criteria=None,synthetic_trials=None,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=False):
 		# Subject data
 		self.subject = subject
@@ -253,6 +284,14 @@ class Fitter():
 		else:
 			# Use the supplied model's criteria
 			pass
+		# Decision policy
+		if decision_policy is None:
+			self.update_threshold = False
+			self.decision_policy = None
+		else:
+			self.update_threshold = True
+			self.decision_policy = decision_policy
+		
 		# Objective function (merit)
 		if isinstance(objective,Objective):
 			self.objective = objective
@@ -260,16 +299,25 @@ class Fitter():
 			if initial_parameters is not None:
 				self.initial_parameters = initial_parameters
 			else:
-				self.initial_parameters = np.random.random(2)
+				self.initial_parameters = np.random.random(len(self.objective.variable_list))
 			if objective.name=='rtd':
 				self.fittype = 0
 			elif objective.name=='rt':
 				self.fittype = 1
 				self.use_subject_signals = True
-				self.initial_parameters = self.initial_parameters[:2]
+				try:
+					self.objective.variable_list.remove('dead_time_sigma')
+					self.initial_parameters = self.initial_parameters[:len(self.objective.variable_list)]
+				except ValueError:
+					pass
 			elif objective.name=='kernel':
 				self.fittype = 2
-				self.initial_parameters = self.initial_parameters[:1]
+				try:
+					self.objective.variable_list.remove('dead_time')
+					self.objective.variable_list.remove('dead_time_sigma')
+					self.initial_parameters = self.initial_parameters[:len(self.objective.variable_list)]
+				except ValueError:
+					pass
 			else:
 				self.fittype = 3
 			if self.use_subject_signals and (synthetic_trials is not None):
@@ -279,38 +327,46 @@ class Fitter():
 				self.synthetic_trials = synthetic_trials
 		else:
 			if objective.lower() in ('rtd','rt distribution','rt histogram','rt_distribution','rt_histogram'):
-				self.objective = Objective(weight_rtd=1.)
-				self.use_subject_signals = use_subject_signals
-				self.fittype = 0
 				if initial_parameters is not None:
 					self.initial_parameters = initial_parameters
+					if len(initial_parameters)==2:
+						variable_list = ['threshold','dead_time']
+					elif len(initial_parameters)==3:
+						variable_list = ['threshold','dead_time','dead_time_sigma']
 				else:
 					self.initial_parameters = np.random.random(2)
+					variable_list = ['threshold','dead_time']
+				self.objective = Objective(weight_rtd=1.,variable_list=variable_list)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 0
 				if self.use_subject_signals and (synthetic_trials is not None):
 					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 					self.synthetic_trials = None
 				else:
 					self.synthetic_trials = synthetic_trials
 			elif objective.lower()=='rt':
-				self.objective = Objective(weight_rt=1.)
+				if len(initial_parameters)!=2:
+					raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
+				variable_list = ['threshold','dead_time']
+				self.objective = Objective(weight_rt=1.,variable_list=variable_list)
 				if not use_subject_signals:
 					warnings.warn("When the objective is to fit subject RT values (not the distribution), use_subject_values is always set as True",RuntimeWarning)
 				self.use_subject_signals = True
-				if len(initial_parameters)!=2:
-					raise(ValueError("If the objective is to fit the RT values, only the model threshold and dead time can be fitted, not the dead time dispersion. Thus, initial_parameters must have only two elements"))
 				self.fittype = 1
 				self.synthetic_trials = None
 				if synthetic_trials is not None:
 					warnings.warn("Variable synthetic_trials is not used when the objective is to fit the RT values",RuntimeWarning)
 				self.initial_parameters = initial_parameters
 			elif objective.lower()=='kernel':
-				self.objective = Objective(weight_k=1.)
-				self.use_subject_signals = use_subject_signals
-				self.fittype = 2
 				if initial_parameters is not None:
+					variable_list = ['threshold']
 					self.initial_parameters = initial_parameters[:1]
 				else:
+					variable_list = ['threshold']
 					self.initial_parameters = np.random.random(1)
+				self.objective = Objective(weight_k=1.,variable_list=variable_list)
+				self.use_subject_signals = use_subject_signals
+				self.fittype = 2
 				if self.use_subject_signals and (synthetic_trials is not None):
 					warnings.warn("Variable synthetic_trials is not used when use_subject_signals is True",RuntimeWarning)
 					self.synthetic_trials = None
@@ -373,6 +429,8 @@ class Fitter():
 			fluctuations = np.transpose(np.array([t.T-dat[:,0],d.T-50]),(2,0,1))
 			subject_kernel,_,_,_ = ke.kernels(fluctuations,1-dat[:,2],dat[:,3]-1)
 			args = (subject_rt,subject_rt_histogram,subject_kernel,dat[:,1],self.model,bin_edges,target,distractor,dat[indeces,0],50)
+		if self.update_threshold:
+			args+=(self.decision_policy,)
 		cma_fmin_output = cma.fmin(self.objective,self.initial_parameters,self.cma_sigma,options=self.cma_options,args=args,restarts=restarts,**kwargs)
 		stop_cond = {}
 		for key in cma_fmin_output[7].keys():
@@ -385,6 +443,12 @@ class Fitter():
 	def __setstate__(self,state):
 		self.subject = state['subject']
 		self.model = state['model']
+		if 'decision_policy' not in state.keys() or 'update_threshold' not in state.keys():
+			self.decision_policy = None
+			self.update_threshold = False
+		else:
+			self.decision_policy = state['decision_policy']
+			self.update_threshold = state['update_threshold']
 		self.use_subject_signals = state['use_subject_signals']
 		self.fittype = state['fittype']
 		self.synthetic_trials = state['synthetic_trials']
@@ -408,7 +472,8 @@ class Fitter():
 		self.fit_output = state['fit_output']
 	
 	def __getstate__(self):
-		return {'subject':self.subject,'model':self.model,'use_subject_signals':self.use_subject_signals,\
+		return {'subject':self.subject,'model':self.model,'decision_policy':self.decision_policy,\
+				'update_threshold':self.update_threshold,'use_subject_signals':self.use_subject_signals,\
 				'fittype':self.fittype,'synthetic_trials':self.synthetic_trials,'initial_parameters':self.initial_parameters,\
 				'objective':self.objective,'cma_sigma':self.cma_sigma,'cma_options':self.cma_options,\
 				'synthetic_data':self.synthetic_data,'fit_output':self.fit_output}
@@ -490,18 +555,25 @@ def fit_all_subjects(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/
 				filename = 'fits/Fit_subject_'+str(s.id)+'_criteria_'+criteria+'_objective_'+obj_name
 				fitter.save(filename,overwrite=True)
 
-def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None):
+def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='all',save=False,savefname='fits',group_by=None,movingBound=True):
 	if not fit_dir.endswith('/'):
 		fit_dir+='/'
-	files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Fit_'))])
+	if movingBound:
+		files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Moving-bound-Fit_'))])
+	else:
+		files = sorted([f for f in os.listdir(fit_dir) if (f.endswith(".pkl") and f.startswith('Fit_'))])
 	figures = []
 	ids = []
 	counter = 0
 	for f in files:
 		temp = f.split("_")
-		sid = temp[2]
-		cri = temp[4]
-		obj = temp[6][:-4]
+		sid = cri = obj = ''
+		try:
+			sid = temp[2]
+			cri = temp[4]
+			obj = temp[6][:-4]
+		except:
+			pass
 		if sid not in subject_id:
 			if subject_id!='all':
 				continue
@@ -532,25 +604,23 @@ def analyze_all_fits(fit_dir='fits/',subject_id='all',criteria='all',objective='
 		target = fitter.synthetic_data['target']
 		distractor = fitter.synthetic_data['distractor']
 		indeces = fitter.synthetic_data['indeces']
-		model.threshold = fitter.fit_output['xopt'][0]
-		if len(fitter.fit_output['xopt'])>1:
-			if fitter.fittype!=2:
-				dead_time = fitter.fit_output['xopt'][1]
-			else:
-				dead_time = 0.
+		
+		threshold,dead_time,dead_time_sigma,cost,reward,prior_mean,prior_var =\
+				fitter.objective.fittable_variables_to_tuple(fitter.fit_output['xopt'])
+		if fitter.update_threshold:
+			if cost is not None:
+				fitter.decision_policy.set_constant_cost(cost)
+			if reward is not None:
+				fitter.decision_policy.reward = reward
+			model.set_asymmetric_threshold(fitter.decision_policy.compute_decision_bounds(type_of_bound='norm_mu'))
 		else:
+			model.set_symmetric_threshold(threshold)
+		if dead_time is None:
 			dead_time = 0.
-		if len(fitter.fit_output['xopt'])>2:
-			if fitter.fittype!=1 and fitter.fittype!=2:
-				var_dead_time = fitter.fit_output['xopt'][2]
-			else:
-				var_dead_time = None
-		else:
-			var_dead_time = None
 		simulation = model.batchInference(target,distractor)
 		simulated_rt,_ = np.histogram(simulation[:,3]+dead_time,bin_edges,density=True)
-		if var_dead_time:
-			simulated_rt = conv_hist(simulated_rt,var_dead_time,model.ISI)
+		if dead_time_sigma:
+			simulated_rt = conv_hist(simulated_rt,dead_time_sigma,model.ISI)
 		simulated_sel = 1-simulation[:,1]
 		simulated_sel[np.isnan(simulated_sel)] = 1
 		sim_fluctuations = np.transpose(np.array([target.T-dat[indeces,0],distractor.T-50]),(2,0,1))
@@ -675,7 +745,7 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 	sT = np.array(range(sdk.shape[1]),dtype=float)*ISI
 	
 	# Compute fitted model's rt distribution
-	model.threshold = fit_output[0][0]
+	model.set_symmetric_threshold(fit_output[0][0])
 	simulation = model.batchInference(target,distractor)
 	simulated_rt,_ = np.histogram(simulation[:,3]+fit_output[0][1],bin_edges,density=True)
 	if var_dead_time:
@@ -727,6 +797,39 @@ def test(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceCon
 		plt.show()
 	return 0
 
+def fit_moving_bounds(data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles',subject_id='all',objective='likelihood'):
+	# Fit parameters for each subject and then for all subjects
+	subjects = io.unique_subjects(data_dir)
+	subjects.append(io.merge_subjects(subjects))
+	if subject_id!='all':
+		subjects = [s for s in itertools.ifilter(lambda s: s.id==subject_id,subjects)]
+	objective = Objective(likelihood=True,variable_list=['dead_time','dead_time_sigma','reward','cost'])
+	ISI = 40.
+	priors={'prior_mu_t':50,'prior_mu_d':50,'prior_va_t':15**2,'prior_va_d':15**2}
+	model_var = 25.
+	decision_policy = ct.DecisionPolicy(model_var=2*model_var/ISI,\
+										prior_mu_mean=priors['prior_mu_t']-priors['prior_mu_d'],\
+										prior_mu_var=priors['prior_va_t']+priors['prior_va_d'],\
+										n=500,dt=ISI,T=1e4,reward=1.,penalty=0.,iti=1e3,tp=0.,cost=0.05,store_p=False,compute_value=False)
+	model = pe.KnownVarPerfectInference(model_var_t=model_var,model_var_d=model_var,ISI=ISI,**priors)
+	initial_parameters = [621.71742870406183, 75.978678076060476,1.,0.]
+	ubounds = [5000.,200.,100.,100.]
+	counter = 0
+	for s in subjects:
+		counter+=1
+		print counter
+		fitter = Fitter(s,model,objective=objective,decision_policy=decision_policy,initial_parameters=initial_parameters,ubounds=ubounds,\
+				synthetic_trials=10000,cma_sigma=1/3,cma_options=cma.CMAOptions(),use_subject_signals=True)
+		fitter.fit(restarts=0)
+		if isinstance(objective,Objective):
+			obj_name = objective.name
+		else:
+			obj_name = objective
+		filename = 'fits/Moving-bound-Fit-subject_'+str(s.id)
+		fitter.save(filename,overwrite=True)
+
+
+
 def parse_args():
 	""" Parse arguments passed from the command line """
 	arg_list = ['program','dir','subject','criteria','objective','save','group_by','savefname']
@@ -743,8 +846,8 @@ def parse_args():
 			kwarg_flag = True
 		elif not kwarg_flag:
 			if c==1:
-				if arg.lower() not in ['test','fit','analyze']:
-					raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (arg))
+				if arg.lower() not in ['test','fit','fit_moving_bounds','analyze']:
+					raise ValueError("Supplied program must be either 'test', 'fit', 'fit_moving_bounds' or 'analyze'. User supplied '%s' instead" % (arg))
 				arg = arg.lower()
 			elif c==2:
 				pass
@@ -801,8 +904,8 @@ def parse_args():
 			if key in ['program','subject','criteria','objective']:
 				val = sys.argv[c+1].lower()
 				if key=='program':
-					if val not in ['test','fit','analyze']:
-						raise ValueError("Supplied program must be either 'test', 'fit' or 'analyze'. User supplied '%s' instead" % (val))
+					if val not in ['test','fit','fit_moving_bounds','analyze']:
+						raise ValueError("Supplied program must be either 'test', 'fit', 'fit_moving_bounds' or 'analyze'. User supplied '%s' instead" % (val))
 				elif key=='subject':
 					if arg!='all':
 						try:
@@ -861,7 +964,7 @@ def display_help():
  behavioral_fit.py -h [or --help] displays help
  
  Optional arguments are:
- 'program': Can be 'test', 'fit' or 'analyze'. Determines whether to run the test suite, run the fit_all_subjects function or analyze_all_fits function. [default 'test']
+ 'program': Can be 'test', 'fit', 'fit_moving_bounds' or 'analyze'. Determines whether to run the test suite, run the fit_all_subjects function or analyze_all_fits function. [default 'test']
  'dir': The directory from which to fetch the data. If the program is test or fit, it must be the path to the behavioral data files. If program is analyze, dir must be the path to the fit files. [default 'None' and fall to each function's default]
  'subject': The subject you with to fit or analyze. Can be 'all' saying you with to analyze all subjects (including the merge of all subjects that has id=0) or an integer id 0(represents the merge of all subjects), 1, 2, etc. [default 'all']
  'criteria': The criteria to implement. Posible values are 'optimal', 'dprime', 'var' and 'dprime-var'. [default 'optimal']
@@ -895,3 +998,9 @@ if __name__=="__main__":
 			analyze_all_fits(fit_dir=args['dir'],subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],group_by=args['group_by'],savefname=args['savefname'])
 		else:
 			analyze_all_fits(subject_id=args['subject'],criteria=args['criteria'],objective=args['objective'],save=args['save'],group_by=args['group_by'],savefname=args['savefname'])
+	elif args['program']=='fit_moving_bounds':
+		fit_moving_bounds
+		if args['dir'] is not None:
+			fit_moving_bounds(fit_dir=args['dir'],subject_id=args['subject'])
+		else:
+			fit_moving_bounds(subject_id=args['subject'])

@@ -12,3 +12,17 @@
 
 # Matlab .mat files
 *.mat
+
+# Binaries
+*.o
+*.so
+
+# Build and lib directories
+build/*
+lib/*
+
+# Fits directory
+fits/*
+
+# Cluster job files
+*.qsub

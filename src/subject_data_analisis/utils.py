@@ -25,7 +25,7 @@ def erfinv(y):
 	else:
 		if y<y0:
 			z = y*y;
-			x = y*(((a[3]*z+a[2])*z+a[1])*z+a[0])/((((b[3]*z+b[3])*z+b[1])*z+b[0])*z+1.0)
+			x = y*(((a[3]*z+a[2])*z+a[1])*z+a[0])/((((b[3]*z+b[2])*z+b[1])*z+b[0])*z+1.0)
 		else:
 			z = np.sqrt(-math.log(0.5*(1.0-y)))
 			x = (((c[3]*z+c[2])*z+c[1])*z+c[0])/((d[1]*z+d[0])*z+1.0)
@@ -36,6 +36,12 @@ def erfinv(y):
 
 _vectErf = np.vectorize(math.erf,otypes=[np.float])
 _vectErfinv = np.vectorize(erfinv,otypes=[np.float])
+_vectGamma = np.vectorize(math.gamma,otypes=[np.float])
+
+def normpdf(x, mu=0., sigma=1.):
+	u = (x-mu)/sigma
+	return 0.3989422804014327/np.abs(sigma)*np.exp(-0.5*u*u)
+
 def normcdf(x,mu=0.,sigma=1.):
 	"""
 	Compute normal cummulative distribution with mean mu and standard
@@ -72,3 +78,9 @@ def normcdfinv(y,mu=0.,sigma=1.):
 			raise ValueError("Invalid sigma supplied to normcdfinv. sigma cannot be 0")
 		x = sigma*x+mu
 	return x
+
+def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
+	return beta**alpha/_vectGamma(alpha)*np.sqrt(0.5*l/np.pi)*t**(alpha-0.5)*np.exp(-0.5*l*t*(x-mu)**2-beta*t)
+
+def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
+	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
