@@ -86,26 +86,27 @@ class Sweeper:
 		self.dec_ax = plt.subplot(121)
 		plt.step(xh,hit_rt,label='Subject '+str(s.id)+' hit rt',where='post',color='b')
 		plt.step(xh,-miss_rt,label='Subject '+str(s.id)+' miss rt',where='post',color='r')
-		plt.plot(self.m.t,dec_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
-		plt.plot(self.m.t,-dec_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
+		plt.plot(self.m.t[1:],dec_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
+		plt.plot(self.m.t[1:],-dec_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
 		plt.xlim([0,mxlim])
 		plt.xlabel('T [s]')
 		plt.ylabel('Prob density')
 		plt.legend()
 		
 		plt.subplot(222)
-		plt.plot(self.m.t,self.dec_gs['full']['all'].T)
+		plt.plot(self.m.t[1:],self.dec_gs['full']['all'].T)
 		
 		self.conf_ax = plt.subplot(224)
 		confidence_params = [self.slider.val]
 		conf_rt = mo.confidence_rt_distribution(self.dec_gs,self.cost,self.dead_time,self.dead_time_sigma,self.phase_out_prob,self.m,self.mu,self.mu_prob,self.max_RT,confidence_params,include_t0=False)
 		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(s.id)+' high',where='post',color='b')
 		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(s.id)+' low',where='post',color='r')
-		#~ l1, = plt.plot(self.m.t,np.sum(conf_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='b')
-		#~ l2, = plt.plot(self.m.t,-np.sum(conf_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='r')
-		l11,l12 = plt.plot(self.m.t,conf_rt['full']['high'].T,label='Theoretical high',linewidth=2,color='b')
-		l21,l22 = plt.plot(self.m.t,-conf_rt['full']['low'].T,label='Theoretical low',linewidth=2,color='r')
-		self.lines = [l11,l12,l21,l22]
+		l1, = plt.plot(self.m.t[1:],np.sum(conf_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='b')
+		l2, = plt.plot(self.m.t[1:],-np.sum(conf_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='r')
+		self.lines = [l1,l2]
+		#~ l11,l12 = plt.plot(self.m.t[1:],conf_rt['full']['high'].T,label='Theoretical high',linewidth=2,color='b')
+		#~ l21,l22 = plt.plot(self.m.t[1:],-conf_rt['full']['low'].T,label='Theoretical low',linewidth=2,color='r')
+		#~ self.lines = [l11,l12,l21,l22]
 		params = [self.cost, self.dead_time, self.dead_time_sigma, self.phase_out_prob, self.slider.val]
 		self.nLL = mo.full_confidence_merit(params,self.m,self.dat,self.mu,self.mu_indeces)
 		plt.xlim([0,mxlim])
@@ -115,12 +116,12 @@ class Sweeper:
 	def update(self,val):
 		confidence_params = [self.slider.val]
 		conf_rt = mo.confidence_rt_distribution(self.dec_gs,self.cost,self.dead_time,self.dead_time_sigma,self.phase_out_prob,self.m,self.mu,self.mu_prob,self.max_RT,confidence_params,include_t0=False)
-		#~ self.lines[0].set_ydata(np.sum(conf_rt['full']['high'],axis=0))
-		#~ self.lines[1].set_ydata(-np.sum(conf_rt['full']['low'],axis=0))
-		self.lines[0].set_ydata(conf_rt['full']['high'][0])
-		self.lines[1].set_ydata(conf_rt['full']['high'][1])
-		self.lines[2].set_ydata(-conf_rt['full']['low'][0])
-		self.lines[3].set_ydata(-conf_rt['full']['low'][1])
+		self.lines[0].set_ydata(np.sum(conf_rt['full']['high'],axis=0))
+		self.lines[1].set_ydata(-np.sum(conf_rt['full']['low'],axis=0))
+		#~ self.lines[0].set_ydata(conf_rt['full']['high'][0])
+		#~ self.lines[1].set_ydata(conf_rt['full']['high'][1])
+		#~ self.lines[2].set_ydata(-conf_rt['full']['low'][0])
+		#~ self.lines[3].set_ydata(-conf_rt['full']['low'][1])
 
 if __name__=="__main__":
 	sweeper = Sweeper()

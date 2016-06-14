@@ -292,13 +292,14 @@ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
 	if include_t0:
 		phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
+		#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
 	else:
 		phased_out_rt[m.t[1:]<_max_RT] = 1./(_max_RT)
-	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
+		#~ phased_out_rt[np.logical_and(m.t[1:]<_max_RT,m.t[1:]>_dead_time)] = 1./(_max_RT-_dead_time)
 	xub,xlb = m.xbounds()
 	for index,drift in enumerate(mu):
-		g = m.rt(drift,bounds=(xub,xlb))
-		if include_t0:
+		g = np.array(m.rt(drift,bounds=(xub,xlb)))
+		if not include_t0:
 			g = g[:,1:]
 		g1,g2 = add_dead_time(g,m.dt,dead_time,dead_time_sigma)
 		g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
@@ -322,27 +323,29 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 		rt = {'full':{'high':np.zeros((2,m.t.shape[0]-1)),'low':np.zeros((2,m.t.shape[0]-1))}}
 		phased_out_rt = np.zeros_like(m.t)[1:]
 	m.cost = cost
-	phased_out_rt = np.zeros_like(m.t)
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
 	if include_t0:
 		phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
+		#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
 	else:
 		phased_out_rt[m.t[1:]<_max_RT] = 1./(_max_RT)
-	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
+		#~ phased_out_rt[np.logical_and(m.t[1:]<_max_RT,m.t[1:]>_dead_time)] = 1./(_max_RT-_dead_time)
 	for index,drift in enumerate(mu):
 		g = dec_gs[drift]['all']
-		phigh = (1.-0.5*phase_out_prob)*np.ones_like(g)
-		phigh[m.log_odds()<confidence_params[0]] = 0.
+		phigh = (1.-0.75*phase_out_prob)*np.ones_like(g)
+		if include_t0:
+			phigh[m.log_odds()<confidence_params[0]] = 0.25*phase_out_prob
+		else:
+			phigh[m.log_odds()[:,1:]<confidence_params[0]] = 0.25*phase_out_prob
 		plow = 1.-phigh
-		#~ phigh*=g
-		#~ plow*=g
-		#~ g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((phigh,plow)),m.dt,dead_time,dead_time_sigma)
-		#~ g1h = g1h*(1-phase_out_prob)
-		#~ g2h = g2h*(1-phase_out_prob)
-		#~ g1l = g1l*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
-		#~ g2l = g2l*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
-		g1h,g2h,g1l,g2l = np.concatenate((phigh,plow))
+		phigh*=g
+		plow*=g
+		g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((phigh,plow)),m.dt,dead_time,dead_time_sigma)
+		g1h = g1h*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2h = g2h*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g1l = g1l*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2l = g2l*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
 		rt[drift] = {}
 		rt[drift]['high'] = np.array([g1h,g2h])
 		rt[drift]['low'] = np.array([g1l,g2l])
