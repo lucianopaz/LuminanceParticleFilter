@@ -270,7 +270,7 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2l,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
 	return nlog_likelihood
 
-def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None,include_t0=False):
+def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None,include_t0=True):
 	rt,dec_gs = decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,return_gs=True,include_t0=include_t0)
 	if confidence_params:
 		dec_conf = confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params,include_t0=include_t0)
@@ -278,7 +278,7 @@ def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,
 			rt[key].update(dec_conf[key])
 	return rt
 
-def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,return_gs=False,include_t0=False):
+def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,return_gs=False,include_t0=True):
 	if include_t0:
 		rt = {'full':{'all':np.zeros((2,m.t.shape[0]))}}
 		gs = {'full':{'all':np.zeros((2,m.t.shape[0]))}}
@@ -315,7 +315,7 @@ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,
 		output+=(gs,)
 	return output
 
-def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params,include_t0=False):
+def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params,include_t0=True):
 	if include_t0:
 		rt = {'full':{'high':np.zeros((2,m.t.shape[0])),'low':np.zeros((2,m.t.shape[0]))}}
 		phased_out_rt = np.zeros_like(m.t)
@@ -371,7 +371,8 @@ def plot_fit(subject,method='full',save=None):
 				f.close()
 				high_conf_thresh = out2[0]['high_confidence_threshold']
 			except (IOError,EOFError):
-				high_conf_thresh = 0.8
+				hand_picked_thresh = [0.8,0.65,0.8,0.7,0.64,0.93,0.81]
+				high_conf_thresh = hand_picked_thresh[subject.id]
 			except Exception as err:
 				high_conf_thresh = out2[0][0]
 	except IndexError,TypeError:
@@ -433,7 +434,7 @@ def plot_fit(subject,method='full',save=None):
 	
 	mxlim = np.ceil(max_RT)
 	mt.rc('axes', color_cycle=['b','r'])
-	plt.figure()
+	plt.figure(figsize=(11,8))
 	plt.subplot(121)
 	plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post')
 	plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post')
