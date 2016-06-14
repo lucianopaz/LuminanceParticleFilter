@@ -49,8 +49,8 @@ class DecisionPolicy():
 		self.g = np.linspace(self.dg/2.,1.-self.dg/2.,self.n)
 		self.dt = float(dt)
 		self.T = float(T)
-		self.t = np.arange(0.,float(T+dt),float(dt),np.float)
-		self.nT = self.t.shape[0]
+		self.nT = int(T/dt)+1
+		self.t = np.linspace(0.,float(T),self.nT)
 		self.cost = cost*np.ones_like(self.t)
 		self.store_p = store_p
 		self.reward = reward

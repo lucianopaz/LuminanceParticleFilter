@@ -290,6 +290,7 @@ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,
 	m.cost = cost
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
+	print gs['full']['all'].shape,m.t.shape,phased_out_rt.shape
 	if include_t0:
 		phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
 		#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
@@ -371,7 +372,7 @@ def plot_fit(subject,method='full',save=None):
 				f.close()
 				high_conf_thresh = out2[0]['high_confidence_threshold']
 			except (IOError,EOFError):
-				hand_picked_thresh = [0.8,0.65,0.8,0.7,0.64,0.93,0.81]
+				hand_picked_thresh = [0.8,0.74,0.8,0.7,0.64,0.93,0.81]
 				high_conf_thresh = hand_picked_thresh[subject.id]
 			except Exception as err:
 				high_conf_thresh = out2[0][0]
