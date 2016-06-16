@@ -2872,7 +2872,7 @@ class CMAEvolutionStrategy(OOOptimizer):
             self._Yneg = np.zeros((N, N))
 
         self.D = self.dC**0.5  # we assume that C is diagonal
-
+        
         # self.gp.pheno adds fixed variables
         relative_stds = ((self.gp.pheno(self.mean + self.sigma * self.sigma_vec * self.D)
                           - self.gp.pheno(self.mean - self.sigma * self.sigma_vec * self.D)) / 2.0

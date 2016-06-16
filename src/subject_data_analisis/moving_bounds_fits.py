@@ -54,7 +54,14 @@ elif loc==Location.cluster:
 	data_dir='/homedtic/lpaz/DecisionConfidenceKernels/data'
 elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
-ISI = 0.04 #seconds
+
+time_units = 'seconds'
+if time_units=='seconds':
+	ISI = 0.04 #seconds
+elif time_units=='milliseconds':
+	ISI = 40
+else:
+	raise ValueError("Unknown time units")
 distractor = 50. # cd/m^2
 patch_sigma = 5. # cd/m^2
 model_var = (patch_sigma**2)*2/ISI
@@ -104,7 +111,7 @@ def log_odds_likelihood(gs,confidence_params,log_odds,dt,dead_time,dead_time_sig
 	print phigh.shape, plow.shape, np.concatenate((phigh,plow)).shape
 	return add_dead_time(np.concatenate((phigh,plow)),dt,dead_time,dead_time_sigma)
 
-def fit(subject,method="full"):
+def fit(subject,method="full",T=None.,dt=None,iti=None,tp=None):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -113,48 +120,73 @@ def fit(subject,method="full"):
 	
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	
-	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
+	if time_units=='seconds':
+		if T is None:
+			T = 10.
+		if iti is None:
+			iti = 1.
+		if tp is None:
+			tp = 0.
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,30.])]
+		start_point = [0.2,0.1,0.5,0.1,0.2]
+	else:
+		if T is None:
+			T = 10000.
+		if iti is None:
+			iti = 1000.
+		if tp is None:
+			tp = 0.
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,30.])]
+		start_point = [0.0002,100,500,0.1,0.2]
+	if dt is None:
+		dt = ISI
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=T,dt=dt,reward=1,penalty=0,iti=iti,tp=tp,store_p=False)
+	scaling_factor = bounds[1]-bounds[0]
+	
 	if method=="two_step":
-		options = cma.CMAOptions({'bounds':[0.,10.]})
-		res = cma.fmin(two_step_merit, [0.2], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
+		res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res2 = []
 		two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
-		res[0] = {'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]}
-		return res[:7]
+		res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
 	elif method=='full':
-		options = cma.CMAOptions({'bounds':[np.array([0.,0.,0.,0.]),np.array([10.,0.4,3.,1.])]})
-		res = cma.fmin(full_merit, [0.2,0.1,0.5,0.1], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res[0] = {'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]}
-		return res[:7]
+		options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
+		res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
 	elif method=='confidence_only':
 		f = open('fits/inference_fit_full_subject_'+str(subject.id)+'.pkl','r')
 		out = pickle.load(f)
 		f.close()
-		options = cma.CMAOptions({'bounds':[np.array([0.]),np.array([3.])]})
-		res = cma.fmin(confidence_only_merit, [0.2], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
-		res[0] = {'high_confidence_threshold':res[0][4]}
-		return res[:7]
+		options = cma.CMAOptions({'bounds':[bounds[0][-1],bounds[1][-1]],'CMA_stds':scaling_factor[-1]})
+		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
+		res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
-		options = cma.CMAOptions({'bounds':[np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,30.])]})
-		res = cma.fmin(full_confidence_merit, [0.2,0.1,0.5,0.1,0.2], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res[0] = {'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]}
-		return res[:7]
+		options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
+		res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
+	return res
 
 
 def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 	dead_time = params[0]
 	dead_time_sigma = params[1]
 	phase_out_prob = params[2]
-	max_RT = np.max(dat[:,1])*1e-3
+	if time_units=='seconds':
+		max_RT = np.max(dat[:,1])*1e-3
+	else:
+		max_RT = np.max(dat[:,1])
 	phase_out_likelihood = phase_out_prob/max_RT
 	
 	nlog_likelihood = 0.
 	for index,(drift,g1,g2) in enumerate(zip(mu,g1s,g2s)):
 		rt1_likelihood,rt2_likelihood = add_dead_time((g1,g2),m.dt,dead_time,dead_time_sigma)
 		for drift_trial in dat[mu_indeces==index]:
-			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			if time_units=='seconds':
+				rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			else:
+				rt = drift_trial[1]
 			perf = drift_trial[2]
 			if perf==1:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt1_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
@@ -171,8 +203,15 @@ def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
 		g1,g2 = m.rt(drift,bounds=(xub,xlb))
 		g1s.append(g1)
 		g2s.append(g2)
-	options = cma.CMAOptions({'bounds':[np.array([0.,0.,0.]),np.array([0.5,3.,1.])]})
-	res = cma.fmin(dead_time_merit, [0.1,0.5,0.1], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
+	if time_units=='seconds':
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,30.])]
+		start_point = [0.2,0.1,0.5,0.1,0.2]
+	else:
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,30.])]
+		start_point = [0.0002,100,500,0.1,0.2]
+	scaling_factor = bounds[1]-bounds[0]
+	options = cma.CMAOptions({'bounds':[start_point[0][1:4],start_point[1][1:4]],'CMA_stds':scaling_factor[1:4]})
+	res = cma.fmin(dead_time_merit, start_point[1:4], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
 	params = res[0]
 	nlog_likelihood = res[1]
 	#~ params,nlog_likelihood,niter,nfuncalls,warnflag =\
@@ -190,7 +229,10 @@ def full_merit(params,m,dat,mu,mu_indeces):
 	dead_time = params[1]
 	dead_time_sigma = params[2]
 	phase_out_prob = params[3]
-	max_RT = np.max(dat[:,1])*1e-3
+	if time_units=='seconds':
+		max_RT = np.max(dat[:,1])*1e-3
+	else:
+		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
 	m.cost = cost
@@ -198,7 +240,10 @@ def full_merit(params,m,dat,mu,mu_indeces):
 	for index,drift in enumerate(mu):
 		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time,dead_time_sigma)
 		for drift_trial in dat[mu_indeces==index]:
-			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			if time_units=='seconds':
+				rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			else:
+				rt = drift_trial[1]
 			perf = drift_trial[2]
 			if perf==1:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
@@ -212,7 +257,10 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 	dead_time_sigma = decision_parameters['dead_time_sigma']
 	phase_out_prob = decision_parameters['phase_out_prob']
 	high_confidence_threshold = params[0]
-	max_RT = np.max(dat[:,1])*1e-3
+	if time_units=='seconds':
+		max_RT = np.max(dat[:,1])*1e-3
+	else:
+		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
 	m.cost = cost
@@ -228,7 +276,10 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 		gh = g1h+g2h
 		gl = g1l+g2l
 		for drift_trial in dat[mu_indeces==index]:
-			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			if time_units=='seconds':
+				rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			else:
+				rt = drift_trial[1]
 			conf = drift_trial[3]
 			if conf==2:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gh,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
@@ -243,7 +294,10 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 	dead_time_sigma = params[2]
 	phase_out_prob = params[3]
 	high_confidence_threshold = params[4]
-	max_RT = np.max(dat[:,1])*1e-3
+	if time_units=='seconds':
+		max_RT = np.max(dat[:,1])*1e-3
+	else:
+		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
 	m.cost = cost
@@ -257,7 +311,10 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 		confidence_rt = np.concatenate((phigh*gs,plow*gs))
 		g1h,g2h,g1l,g2l = add_dead_time(confidence_rt,m.dt,dead_time,dead_time_sigma)
 		for drift_trial in dat[mu_indeces==index]:
-			rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			if time_units=='seconds':
+				rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
+			else:
+				rt = drift_trial[1]
 			perf = drift_trial[2]
 			conf = drift_trial[3]
 			if perf==1 and conf==2:
@@ -385,7 +442,10 @@ def plot_fit(subject,method='full',save=None):
 			high_conf_thresh = out[0][4]
 	
 	dat,t,d = subject.load_data()
-	rt = dat[:,1]*1e-3
+	if time_units=='seconds':
+		rt = dat[:,1]*1e-3
+	else:
+		rt = dat[:,1]
 	max_RT = np.max(rt)
 	perf = dat[:,2]
 	conf = dat[:,3]
@@ -422,7 +482,16 @@ def plot_fit(subject,method='full',save=None):
 	counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
 	p = counts/np.sum(counts)
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
-	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
+	
+	if time_units=='seconds':
+		T = 10.
+		iti = 1.
+		tp = 0.
+	else:
+		T = 10000.
+		iti = 1000.
+		tp = 0.
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=T,dt=ISI,reward=1,penalty=0,iti=iti,tp=tp,store_p=False)
 	
 	
 	#~ print subject.id,[cost,dead_time,dead_time_sigma,phase_out_prob,high_conf_thresh]
@@ -479,11 +548,25 @@ def plot_fit(subject,method='full',save=None):
 	else:
 		plt.show(True)
 
+def parse_input:
+	task = 0
+	ntasks = 1
+	method = 'full'
+	save = None
+	time_units = 'seconds'
+	T = None
+	iti = None
+	tp = None
+	dt = None
+	
+
 if __name__=="__main__":
 	task = 0
 	ntasks = 1
 	method = 'full'
 	save = None
+	time_units = 'seconds'
+	
 	if len(sys.argv)>1:
 		task = int(sys.argv[1])
 		ntasks = int(sys.argv[2])
@@ -492,22 +575,33 @@ if __name__=="__main__":
 		if len(sys.argv)>3:
 			method = sys.argv[3]
 			if len(sys.argv)>4:
-				save = PdfPages('../../figs/inference_fits_'+method+'.pdf')
+				if int(sys.argv[4]):
+					save = PdfPages('../../figs/inference_fits_'+method+'.pdf')
+				if len(sys.argv)>5:
+					time_units = sys.argv[5]
+	
+	if time_units=='seconds':
+		ISI = 0.04 #seconds
+	elif time_units=='milliseconds':
+		ISI = 40
+	else:
+		raise ValueError("Unknown time units")
+	model_var = (patch_sigma**2)*2/ISI
 	
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			#~ fit_output = fit(s,method=method)
-			#~ f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
-			#~ pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
-			#~ f.close()
-			#~ if method=='full' or method=='two_step':
-				#~ fit_output = fit(s,method='confidence_only')
-				#~ f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
-				#~ pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
-				#~ f.close()
-			plot_fit(s,method=method,save=save)
+			fit_output = fit(s,method=method)
+			f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
+			pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
+			f.close()
+			if method=='full' or method=='two_step':
+				fit_output = fit(s,method='confidence_only')
+				f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
+				pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
+				f.close()
+			#~ plot_fit(s,method=method,save=save)
 			#~ break
 	if save:
 		save.close()
