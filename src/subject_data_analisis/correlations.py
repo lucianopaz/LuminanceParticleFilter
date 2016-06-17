@@ -20,6 +20,11 @@ for index,(s,fname) in enumerate(zip(subjects,fit_files)):
 	f = open(fname,'r')
 	fit = pickle.load(f)
 	f.close()
+	if isinstance(fit,dict):
+		time_units = fit['options']['time_units']
+		fit = fit['fit_output']
+	else:
+		time_units = 'seconds'
 	try:
 		cost = fit[0]['cost']
 		dead_time = fit[0]['dead_time']
@@ -32,14 +37,22 @@ for index,(s,fname) in enumerate(zip(subjects,fit_files)):
 		phase_out_prob = fit[0][3]
 	high_conf_threshold = hand_picked_thresh[index]
 	dat,t,d = s.load_data()
-	rt = dat[:,1]*1e-3
+	if time_units=='seconds':
+		rt = dat[:,1]*1e-3
+	else:
+		rt = dat[:,1]
 	perf = dat[:,2]
 	conf = dat[:,3]-1
 	
 	stats[s.id] = {}
-	stats[s.id]['cost'] = cost
-	stats[s.id]['dead_time'] = dead_time
-	stats[s.id]['dead_time_sigma'] = dead_time_sigma
+	if time_units=='seconds':
+		stats[s.id]['cost'] = cost
+		stats[s.id]['dead_time'] = dead_time
+		stats[s.id]['dead_time_sigma'] = dead_time_sigma
+	else:
+		stats[s.id]['cost'] = cost*1e3
+		stats[s.id]['dead_time'] = dead_time*1e3
+		stats[s.id]['dead_time_sigma'] = dead_time_sigma*1e3
 	stats[s.id]['phase_out_prob'] = phase_out_prob
 	stats[s.id]['high_conf_threshold'] = high_conf_threshold
 	stats[s.id]['n'] = dat.shape[0]

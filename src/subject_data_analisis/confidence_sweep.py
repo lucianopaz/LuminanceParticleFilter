@@ -25,18 +25,44 @@ class Sweeper:
 		f = open(fname)
 		out = pickle.load(f)
 		f.close()
-		try:
-			self.cost = out[0]['cost']
-			self.dead_time = out[0]['dead_time']
-			self.dead_time_sigma = out[0]['dead_time_sigma']
-			self.phase_out_prob = out[0]['phase_out_prob']
-		except:
-			self.cost = out[0][0]
-			self.dead_time = out[0][1]
-			self.dead_time_sigma = out[0][2]
-			self.phase_out_prob = out[0][3]
+		if isinstance(out,dict):
+			fit_output = out['fit_output']
+			time_units = out['options']['time_units']
+			T = out['options']['T']
+			dt = out['options']['dt']
+			iti = out['options']['iti']
+			tp = out['options']['tp']
+			reward = out['options']['reward']
+			penalty = out['options']['penalty']
+			n = out['options']['n']
+			cost = out[0]['cost']
+			dead_time = out[0]['dead_time']
+			dead_time_sigma = out[0]['dead_time_sigma']
+			phase_out_prob = out[0]['phase_out_prob']
+		else:
+			time_units = 'seconds'
+			T = None
+			dt = None
+			iti = None
+			tp = None
+			reward = 1.
+			penalty = 0.
+			n = 101
+			try:
+				self.cost = out[0]['cost']
+				self.dead_time = out[0]['dead_time']
+				self.dead_time_sigma = out[0]['dead_time_sigma']
+				self.phase_out_prob = out[0]['phase_out_prob']
+			except:
+				self.cost = out[0][0]
+				self.dead_time = out[0][1]
+				self.dead_time_sigma = out[0][2]
+				self.phase_out_prob = out[0][3]
 		self.dat,t,d = s.load_data()
-		rt = self.dat[:,1]*1e-3
+		if time_units=='seconds':
+			rt = self.dat[:,1]*1e-3
+		else:
+			rt = self.dat[:,1]
 		self.max_RT = np.max(rt)
 		perf = self.dat[:,2]
 		conf = self.dat[:,3]
@@ -66,6 +92,27 @@ class Sweeper:
 		low_hit_rt/=normalization
 		low_miss_rt/=normalization
 		
+		if time_units=='seconds':
+			if T is None:
+				T = 10.
+			if dt is None:
+				dt = mo.ISI
+			if iti is None:
+				iti = 1.
+			if tp is None:
+				tp = 0.
+		else:
+			mo.ISI*=1e3
+			mo.model_var*=1e-3
+			if T is None:
+				T = 10000.
+			if dt is None:
+				dt = mo.ISI
+			if iti is None:
+				iti = 1000.
+			if tp is None:
+				tp = 0.
+		
 		self.mu,self.mu_indeces,count = np.unique((self.dat[:,0]-mo.distractor)/mo.ISI,return_inverse=True,return_counts=True)
 		self.mu_prob = count.astype(np.float64)
 		self.mu_prob/=np.sum(self.mu_prob)
@@ -73,7 +120,7 @@ class Sweeper:
 		counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
 		p = counts/np.sum(counts)
 		prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
-		self.m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=1.,tp=0.,store_p=False)
+		self.m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 		
 		dec_rt,self.dec_gs = mo.decision_rt_distribution(self.cost,self.dead_time,self.dead_time_sigma,self.phase_out_prob,self.m,self.mu,self.mu_prob,self.max_RT,return_gs=True,include_t0=False)
 		
@@ -89,7 +136,10 @@ class Sweeper:
 		plt.plot(self.m.t[1:],dec_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
 		plt.plot(self.m.t[1:],-dec_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
 		plt.xlim([0,mxlim])
-		plt.xlabel('T [s]')
+		if time_units=='seconds':
+			plt.xlabel('T [s]')
+		else:
+			plt.xlabel('T [ms]')
 		plt.ylabel('Prob density')
 		plt.legend()
 		
@@ -107,7 +157,10 @@ class Sweeper:
 		#~ l21,l22 = plt.plot(self.m.t[1:],-conf_rt['full']['low'].T,label='Theoretical low',linewidth=2,color='r')
 		#~ self.lines = [l11,l12,l21,l22]
 		plt.xlim([0,mxlim])
-		plt.xlabel('T [s]')
+		if time_units=='seconds':
+			plt.xlabel('T [s]')
+		else:
+			plt.xlabel('T [ms]')
 		self.conf_ax.set_title("nLL = {0}".format(self.nLL))
 		plt.legend()
 		

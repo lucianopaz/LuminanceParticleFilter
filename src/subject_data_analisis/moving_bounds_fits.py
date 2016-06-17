@@ -56,12 +56,7 @@ elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
 
 time_units = 'seconds'
-if time_units=='seconds':
-	ISI = 0.04 #seconds
-elif time_units=='milliseconds':
-	ISI = 40
-else:
-	raise ValueError("Unknown time units")
+ISI = 0.04 #seconds
 distractor = 50. # cd/m^2
 patch_sigma = 5. # cd/m^2
 model_var = (patch_sigma**2)*2/ISI
@@ -108,10 +103,9 @@ def log_odds_likelihood(gs,confidence_params,log_odds,dt,dead_time,dead_time_sig
 		plow = 1.-phigh
 		phigh*=gs
 		plow*=gs
-	print phigh.shape, plow.shape, np.concatenate((phigh,plow)).shape
 	return add_dead_time(np.concatenate((phigh,plow)),dt,dead_time,dead_time_sigma)
 
-def fit(subject,method="full",T=None.,dt=None,iti=None,tp=None):
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -119,7 +113,6 @@ def fit(subject,method="full",T=None.,dt=None,iti=None,tp=None):
 	p = counts/np.sum(counts)
 	
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
-	
 	if time_units=='seconds':
 		if T is None:
 			T = 10.
@@ -140,29 +133,34 @@ def fit(subject,method="full",T=None.,dt=None,iti=None,tp=None):
 		start_point = [0.0002,100,500,0.1,0.2]
 	if dt is None:
 		dt = ISI
-	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=T,dt=dt,reward=1,penalty=0,iti=iti,tp=tp,store_p=False)
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 	scaling_factor = bounds[1]-bounds[0]
 	
 	if method=="two_step":
 		options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
-		res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res2 = []
-		two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
+		res = (start_point[:4],None,None,None,None,None,None,)
+		res2 = (start_point[:4],None,None,None,None,None,None,)
+		#~ res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		#~ res2 = []
+		#~ two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
 		res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
 	elif method=='full':
 		options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
-		res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		res = (start_point[:4],None,None,None,None,None,None,)
+		#~ res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
 	elif method=='confidence_only':
 		f = open('fits/inference_fit_full_subject_'+str(subject.id)+'.pkl','r')
 		out = pickle.load(f)
 		f.close()
 		options = cma.CMAOptions({'bounds':[bounds[0][-1],bounds[1][-1]],'CMA_stds':scaling_factor[-1]})
-		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
+		res = ([start_point[-1]],None,None,None,None,None,None,)
+		#~ res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
 		res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
 		options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
-		res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		res = (start_point,None,None,None,None,None,None,)
+		#~ res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
@@ -221,7 +219,6 @@ def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
 		del output_list[:]
 		output_list.append(cost)
 		output_list.extend(params)
-	print cost[0],params[0],params[1],nlog_likelihood
 	return nlog_likelihood
 
 def full_merit(params,m,dat,mu,mu_indeces):
@@ -347,7 +344,6 @@ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,
 	m.cost = cost
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
-	print gs['full']['all'].shape,m.t.shape,phased_out_rt.shape
 	if include_t0:
 		phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
 		#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
@@ -412,34 +408,62 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	return rt
 
 def plot_fit(subject,method='full',save=None):
-	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'.pkl','r')
+	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'_test.pkl','r')
 	out = pickle.load(f)
 	f.close()
-	try:
-		cost = out[0]['cost']
-		dead_time = out[0]['dead_time']
-		dead_time_sigma = out[0]['dead_time_sigma']
-		phase_out_prob = out[0]['phase_out_prob']
+	if isinstance(out,dict):
+		fit_output = out['fit_output']
+		options = out['options']
+		cost = fit_output[0]['cost']
+		dead_time = fit_output[0]['dead_time']
+		dead_time_sigma = fit_output[0]['dead_time_sigma']
+		phase_out_prob = fit_output[0]['phase_out_prob']
+		print fit_output[0]
 		try:
-			high_conf_thresh = out[0]['high_confidence_threshold']
+			high_conf_thresh = fit_output[0]['high_confidence_threshold']
 		except KeyError:
 			try:
-				f = open("inference_fit_confidence_only_subject_"+str(subject.id)+".pkl",'r')
+				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+"_test.pkl",'r')
+				print f
 				out2 = pickle.load(f)
 				f.close()
+				print out2
+				if isinstance(out2,dict):
+					out2 = out2['fit_output']
 				high_conf_thresh = out2[0]['high_confidence_threshold']
 			except (IOError,EOFError):
 				hand_picked_thresh = [0.8,0.74,0.8,0.7,0.64,0.93,0.81]
 				high_conf_thresh = hand_picked_thresh[subject.id]
 			except Exception as err:
 				high_conf_thresh = out2[0][0]
-	except IndexError,TypeError:
-		cost = out[0][0]
-		dead_time = out[0][1]
-		dead_time_sigma = out[0][2]
-		phase_out_prob = out[0][3]
-		if 'confidence' in method:
-			high_conf_thresh = out[0][4]
+	else:
+		options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
+		try:
+			cost = out[0]['cost']
+			dead_time = out[0]['dead_time']
+			dead_time_sigma = out[0]['dead_time_sigma']
+			phase_out_prob = out[0]['phase_out_prob']
+			try:
+				high_conf_thresh = out[0]['high_confidence_threshold']
+			except KeyError:
+				try:
+					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+"_test.pkl",'r')
+					out2 = pickle.load(f)
+					f.close()
+					high_conf_thresh = out2[0]['high_confidence_threshold']
+				except (IOError,EOFError):
+					hand_picked_thresh = [0.8,0.74,0.8,0.7,0.64,0.93,0.81]
+					high_conf_thresh = hand_picked_thresh[subject.id]
+				except Exception as err:
+					high_conf_thresh = out2[0][0]
+		except IndexError,TypeError:
+			cost = out[0][0]
+			dead_time = out[0][1]
+			dead_time_sigma = out[0][2]
+			phase_out_prob = out[0][3]
+			if 'confidence' in method:
+				high_conf_thresh = out[0][4]
+	time_units = options['time_units']
 	
 	dat,t,d = subject.load_data()
 	if time_units=='seconds':
@@ -483,15 +507,30 @@ def plot_fit(subject,method='full',save=None):
 	p = counts/np.sum(counts)
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	
+	T = options['T']
+	dt = options['dt']
+	iti = options['iti']
+	tp = options['tp']
+	reward = options['reward']
+	penalty = options['penalty']
+	n = options['n']
 	if time_units=='seconds':
-		T = 10.
-		iti = 1.
-		tp = 0.
+		if T is None:
+			T = 10.
+		if iti is None:
+			iti = 1.
+		if tp is None:
+			tp = 0.
 	else:
-		T = 10000.
-		iti = 1000.
-		tp = 0.
-	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=101,T=T,dt=ISI,reward=1,penalty=0,iti=iti,tp=tp,store_p=False)
+		if T is None:
+			T = 10000.
+		if iti is None:
+			iti = 1000.
+		if tp is None:
+			tp = 0.
+	if dt is None:
+		dt = ISI
+	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 	
 	
 	#~ print subject.id,[cost,dead_time,dead_time_sigma,phase_out_prob,high_conf_thresh]
@@ -511,7 +550,10 @@ def plot_fit(subject,method='full',save=None):
 	plt.plot(m.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2)
 	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2)
 	plt.xlim([0,mxlim])
-	plt.xlabel('T [s]')
+	if time_units=='seconds':
+		plt.xlabel('T [s]')
+	else:
+		plt.xlabel('T [ms]')
 	plt.ylabel('Prob density')
 	plt.legend()
 	plt.subplot(122)
@@ -520,7 +562,10 @@ def plot_fit(subject,method='full',save=None):
 	plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2)
 	plt.plot(m.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2)
 	plt.xlim([0,mxlim])
-	plt.xlabel('T [s]')
+	if time_units=='seconds':
+		plt.xlabel('T [s]')
+	else:
+		plt.xlabel('T [ms]')
 	plt.legend()
 	
 	
@@ -548,60 +593,120 @@ def plot_fit(subject,method='full',save=None):
 	else:
 		plt.show(True)
 
-def parse_input:
-	task = 0
-	ntasks = 1
-	method = 'full'
-	save = None
-	time_units = 'seconds'
-	T = None
-	iti = None
-	tp = None
-	dt = None
+def parse_input():
+	script_help = """ moving_bounds_fits.py help
+ Sintax:
+ moving_bounds_fits.py [option flag] [option value]
+ 
+ moving_bounds_fits.py -h [or --help] displays help
+ 
+ Optional arguments are:
+ '-t' or '--task': Integer that identifies the task number when running multiple tasks in parallel. Is one based, thus the first task is task 1 [default 1]
+ '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [default 1]
+ '-m' or '--method': String that identifies the fit method. Available values are two_step, full, confidence_only and full_confidence. [default full]
+ '-s' or '--save': This flag takes no values. If present it saves the figure
+ '-u' or '--units': String that identifies the time units that will be used. Available values are seconds and milliseconds. [default seconds]
+ '-n': Integer that specifies the belief space discretization for the DecisionPolicy instance. Must be an uneven number, if an even number is supplied it will be recast to closest, larger uneven integer (e.g. if n=100 then it will be casted to n=101) [Default 101]
+ '-T': Float that specifies the maximum time for the DecisionPolicy instance. [Default 10 seconds]
+ '-dt': Float that specifies the time step for the DecisionPolicy instance. [Default 0.04 seconds]
+ '-iti': Float that specifies the inter trial time for the DecisionPolicy instance. [Default 1 seconds]
+ '-tp': Float that specifies the penalty time for the DecisionPolicy instance. [Default 0 seconds]
+ '-r' or '--reward': Float that specifies the reward for the DecisionPolicy instance. [Default 10 seconds]
+ '-p' or '--penalty': Float that specifies the penalty for the DecisionPolicy instance. [Default 10 seconds]
+ 
+ Example:
+ python moving_bounds_fits.py -T 10 -dt 0.001 --save"""
+	options =  {'task':1,'ntasks':1,'method':'full','save':None,'time_units':'seconds',
+				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101}
 	
+	expecting_key = True
+	key = None
+	for i,arg in enumerate(sys.argv[1:]):
+		if expecting_key:
+			if arg=='-t' or arg=='--task':
+				key = 'task'
+				expecting_key = False
+			elif arg=='-nt' or arg=='--ntasks':
+				key = 'ntasks'
+				expecting_key = False
+			elif arg=='-m' or arg=='--method':
+				key = 'method'
+				expecting_key = False
+			elif arg=='-s' or arg=='--save':
+				options['save'] = True
+			elif arg=='-u' or arg=='--units':
+				key = 'time_units'
+				expecting_key = False
+			elif arg=='-n':
+				key = 'n'
+				expecting_key = False
+			elif arg=='-T':
+				key = 'T'
+				expecting_key = False
+			elif arg=='-dt':
+				key = 'dt'
+				expecting_key = False
+			elif arg=='-iti':
+				key = 'iti'
+				expecting_key = False
+			elif arg=='-tp':
+				key = 'tp'
+				expecting_key = False
+			elif arg=='-r' or arg=='--reward':
+				key = 'reward'
+				expecting_key = False
+			elif arg=='-p' or arg=='--penalty':
+				key = 'penalty'
+				expecting_key = False
+			elif arg=='-h' or arg=='--help':
+				print script_help
+				sys.exit()
+			else:
+				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format({'opt':arg,'pos':i+1}))
+		else:
+			expecting_key = True
+			if key in ['n','task','ntasks']:
+				options[key] = int(arg)
+			elif key in ['T','dt','iti','tp','reward','penalty']:
+				options[key] = float(arg)
+			else:
+				options[key] = arg
+	# Shift task from 1 base to 0 based
+	options['task']-=1
+	if options['time_units'] not in ['seconds','milliseconds']:
+		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format({'units':options['time_units']}))
+	if options['method'] not in ['two_step','full','confidence_only','full_confidence']:
+		raise ValueError("Unknown supplied method: '{method}'. Available values are two_step, full, confidence_only and full_confidence".format({'method':options['method']}))
+	return options
 
 if __name__=="__main__":
-	task = 0
-	ntasks = 1
-	method = 'full'
-	save = None
-	time_units = 'seconds'
+	options = parse_input()
+	method = options['method']
+	save = options['save']
+	task = options['task']
+	ntasks = options['ntasks']
 	
-	if len(sys.argv)>1:
-		task = int(sys.argv[1])
-		ntasks = int(sys.argv[2])
-		if loc==Location.cluster:
-			task-=1
-		if len(sys.argv)>3:
-			method = sys.argv[3]
-			if len(sys.argv)>4:
-				if int(sys.argv[4]):
-					save = PdfPages('../../figs/inference_fits_'+method+'.pdf')
-				if len(sys.argv)>5:
-					time_units = sys.argv[5]
-	
-	if time_units=='seconds':
+	if options['time_units']=='seconds':
 		ISI = 0.04 #seconds
-	elif time_units=='milliseconds':
+	elif options['time_units']=='milliseconds':
 		ISI = 40
 	else:
 		raise ValueError("Unknown time units")
 	model_var = (patch_sigma**2)*2/ISI
-	
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			fit_output = fit(s,method=method)
-			f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
-			pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
+			fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
+			f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+"_test.pkl",'w')
+			pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 			f.close()
 			if method=='full' or method=='two_step':
-				fit_output = fit(s,method='confidence_only')
-				f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
-				pickle.dump(fit_output,f,pickle.HIGHEST_PROTOCOL)
+				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
+				f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+"_test.pkl",'w')
+				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 				f.close()
-			#~ plot_fit(s,method=method,save=save)
-			#~ break
+			plot_fit(s,method=method,save=save)
+			break
 	if save:
 		save.close()
