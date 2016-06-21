@@ -491,7 +491,7 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	return rt
 
 def plot_fit(subject,method='full',save=None):
-	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'_test.pkl','r')
+	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'.pkl','r')
 	out = pickle.load(f)
 	f.close()
 	if isinstance(out,dict):
@@ -505,7 +505,7 @@ def plot_fit(subject,method='full',save=None):
 			high_conf_thresh = fit_output[0]['high_confidence_threshold']
 		except KeyError:
 			try:
-				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+"_test.pkl",'r')
+				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+".pkl",'r')
 				print f
 				out2 = pickle.load(f)
 				f.close()
@@ -514,7 +514,7 @@ def plot_fit(subject,method='full',save=None):
 					out2 = out2['fit_output']
 				high_conf_thresh = out2[0]['high_confidence_threshold']
 			except (IOError,EOFError):
-				hand_picked_thresh = [0.8,0.74,0.8,0.7,0.64,0.93,0.81]
+				hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
 				high_conf_thresh = hand_picked_thresh[subject.id]
 			except Exception as err:
 				high_conf_thresh = out2[0][0]
@@ -529,12 +529,12 @@ def plot_fit(subject,method='full',save=None):
 				high_conf_thresh = out[0]['high_confidence_threshold']
 			except KeyError:
 				try:
-					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+"_test.pkl",'r')
+					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+".pkl",'r')
 					out2 = pickle.load(f)
 					f.close()
 					high_conf_thresh = out2[0]['high_confidence_threshold']
 				except (IOError,EOFError):
-					hand_picked_thresh = [0.8,0.74,0.8,0.7,0.64,0.93,0.81]
+					hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
 					high_conf_thresh = hand_picked_thresh[subject.id]
 				except Exception as err:
 					high_conf_thresh = out2[0][0]
@@ -773,16 +773,16 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
-			f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+"_test.pkl",'w')
-			pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-			f.close()
-			if method=='full' or method=='two_step':
-				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
-				f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+"_test.pkl",'w')
-				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-				f.close()
+			#~ fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
+			#~ f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
+			#~ pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+			#~ f.close()
+			#~ if method=='full' or method=='two_step':
+				#~ fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
+				#~ f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
+				#~ pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+				#~ f.close()
 			plot_fit(s,method=method,save=save)
-			break
+			#~ break
 	if save:
 		save.close()

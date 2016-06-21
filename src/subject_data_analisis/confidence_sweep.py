@@ -18,8 +18,6 @@ class Sweeper:
 	
 	def sweep(self):
 		for i,(s,fname) in enumerate(zip(self.subjects,self.fit_files)):
-			if i==0:
-				continue
 			self.sweep_plot(i,s,fname)
 			plt.show(True)
 	
