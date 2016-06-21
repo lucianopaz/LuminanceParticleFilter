@@ -50,7 +50,7 @@ class DecisionPolicy():
 		self.dt = float(dt)
 		self.T = float(T)
 		self.nT = int(T/dt)+1
-		self.t = np.linspace(0.,float(T),self.nT)
+		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 		self.cost = cost*np.ones_like(self.t)
 		self.store_p = store_p
 		self.reward = reward
@@ -68,14 +68,14 @@ class DecisionPolicy():
 	def set_dt(self,dt):
 		oldt = self.t
 		self.dt = float(dt)
-		self.t = np.arange(0.,float(self.T+self.dt),float(self.dt),np.float)
-		self.nT = self.t.shape[0]
+		self.nT = int(self.T/self.dt)+1
+		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 		self.cost = np.interp(self.t, oldt, self.cost)
 	def set_T(self,T):
 		self.T = float(T)
-		self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
 		old_nT = self.nT
-		self.nT = self.t.shape[0]
+		self.nT = int(self.T/self.dt)+1
+		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 		old_cost = self.cost
 		self.cost = np.zeros_like(self.t)
 		self.cost[:old_nT] = old_cost
@@ -475,17 +475,17 @@ class DecisionPolicy():
 					change = True
 					oldt = self.t.copy()
 					self.dt = float(dt)
-					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
-					self.nT = self.t.shape[0]
+					self.nT = int(self.T/self.dt)+1
+					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 					self.cost = np.interp(self.t, oldt, self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
 					self.T = float(T)
-					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
 					old_nT = self.nT
-					self.nT = self.t.shape[0]
 					old_cost = self.cost
+					self.nT = int(self.T/self.dt)+1
+					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 					self.cost = np.zeros_like(self.t)
 					self.cost[:old_nT] = old_cost
 					self.cost[old_nT:] = old_cost[-1]
@@ -527,16 +527,17 @@ class DecisionPolicy():
 				if dt<self.dt:
 					change = True
 					oldt = self.t.copy()
-					self.t = np.arange(0,self.T+dt,dt,np.float)
-					self.nT = self.t.shape[0]
+					self.dt = float(dt)
+					self.nT = int(self.T/self.dt)+1
+					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 					self.cost = np.interp(self.t, oldt, self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
 					self.T = float(T)
-					self.t = np.arange(0,self.T+self.dt,self.dt,np.float)
 					old_nT = self.nT
-					self.nT = self.t.shape[0]
+					self.nT = int(self.T/self.dt)+1
+					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 					old_cost = self.cost
 					self.cost = np.zeros_like(self.t)
 					self.cost[:old_nT] = old_cost

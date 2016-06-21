@@ -60,6 +60,19 @@ ISI = 0.04 #seconds
 distractor = 50. # cd/m^2
 patch_sigma = 5. # cd/m^2
 model_var = (patch_sigma**2)*2/ISI
+def set_time_units(units='seconds'):
+	if units not in ('seconds','milliseconds'):
+		raise ValueError("Invalid time units '{0}'. Available units are seconds and milliseconds".format(units))
+	global time_units
+	global ISI
+	global model_var
+	time_units = units
+	if time_units=='seconds':
+		ISI = 0.04
+		model_var = (patch_sigma**2)*2/ISI
+	else:
+		ISI = 40.
+		model_var = (patch_sigma**2)*2/ISI
 
 def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	"""
@@ -95,15 +108,6 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 		output[:,dead_time_shift:] = ret[:,:-dead_time_shift]
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
-
-def log_odds_likelihood(gs,confidence_params,log_odds,dt,dead_time,dead_time_sigma,phase_out_prob):
-	if len(confidence_params)==1:
-		phigh = (1.-phase_out_prob)*np.ones_like(gs)
-		phigh[log_odds<confidence_params[0]] = 0.
-		plow = 1.-phigh
-		phigh*=gs
-		plow*=gs
-	return add_dead_time(np.concatenate((phigh,plow)),dt,dead_time,dead_time_sigma)
 
 def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101):
 	dat,t,d = subject.load_data()
@@ -263,9 +267,35 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 	m.cost = cost
 	xub,xlb = m.xbounds()
 	
-	phigh = (1.-0.5*phase_out_prob)*np.ones((2,xub.shape[0]))
-	phigh[m.log_odds()<high_confidence_threshold] = 0.
+	if time_units=='seconds' and m.dt>1e-3:
+		_dt = 1e-3
+	elif time_units=='milliseconds' and m.dt>1.:
+		_dt = 1.
+	else:
+		_dt = None
+	
+	if _dt:
+		_nT = int(m.T/_dt)+1
+		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
+		log_odds = m.log_odds()
+		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+	else:
+		_nT = m.nT
+		log_odds = m.log_odds()
+	
+	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
+	phigh[log_odds<high_confidence_threshold] = 0.25*phase_out_prob
+	if _dt:
+		ratio = np.ceil(_nT/m.nT)
+		tail = _nT%m.nT
+		if tail!=0:
+			padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,m.nT-tail),dtype=np.float)),axis=1)
+		else:
+			padded_phigh = phigh
+		padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
+		phigh = np.nanmean(padded_phigh,axis=2)
 	plow = 1.-phigh
+	
 	for index,drift in enumerate(mu):
 		gs = np.array(m.rt(drift,bounds=(xub,xlb)))
 		confidence_rt = np.concatenate((phigh*gs,plow*gs))
@@ -300,9 +330,35 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 	m.cost = cost
 	xub,xlb = m.xbounds()
 	
-	phigh = (1.-0.5*phase_out_prob)*np.ones((2,xub.shape[0]))
-	phigh[m.log_odds()<high_confidence_threshold] = 0.
+	if time_units=='seconds' and m.dt>1e-3:
+		_dt = 1e-3
+	elif time_units=='milliseconds' and m.dt>1.:
+		_dt = 1.
+	else:
+		_dt = None
+	
+	if _dt:
+		_nT = int(m.T/_dt)+1
+		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
+		log_odds = m.log_odds()
+		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+	else:
+		_nT = m.nT
+		log_odds = m.log_odds()
+	
+	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
+	phigh[log_odds<high_confidence_threshold] = 0.25*phase_out_prob
+	if _dt:
+		ratio = np.ceil(_nT/m.nT)
+		tail = _nT%m.nT
+		if tail!=0:
+			padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,m.nT-tail),dtype=np.float)),axis=1)
+		else:
+			padded_phigh = phigh
+		padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
+		phigh = np.nanmean(padded_phigh,axis=2)
 	plow = 1.-phigh
+	
 	for index,drift in enumerate(mu):
 		gs = np.array(m.rt(drift,bounds=(xub,xlb)))
 		confidence_rt = np.concatenate((phigh*gs,plow*gs))
@@ -379,27 +435,54 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	m.cost = cost
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
-	if include_t0:
-		phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
-		#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
+	
+	if time_units=='seconds' and m.dt>1e-3:
+		_dt = 1e-3
+	elif time_units=='milliseconds' and m.dt>1.:
+		_dt = 1.
 	else:
-		phased_out_rt[m.t[1:]<_max_RT] = 1./(_max_RT)
-		#~ phased_out_rt[np.logical_and(m.t[1:]<_max_RT,m.t[1:]>_dead_time)] = 1./(_max_RT-_dead_time)
+		_dt = None
+	
+	orig_phigh = (1.-0.75*phase_out_prob)*np.ones((2,m.nT))
+	orig_phigh[m.log_odds()<confidence_params[0]] = 0.25*phase_out_prob
+	if _dt:
+		_nT = int(m.T/_dt)+1
+		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
+		log_odds = m.log_odds()
+		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+	else:
+		_nT = m.nT
+		log_odds = m.log_odds()
+	
+	phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
+	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
+	
+	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
+	phigh[log_odds<confidence_params[0]] = 0.25*phase_out_prob
+	if _dt:
+		ratio = int(np.ceil(_nT/m.nT))
+		tail = _nT%m.nT
+		if tail!=0:
+			padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,m.nT-tail),dtype=np.float)),axis=1)
+		else:
+			padded_phigh = phigh
+		padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
+		phigh = np.nanmean(padded_phigh,axis=2)
+	plow = 1.-phigh
+	
 	for index,drift in enumerate(mu):
 		g = dec_gs[drift]['all']
-		phigh = (1.-0.75*phase_out_prob)*np.ones_like(g)
 		if include_t0:
-			phigh[m.log_odds()<confidence_params[0]] = 0.25*phase_out_prob
+			gh=phigh*g
+			gl=plow*g
 		else:
-			phigh[m.log_odds()[:,1:]<confidence_params[0]] = 0.25*phase_out_prob
-		plow = 1.-phigh
-		phigh*=g
-		plow*=g
-		g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((phigh,plow)),m.dt,dead_time,dead_time_sigma)
-		g1h = g1h*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g2h = g2h*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g1l = g1l*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g2l = g2l*(1-0.25*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+			gh=phigh[:,1:]*g
+			gl=plow[:,1:]*g
+		g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((gh,gl)),m.dt,dead_time,dead_time_sigma)
+		g1h = g1h*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2h = g2h*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g1l = g1l*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2l = g2l*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
 		rt[drift] = {}
 		rt[drift]['high'] = np.array([g1h,g2h])
 		rt[drift]['low'] = np.array([g1l,g2l])
@@ -418,7 +501,6 @@ def plot_fit(subject,method='full',save=None):
 		dead_time = fit_output[0]['dead_time']
 		dead_time_sigma = fit_output[0]['dead_time_sigma']
 		phase_out_prob = fit_output[0]['phase_out_prob']
-		print fit_output[0]
 		try:
 			high_conf_thresh = fit_output[0]['high_confidence_threshold']
 		except KeyError:
@@ -686,13 +768,7 @@ if __name__=="__main__":
 	task = options['task']
 	ntasks = options['ntasks']
 	
-	if options['time_units']=='seconds':
-		ISI = 0.04 #seconds
-	elif options['time_units']=='milliseconds':
-		ISI = 40
-	else:
-		raise ValueError("Unknown time units")
-	model_var = (patch_sigma**2)*2/ISI
+	set_time_units(options['time_units'])
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):

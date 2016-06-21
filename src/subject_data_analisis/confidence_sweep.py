@@ -18,6 +18,8 @@ class Sweeper:
 	
 	def sweep(self):
 		for i,(s,fname) in enumerate(zip(self.subjects,self.fit_files)):
+			if i==0:
+				continue
 			self.sweep_plot(i,s,fname)
 			plt.show(True)
 	
@@ -58,6 +60,7 @@ class Sweeper:
 				self.dead_time = out[0][1]
 				self.dead_time_sigma = out[0][2]
 				self.phase_out_prob = out[0][3]
+		mo.set_time_units(time_units)
 		self.dat,t,d = s.load_data()
 		if time_units=='seconds':
 			rt = self.dat[:,1]*1e-3
@@ -102,8 +105,6 @@ class Sweeper:
 			if tp is None:
 				tp = 0.
 		else:
-			mo.ISI*=1e3
-			mo.model_var*=1e-3
 			if T is None:
 				T = 10000.
 			if dt is None:
