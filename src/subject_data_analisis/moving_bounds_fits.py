@@ -29,17 +29,18 @@ if np.__version__<'1.9':
 		return ret
 	np.unique = np19_unique
 
-if np.__version__<'1.9':
-	def np18_nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
-		"Compute the arithmetic mean along the specified axis, ignoring NaNs.\n\nReturns the average of the array elements.  The average is taken over the flattened array by default, otherwise over the specified axis. `float64` intermediate and return values are used for integer inputs.\n\nFor all-NaN slices, NaN is returned and a `RuntimeWarning` is raised.\n.. versionadded:: 1.8.0\n\nParameters\n----------\na : array_like\n    Array containing numbers whose mean is desired. If `a` is not an array, a conversion is attempted.\naxis : int, optional\n    Axis along which the means are computed. The default is to compute the mean of the flattened array.\ndtype : data-type, optional\n    Type to use in computing the mean.  For integer inputs, the default is `float64`; for inexact inputs, it is the same as the input dtype.\nout : ndarray, optional\n    Alternate output array in which to place the result.  The default is ``None``; if provided, it must have the same shape as the expected output, but the type will be cast if necessary.  See `doc.ufuncs` for details.\nkeepdims : bool, optional\n    If this is set to True, the axes which are reduced are left in the result as dimensions with size one. With this option, the result will broadcast correctly against the original `arr`.\n\nReturns\n-------\nm : ndarray, see dtype parameter above\n    If `out=None`, returns a new array containing the mean values, otherwise a reference to the output array is returned. Nan is returned for slices that contain only NaNs.\n\nSee Also\n--------\naverage : Weighted averagemean : Arithmetic mean taken while not ignoring NaNs\nvar, nanvar\n\nNotes\n-----\nThe arithmetic mean is the sum of the non-NaN elements along the axis divided by the number of non-NaN elements.\n\nNote that for floating-point input, the mean is computed using the same precision the input has.  Depending on the input data, this can cause the results to be inaccurate, especially for `float32`.  Specifying a higher-precision accumulator using the `dtype` keyword can alleviate this issue.\n\nExamples\n--------\n>>> a = np.array([[1, np.nan], [3, 4]])\n>>> np.nanmean(a)\n2.6666666666666665\n>>> np.nanmean(a, axis=0)\narray([ 2.,  4.])\n>>> np.nanmean(a, axis=1)\narray([ 1.,  3.5])"
+if np.__version__<'1.8':
+	def np18_nanmean(a, axis=None, dtype=None, out=None):
+		"Compute the arithmetic mean along the specified axis, ignoring NaNs.\n\nReturns the average of the array elements.  The average is taken over the flattened array by default, otherwise over the specified axis. `float64` intermediate and return values are used for integer inputs.\n\nFor all-NaN slices, NaN is returned and a `RuntimeWarning` is raised.\n.. versionadded:: 1.8.0\n\nParameters\n----------\na : array_like\n    Array containing numbers whose mean is desired. If `a` is not an array, a conversion is attempted.\naxis : int, optional\n    Axis along which the means are computed. The default is to compute the mean of the flattened array.\ndtype : data-type, optional\n    Type to use in computing the mean.  For integer inputs, the default is `float64`; for inexact inputs, it is the same as the input dtype.\nout : ndarray, optional\n    Alternate output array in which to place the result.  The default is ``None``; if provided, it must have the same shape as the expected output, but the type will be cast if necessary.  See `doc.ufuncs` for details.\n\nReturns\n-------\nm : ndarray, see dtype parameter above\n    If `out=None`, returns a new array containing the mean values, otherwise a reference to the output array is returned. Nan is returned for slices that contain only NaNs.\n\nSee Also\n--------\naverage : Weighted averagemean : Arithmetic mean taken while not ignoring NaNs\nvar, nanvar\n\nNotes\n-----\nThe arithmetic mean is the sum of the non-NaN elements along the axis divided by the number of non-NaN elements.\n\nNote that for floating-point input, the mean is computed using the same precision the input has.  Depending on the input data, this can cause the results to be inaccurate, especially for `float32`.  Specifying a higher-precision accumulator using the `dtype` keyword can alleviate this issue.\n\nExamples\n--------\n>>> a = np.array([[1, np.nan], [3, 4]])\n>>> np.nanmean(a)\n2.6666666666666665\n>>> np.nanmean(a, axis=0)\narray([ 2.,  4.])\n>>> np.nanmean(a, axis=1)\narray([ 1.,  3.5])"
 		nans = np.isnan(a)
-		n = np.sum(np.logical_not(nans),axis=axis,dtype=dtype,keepdims=keepdims);
-		b = a[:]
+		n = np.sum(np.logical_not(nans),axis=axis,dtype=dtype)
+		b = np.empty_like(a)
+		b[:] = a
 		b[nans] = 0
 		if out is None:
-			out = np.sum(b,axis=axis,dtype=dtype,keepdims=keepdims)
+			out = np.sum(b,axis=axis,dtype=dtype)
 		else:
-			np.sum(b,axis=axis,dtype=dtype,out=out,keepdims=keepdims)
+			np.sum(b,axis=axis,dtype=dtype,out=out)
 		out/=n
 		return out
 	np.nanmean = np18_nanmean
@@ -124,7 +125,7 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
-def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101):
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix=''):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -157,29 +158,29 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 	
 	if method=="two_step":
 		options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
-		res = (start_point[:4],None,None,None,None,None,None,)
-		res2 = (start_point[:4],None,None,None,None,None,None,)
-		#~ res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		#~ res2 = []
-		#~ two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
+		#~ res = (start_point[:4],None,None,None,None,None,None,)
+		#~ res2 = (start_point[:4],None,None,None,None,None,None,)
+		res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		res2 = []
+		two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
 		res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
 	elif method=='full':
 		options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
-		res = (start_point[:4],None,None,None,None,None,None,)
-		#~ res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		#~ res = (start_point[:4],None,None,None,None,None,None,)
+		res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
 	elif method=='confidence_only':
-		f = open('fits/inference_fit_full_subject_'+str(subject.id)+'.pkl','r')
+		f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
 		out = pickle.load(f)
 		f.close()
 		options = cma.CMAOptions({'bounds':[bounds[0][-1],bounds[1][-1]],'CMA_stds':scaling_factor[-1]})
-		res = ([start_point[-1]],None,None,None,None,None,None,)
-		#~ res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out[0]),restarts=1)
+		#~ res = ([start_point[-1]],None,None,None,None,None,None,)
+		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out['fit_output'][0]),restarts=1)
 		res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
 		options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
-		res = (start_point,None,None,None,None,None,None,)
-		#~ res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+		#~ res = (start_point,None,None,None,None,None,None,)
+		res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
@@ -505,8 +506,8 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 		rt['full']['low']+= rt[drift]['low']*mu_prob[index]
 	return rt
 
-def plot_fit(subject,method='full',save=None):
-	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+'.pkl','r')
+def plot_fit(subject,method='full',save=None,display=True,suffix=''):
+	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+suffix+'.pkl','r')
 	out = pickle.load(f)
 	f.close()
 	if isinstance(out,dict):
@@ -520,7 +521,7 @@ def plot_fit(subject,method='full',save=None):
 			high_conf_thresh = fit_output[0]['high_confidence_threshold']
 		except KeyError:
 			try:
-				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+".pkl",'r')
+				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
 				print f
 				out2 = pickle.load(f)
 				f.close()
@@ -544,7 +545,7 @@ def plot_fit(subject,method='full',save=None):
 				high_conf_thresh = out[0]['high_confidence_threshold']
 			except KeyError:
 				try:
-					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+".pkl",'r')
+					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
 					out2 = pickle.load(f)
 					f.close()
 					high_conf_thresh = out2[0]['high_confidence_threshold']
@@ -641,7 +642,7 @@ def plot_fit(subject,method='full',save=None):
 	mxlim = np.ceil(max_RT)
 	mt.rc('axes', color_cycle=['b','r'])
 	plt.figure(figsize=(11,8))
-	plt.subplot(121)
+	ax1 = plt.subplot(121)
 	plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post')
 	plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post')
 	plt.plot(m.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2)
@@ -653,7 +654,7 @@ def plot_fit(subject,method='full',save=None):
 		plt.xlabel('T [ms]')
 	plt.ylabel('Prob density')
 	plt.legend()
-	plt.subplot(122)
+	plt.subplot(122,sharey=ax1)
 	plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post')
 	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post')
 	plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2)
@@ -685,9 +686,10 @@ def plot_fit(subject,method='full',save=None):
 	#~ plt.xlim([0,mxlim])
 	#~ plt.xlabel('T [s]')
 	#~ plt.legend()
+	
 	if save:
 		save.savefig()
-	else:
+	if display:
 		plt.show(True)
 
 def parse_input():
@@ -701,7 +703,8 @@ def parse_input():
  '-t' or '--task': Integer that identifies the task number when running multiple tasks in parallel. Is one based, thus the first task is task 1 [default 1]
  '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [default 1]
  '-m' or '--method': String that identifies the fit method. Available values are two_step, full, confidence_only and full_confidence. [default full]
- '-s' or '--save': This flag takes no values. If present it saves the figure
+ '-s' or '--save': This flag takes no values. If present it saves the figure.
+ '--plot': This flag takes no values. If present it displays the plotted figure and freezes execution until the figure is closed.
  '-u' or '--units': String that identifies the time units that will be used. Available values are seconds and milliseconds. [default seconds]
  '-n': Integer that specifies the belief space discretization for the DecisionPolicy instance. Must be an uneven number, if an even number is supplied it will be recast to closest, larger uneven integer (e.g. if n=100 then it will be casted to n=101) [Default 101]
  '-T': Float that specifies the maximum time for the DecisionPolicy instance. [Default 10 seconds]
@@ -710,11 +713,12 @@ def parse_input():
  '-tp': Float that specifies the penalty time for the DecisionPolicy instance. [Default 0 seconds]
  '-r' or '--reward': Float that specifies the reward for the DecisionPolicy instance. [Default 10 seconds]
  '-p' or '--penalty': Float that specifies the penalty for the DecisionPolicy instance. [Default 10 seconds]
+ '-sf' or '--suffix': A string suffix to paste to the filenames. [Default '']
  
  Example:
  python moving_bounds_fits.py -T 10 -dt 0.001 --save"""
-	options =  {'task':1,'ntasks':1,'method':'full','save':None,'time_units':'seconds',
-				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101}
+	options =  {'task':1,'ntasks':1,'method':'full','save':False,'plot':False,'time_units':'seconds',
+				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101,'suffix':''}
 	
 	expecting_key = True
 	key = None
@@ -731,6 +735,8 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-s' or arg=='--save':
 				options['save'] = True
+			elif arg=='--plot':
+				options['plot'] = True
 			elif arg=='-u' or arg=='--units':
 				key = 'time_units'
 				expecting_key = False
@@ -754,6 +760,9 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-p' or arg=='--penalty':
 				key = 'penalty'
+				expecting_key = False
+			elif arg=='-sf' or arg=='--suffix':
+				key = 'suffix'
 				expecting_key = False
 			elif arg=='-h' or arg=='--help':
 				print script_help
@@ -782,22 +791,26 @@ if __name__=="__main__":
 	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
+	if save:
+		save_object = PdfPages("inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']))
+	else:
+		save_object = None
 	
 	set_time_units(options['time_units'])
 	subjects = io.unique_subjects(data_dir)
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			#~ fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
-			#~ f = open("fits/inference_fit_"+method+"_subject_"+str(s.id)+".pkl",'w')
-			#~ pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-			#~ f.close()
-			#~ if method=='full' or method=='two_step':
-				#~ fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'])
-				#~ f = open("fits/inference_fit_confidence_only_subject_"+str(s.id)+".pkl",'w')
-				#~ pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-				#~ f.close()
-			plot_fit(s,method=method,save=save)
-			#~ break
+			fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
+			f = open("fits/inference_fit_{method}_{task}_{ntasks}{suffix}.pkl".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']),'w')
+			pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+			f.close()
+			if method=='full' or method=='two_step':
+				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
+				f = open("fits/inference_fit_{method}_{task}_{ntasks}{suffix}.pkl".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']),'w')
+				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+				f.close()
+			if options['plot'] or save:
+				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'],task=task,ntasks=ntasks)
 	if save:
-		save.close()
+		save_object.close()
