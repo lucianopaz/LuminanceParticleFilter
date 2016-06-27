@@ -125,7 +125,7 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
-def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix=''):
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -170,12 +170,14 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 		res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
 	elif method=='confidence_only':
-		f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
-		out = pickle.load(f)
-		f.close()
+		if fixed_parameters is None:
+			f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
+			out = pickle.load(f)
+			f.close()
+			fixed_parameters = out['fit_output'][0]
 		options = cma.CMAOptions({'bounds':[bounds[0][-1],bounds[1][-1]],'CMA_stds':scaling_factor[-1]})
 		#~ res = ([start_point[-1]],None,None,None,None,None,None,)
-		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,out['fit_output'][0]),restarts=1)
+		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,fixed_parameters),restarts=1)
 		res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
 		options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
@@ -792,7 +794,10 @@ if __name__=="__main__":
 	task = options['task']
 	ntasks = options['ntasks']
 	if save:
-		save_object = PdfPages("inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']))
+		if task==0 and ntasks==1:
+			save_object = PdfPages("inference_fit_{method}{suffix}.pdf".format(method=method,suffix=options['suffix']))
+		else:
+			save_object = PdfPages("inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']))
 	else:
 		save_object = None
 	
@@ -802,15 +807,15 @@ if __name__=="__main__":
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
 			fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
-			f = open("fits/inference_fit_{method}_{task}_{ntasks}{suffix}.pkl".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']),'w')
+			f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
 			pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 			f.close()
 			if method=='full' or method=='two_step':
-				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
-				f = open("fits/inference_fit_{method}_{task}_{ntasks}{suffix}.pkl".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']),'w')
+				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0])
+				f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
 				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 				f.close()
 			if options['plot'] or save:
-				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'],task=task,ntasks=ntasks)
+				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'])
 	if save:
 		save_object.close()
