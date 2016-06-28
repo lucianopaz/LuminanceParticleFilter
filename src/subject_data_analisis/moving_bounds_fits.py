@@ -332,7 +332,6 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gl,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 	return nlog_likelihood
 
-
 def full_confidence_merit(params,m,dat,mu,mu_indeces):
 	cost = params[0]
 	dead_time = params[1]
@@ -524,10 +523,8 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 		except KeyError:
 			try:
 				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
-				print f
 				out2 = pickle.load(f)
 				f.close()
-				print out2
 				if isinstance(out2,dict):
 					out2 = out2['fit_output']
 				high_conf_thresh = out2[0]['high_confidence_threshold']
@@ -564,6 +561,7 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 			if 'confidence' in method:
 				high_conf_thresh = out[0][4]
 	time_units = options['time_units']
+	set_time_units(options['time_units'])
 	
 	dat,t,d = subject.load_data()
 	if time_units=='seconds':
@@ -630,6 +628,7 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 			tp = 0.
 	if dt is None:
 		dt = ISI
+	
 	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 	
 	
@@ -707,6 +706,8 @@ def parse_input():
  '-m' or '--method': String that identifies the fit method. Available values are two_step, full, confidence_only and full_confidence. [default full]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--plot': This flag takes no values. If present it displays the plotted figure and freezes execution until the figure is closed.
+ '--fit': This flag takes no values. If present it performs the fit for the selected method. By default, this flag is always set.
+ '--no-fit': This flag takes no values. If present no fit is performed for the selected method. This flag should be used when it is only necesary to plot the results.
  '-u' or '--units': String that identifies the time units that will be used. Available values are seconds and milliseconds. [default seconds]
  '-n': Integer that specifies the belief space discretization for the DecisionPolicy instance. Must be an uneven number, if an even number is supplied it will be recast to closest, larger uneven integer (e.g. if n=100 then it will be casted to n=101) [Default 101]
  '-T': Float that specifies the maximum time for the DecisionPolicy instance. [Default 10 seconds]
@@ -719,7 +720,7 @@ def parse_input():
  
  Example:
  python moving_bounds_fits.py -T 10 -dt 0.001 --save"""
-	options =  {'task':1,'ntasks':1,'method':'full','save':False,'plot':False,'time_units':'seconds',
+	options =  {'task':1,'ntasks':1,'method':'full','save':False,'plot':False,'fit':True,'time_units':'seconds',
 				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101,'suffix':''}
 	
 	expecting_key = True
@@ -739,6 +740,10 @@ def parse_input():
 				options['save'] = True
 			elif arg=='--plot':
 				options['plot'] = True
+			elif arg=='--fit':
+				options['fit'] = True
+			elif arg=='--no-fit':
+				options['fit'] = False
 			elif arg=='-u' or arg=='--units':
 				key = 'time_units'
 				expecting_key = False
@@ -795,9 +800,12 @@ if __name__=="__main__":
 	ntasks = options['ntasks']
 	if save:
 		if task==0 and ntasks==1:
-			save_object = PdfPages("inference_fit_{method}{suffix}.pdf".format(method=method,suffix=options['suffix']))
+			fname = "inference_fit_{method}{suffix}.pdf".format(method=method,suffix=options['suffix'])
 		else:
-			save_object = PdfPages("inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix']))
+			fname = "inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
+		if os.path.isdir("../../figs"):
+			fname = "../../figs/"+fname
+		save_object = PdfPages(fname)
 	else:
 		save_object = None
 	
@@ -806,15 +814,16 @@ if __name__=="__main__":
 	subjects.append(io.merge_subjects(subjects))
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
-			fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
-			f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
-			pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-			f.close()
-			if method=='full' or method=='two_step':
-				fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0])
-				f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
+			if options['fit']:
+				fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
+				f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
 				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 				f.close()
+				if method=='full' or method=='two_step':
+					fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0])
+					f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
+					pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+					f.close()
 			if options['plot'] or save:
 				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'])
 	if save:
