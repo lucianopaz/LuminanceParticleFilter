@@ -84,3 +84,80 @@ def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
 
 def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
 	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
+
+def average_downsample(a,ratio,axis=None,ignore_nans=True):
+	#~ if ratio%1==0:
+		#~ if ignore_nans:
+			#~ mean = np.nanmean
+		#~ else:
+			#~ mean = np.mean
+		#~ if axis is None:
+			#~ b = mean(np.reshape(a.flatten(),(-1,ratio)),axis=1)
+		#~ else:
+			#~ new_shape = list(a.shape)
+			#~ new_shape.insert(axis+1,ratio)
+			#~ new_shape[axis] = -1
+			#~ b = mean(np.reshape(a,tuple(new_shape)),axis=axis+1)
+	#~ else:
+	if axis is None:
+		a = a.flatten()
+		axis = 0
+		sum_weight = 0
+		b = np.zeros((int(np.ceil(a.shape[0]/ratio))))
+	else:
+		a = np.swapaxes(a,0,axis)
+		sum_weight = np.zeros_like(a[0])
+		b_shape = list(a.shape)
+		b_shape[0] = int(np.ceil(b_shape[0]/ratio))
+		b = np.zeros(tuple(b_shape))
+	flat_array = a.ndim==1
+	
+	step_size = 1./ratio
+	position = 0.
+	i = 0
+	prev_index = 0
+	L = len(a)
+	Lb = len(b)
+	all_indeces = np.ones_like(a[0],dtype=np.bool)
+	step = True
+	print a.shape, b.shape
+	while step:
+		if ignore_nans:
+			valid_indeces = np.logical_not(np.isnan(a[i]))
+		else:
+			valid_indeces = all_indeces
+		position = (i+1)*step_size
+		index = int(position)
+		if prev_index==index:
+			weight = valid_indeces*step_size
+			sum_weight+= weight
+			if flat_array:
+				b[index]+= a[i]*weight if valid_indeces else 0.
+			else:
+				b[index][valid_indeces]+= a[i][valid_indeces]*weight
+		elif prev_index!=index:
+			weight = position-index
+			prev_weight = index+step_size-position
+			if flat_array:
+				b[prev_index]+= a[i]*prev_weight if valid_indeces else 0.
+				sum_weight+= prev_weight
+				b[prev_index]/=sum_weight
+				if index<Lb:
+					b[index]+= a[i]*weight if valid_indeces else 0.
+			else:
+				b[prev_index][valid_indeces]+= a[i][valid_indeces]*prev_weight
+				sum_weight+= prev_weight
+				b[prev_index]/=sum_weight
+				if index<Lb:
+					b[index][valid_indeces]+= a[i][valid_indeces]*weight
+			sum_weight = weight
+		
+		prev_index = index
+		
+		i+=1
+		if i==L:
+			step = False
+			if index<Lb:
+				b[index]/=sum_weight
+	b = np.swapaxes(b,0,axis)
+	return b
