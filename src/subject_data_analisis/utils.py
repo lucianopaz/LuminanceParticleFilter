@@ -85,34 +85,73 @@ def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
 def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
 	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
 
-def average_downsample(a,ratio,axis=None,ignore_nans=True):
-	#~ if ratio%1==0:
-		#~ if ignore_nans:
-			#~ mean = np.nanmean
-		#~ else:
-			#~ mean = np.mean
-		#~ if axis is None:
-			#~ b = mean(np.reshape(a.flatten(),(-1,ratio)),axis=1)
-		#~ else:
-			#~ new_shape = list(a.shape)
-			#~ new_shape.insert(axis+1,ratio)
-			#~ new_shape[axis] = -1
-			#~ b = mean(np.reshape(a,tuple(new_shape)),axis=axis+1)
-	#~ else:
+def average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float):
+	"""
+	b = average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float)
+	
+	This function downsamples a numpy array of arbitrary shape. It does
+	so by computing the average value of the input array 'a' inside a
+	window of steps. This window can be an arbitrary float, and the
+	function handles the averaging of the edges of each window properly.
+	
+	Inputs:
+	- a:           np.array that will be downsampled
+	- window:      Scalar that specifies the width of the window in
+	               which the average is computed
+	- axis:        The axis of the input array along which the array
+	               will be downsampled. By default axis is None, and in
+	               that case, the downsampling is performed on the
+	               flattened array.
+	- ignore_nans: Ignore nans in the averaging or not. Default is to
+	               ignore.
+	- dtype:       Specifies the output array's dtype. Default is
+	               np.float
+	
+	Output:
+	- b:           The downsampled array. If axis is None, it will be a
+	               flat array of shape equal to (int(np.ceil(a.size/window))).
+	               If axis is not None, 'b' will have the same shape as
+	               'a' except for the specified axis, that will have
+	               int(np.ceil(a.shape[axis]/window)) elements
+	
+	Example
+	>>> import numpy as np
+	>>> a = a = np.reshape(np.arange(100,dtype=np.float),(10,-1))
+	>>> a[-1] = np.nan
+	
+	>>> utils.average_downsample(a,10)
+	array([  4.5,  14.5,  24.5,  34.5,  44.5,  54.5,  64.5,  74.5,  84.5,   nan])
+	
+	>>> utils.average_downsample(a,10,axis=0)
+	array([[ 40.,  41.,  42.,  43.,  44.,  45.,  46.,  47.,  48.,  49.]])
+	
+	>>> utils.average_downsample(a,10,axis=1)
+	array([[  4.5],
+	       [ 14.5],
+	       [ 24.5],
+	       [ 34.5],
+	       [ 44.5],
+	       [ 54.5],
+	       [ 64.5],
+	       [ 74.5],
+	       [ 84.5],
+	       [  nan]])
+	
+	"""
 	if axis is None:
 		a = a.flatten()
 		axis = 0
 		sum_weight = 0
-		b = np.zeros((int(np.ceil(a.shape[0]/ratio))))
+		b = np.zeros((int(np.ceil(a.shape[0]/window))),dtype=dtype)
 	else:
 		a = np.swapaxes(a,0,axis)
-		sum_weight = np.zeros_like(a[0])
+		sum_weight = np.zeros_like(a[0],dtype=np.float)
 		b_shape = list(a.shape)
-		b_shape[0] = int(np.ceil(b_shape[0]/ratio))
-		b = np.zeros(tuple(b_shape))
+		b_shape[0] = int(np.ceil(b_shape[0]/window))
+		b = np.zeros(tuple(b_shape),dtype=dtype)
 	flat_array = a.ndim==1
 	
-	step_size = 1./ratio
+	step_size = 1./window
 	position = 0.
 	i = 0
 	prev_index = 0
@@ -120,7 +159,6 @@ def average_downsample(a,ratio,axis=None,ignore_nans=True):
 	Lb = len(b)
 	all_indeces = np.ones_like(a[0],dtype=np.bool)
 	step = True
-	print a.shape, b.shape
 	while step:
 		if ignore_nans:
 			valid_indeces = np.logical_not(np.isnan(a[i]))
@@ -134,10 +172,10 @@ def average_downsample(a,ratio,axis=None,ignore_nans=True):
 			if flat_array:
 				b[index]+= a[i]*weight if valid_indeces else 0.
 			else:
-				b[index][valid_indeces]+= a[i][valid_indeces]*weight
+				b[index][valid_indeces]+= a[i][valid_indeces]*weight[valid_indeces]
 		elif prev_index!=index:
-			weight = position-index
-			prev_weight = index+step_size-position
+			weight = valid_indeces*(position-index)
+			prev_weight = valid_indeces*(index+step_size-position)
 			if flat_array:
 				b[prev_index]+= a[i]*prev_weight if valid_indeces else 0.
 				sum_weight+= prev_weight
@@ -145,11 +183,11 @@ def average_downsample(a,ratio,axis=None,ignore_nans=True):
 				if index<Lb:
 					b[index]+= a[i]*weight if valid_indeces else 0.
 			else:
-				b[prev_index][valid_indeces]+= a[i][valid_indeces]*prev_weight
+				b[prev_index][valid_indeces]+= a[i][valid_indeces]*prev_weight[valid_indeces]
 				sum_weight+= prev_weight
 				b[prev_index]/=sum_weight
 				if index<Lb:
-					b[index][valid_indeces]+= a[i][valid_indeces]*weight
+					b[index][valid_indeces]+= a[i][valid_indeces]*weight[valid_indeces]
 			sum_weight = weight
 		
 		prev_index = index
