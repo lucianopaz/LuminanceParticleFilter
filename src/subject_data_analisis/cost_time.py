@@ -6,8 +6,6 @@ import numpy as np
 from scipy import io
 from scipy import optimize
 import math, copy
-from matplotlib import pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 from utils import normcdf,normcdfinv
 try:
 	import dp
@@ -670,7 +668,7 @@ class DecisionPolicy():
 		if rt==self.T:
 			return -np.log(g[self.nT-1])
 		t_i = int(rt/self.dt)
-		if self.dt*(rt-self.t[t_i])==0:
+		if (rt-self.t[t_i])==0:
 			return -np.log(g[t_i])
 		ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
 		#~ oldstate = np.seterr(divide='raise')
@@ -718,109 +716,115 @@ def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
 		
 	return rt,decision
 
-def bounds_for_costs(n=20,maxcost=1.):
-	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=10,dt=0.04,reward=1,cost=1./5.,penalty=0,iti=10.,tp=5.,store_p=False)
-	costs = np.linspace(0,maxcost,n)
-	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
-	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
-	
-	for cost,c1,c2 in zip(costs,s1_colors,s2_colors):
-		m.cost = cost
-		xub,xlb = m.xbounds()
-		plt.plot(m.t,xub,color=c1)
-		plt.plot(m.t,xlb,color=c2)
-	
-	pp = PdfPages('../../figs/bounds_cost.pdf')
-	pp.savefig()
-	pp.close()
-	
-	plt.show()
+def main():
+	from matplotlib import pyplot as plt
+	from matplotlib.backends.backend_pdf import PdfPages
+	def bounds_for_costs(n=20,maxcost=1.):
+		m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=10,dt=0.04,reward=1,cost=1./5.,penalty=0,iti=10.,tp=5.,store_p=False)
+		costs = np.linspace(0,maxcost,n)
+		s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
+		s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
+		
+		for cost,c1,c2 in zip(costs,s1_colors,s2_colors):
+			m.cost = cost
+			xub,xlb = m.xbounds()
+			plt.plot(m.t,xub,color=c1)
+			plt.plot(m.t,xlb,color=c2)
+		
+		pp = PdfPages('../../figs/bounds_cost.pdf')
+		pp.savefig()
+		pp.close()
+		
+		plt.show()
 
 
-def tesis_figure():
-	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=50,dt=0.01,reward=1,penalty=0,iti=10.,tp=5.)
-	m.cost = 0.1
-	m.xbounds()
-	m.refine_value(n=501)
-	xub,xlb,value,v_explore,v1,v2 = m.xbounds_fixed_rho(set_bounds=True,return_values=True)
-	xb = np.array([xub,xlb])
-	b = m.bounds
-	print xb.shape, b.shape
-	io.savemat('tesis_figure_data4',{'value':value,'gb':b,'xb':xb,'v_explore':v_explore,'v1':v1,'v2':v2,'t':m.t,'g':m.g}) 
-	
-	plt.figure(figsize=(11,8))
-	plt.subplot(221)
-	plt.imshow(value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
-	#~ plt.contourf(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
-	cbar = plt.colorbar(orientation='vertical')
-	cbar.set_label('Value')
-	plt.ylabel('belief')
-	plt.xlabel('T [s]')
-	
-	plt.subplot(223)
-	plt.plot(m.g,np.max(np.array([v1,v2]),axis=0),linestyle='--',color='k',linewidth=3)
-	inds = np.array([0,100,250,500,len(m.t)-2])
-	cmap = plt.get_cmap('RdYlGn')
-	for ind,cmap_ind in zip(inds,1-inds.astype(np.float64)/float((len(m.t)-1)*10./m.T)):
-		plt.plot(m.g,v_explore[ind],color=cmap(cmap_ind),linewidth=2)
-	plt.xlabel('Belief')
-	plt.ylabel('$\tilde V$')
-	
-	plt.subplot(222)
-	plt.plot(m.t,b.T)
-	plt.ylabel('Belief bound')
-	plt.subplot(224)
-	plt.plot(m.t,xb.T)
-	plt.ylabel('$x(t)$ bound')
-	plt.xlabel('T [s]')
-	
-	pp = PdfPages('../../figs/inference_value.pdf')
-	pp.savefig()
-	pp.close()
-	
-	plt.show()
+	def tesis_figure():
+		m = DecisionPolicy(model_var=50/0.04,prior_mu_var=62500,n=101,T=50,dt=0.01,reward=1,penalty=0,iti=10.,tp=5.)
+		m.cost = 0.1
+		m.xbounds()
+		m.refine_value(n=501)
+		xub,xlb,value,v_explore,v1,v2 = m.xbounds_fixed_rho(set_bounds=True,return_values=True)
+		xb = np.array([xub,xlb])
+		b = m.bounds
+		print xb.shape, b.shape
+		io.savemat('tesis_figure_data4',{'value':value,'gb':b,'xb':xb,'v_explore':v_explore,'v1':v1,'v2':v2,'t':m.t,'g':m.g}) 
+		
+		plt.figure(figsize=(11,8))
+		plt.subplot(221)
+		plt.imshow(value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
+		#~ plt.contourf(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
+		cbar = plt.colorbar(orientation='vertical')
+		cbar.set_label('Value')
+		plt.ylabel('belief')
+		plt.xlabel('T [s]')
+		
+		plt.subplot(223)
+		plt.plot(m.g,np.max(np.array([v1,v2]),axis=0),linestyle='--',color='k',linewidth=3)
+		inds = np.array([0,100,250,500,len(m.t)-2])
+		cmap = plt.get_cmap('RdYlGn')
+		for ind,cmap_ind in zip(inds,1-inds.astype(np.float64)/float((len(m.t)-1)*10./m.T)):
+			plt.plot(m.g,v_explore[ind],color=cmap(cmap_ind),linewidth=2)
+		plt.xlabel('Belief')
+		plt.ylabel('$\tilde V$')
+		
+		plt.subplot(222)
+		plt.plot(m.t,b.T)
+		plt.ylabel('Belief bound')
+		plt.subplot(224)
+		plt.plot(m.t,xb.T)
+		plt.ylabel('$x(t)$ bound')
+		plt.xlabel('T [s]')
+		
+		pp = PdfPages('../../figs/inference_value.pdf')
+		pp.savefig()
+		pp.close()
+		
+		plt.show()
 
-def test():
-	m = DecisionPolicy(model_var=50/0.04,prior_mu_var=20,n=51,T=30.,\
-					   reward=1,cost=5,penalty=0,iti=10.,tp=5.,store_p=False)
-	m.refine_value(n=501)
-	b = m.bounds
-	xb = m.belief_bound_to_x_bound(b)
-	plt.figure(figsize=(11,8))
-	plt.subplot(121)
-	plt.imshow(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
-	#~ plt.contourf(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
-	cbar = plt.colorbar(orientation='horizontal')
-	cbar.set_label('Value')
-	plt.ylabel('belief')
-	plt.xlabel('T [s]')
-	plt.subplot(222)
-	plt.plot(m.t,b.T)
-	plt.ylabel('Belief bound')
-	plt.subplot(224)
-	plt.plot(m.t,xb.T)
-	plt.ylabel('$x(t)$ bound')
-	plt.xlabel('T [s]')
+	def test():
+		m = DecisionPolicy(model_var=50/0.04,prior_mu_var=20,n=51,T=30.,\
+						   reward=1,cost=5,penalty=0,iti=10.,tp=5.,store_p=False)
+		m.refine_value(n=501)
+		b = m.bounds
+		xb = m.belief_bound_to_x_bound(b)
+		plt.figure(figsize=(11,8))
+		plt.subplot(121)
+		plt.imshow(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
+		#~ plt.contourf(m.value.T,aspect='auto',cmap='jet',interpolation='none',origin='lower',extent=[m.t[0],m.t[-1],m.g[0],m.g[-1]])
+		cbar = plt.colorbar(orientation='horizontal')
+		cbar.set_label('Value')
+		plt.ylabel('belief')
+		plt.xlabel('T [s]')
+		plt.subplot(222)
+		plt.plot(m.t,b.T)
+		plt.ylabel('Belief bound')
+		plt.subplot(224)
+		plt.plot(m.t,xb.T)
+		plt.ylabel('$x(t)$ bound')
+		plt.xlabel('T [s]')
+		
+		
+		#~ colors = plt.get_cmap('jet')
+		#~ plt.gca().set_color_cycle([colors(v) for v in np.linspace(0,1,m.value.shape[0])])
+		#~ plt.plot(m.g,m.value.T)
+		#~ plt.xlabel('belief')
+		#~ plt.ylabel('value')
+		#~ plt.subplot(322)
+		#~ plt.plot(m.t,b.T)
+		#~ plt.ylabel('Belief bound')
+		#~ plt.subplot(324)
+		#~ plt.plot(m.t,mu_b.T)
+		#~ plt.ylabel('$\mu$ bound')
+		#~ plt.subplot(326)
+		#~ plt.plot(m.t,nmu_b.T)
+		#~ plt.ylabel('$\mu/\sigma$ bound')
+		#~ plt.xlabel('T [s]')
+		plt.show()
 	
 	
-	#~ colors = plt.get_cmap('jet')
-	#~ plt.gca().set_color_cycle([colors(v) for v in np.linspace(0,1,m.value.shape[0])])
-	#~ plt.plot(m.g,m.value.T)
-	#~ plt.xlabel('belief')
-	#~ plt.ylabel('value')
-	#~ plt.subplot(322)
-	#~ plt.plot(m.t,b.T)
-	#~ plt.ylabel('Belief bound')
-	#~ plt.subplot(324)
-	#~ plt.plot(m.t,mu_b.T)
-	#~ plt.ylabel('$\mu$ bound')
-	#~ plt.subplot(326)
-	#~ plt.plot(m.t,nmu_b.T)
-	#~ plt.ylabel('$\mu/\sigma$ bound')
-	#~ plt.xlabel('T [s]')
-	plt.show()
-
-if __name__=="__main__":
 	#~ test()
 	#~ tesis_figure()
 	bounds_for_costs()
+
+if __name__=="__main__":
+	main()

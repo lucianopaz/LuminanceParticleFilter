@@ -1,13 +1,46 @@
 from __future__ import division
 
 import enum, os, sys, math, scipy, pickle, cma
-import data_io as io
-import cost_time as ct
 import numpy as np
 from utils import normpdf
-import matplotlib as mt
-from matplotlib import pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+
+class Location(enum.Enum):
+	facu = 0
+	home = 1
+	cluster = 2
+	unknown = 3
+
+opsys,computer_name,kern,bla,bits = os.uname()
+if opsys.lower().startswith("linux"):
+	if computer_name=="facultad":
+		loc = Location.facu
+	elif computer_name.startswith("sge"):
+		loc = Location.cluster
+elif opsys.lower().startswith("darwin"):
+	loc = Location.home
+else:
+	loc = Location.unknown
+
+if loc==Location.facu:
+	data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'
+elif loc==Location.home:
+	data_dir='/Users/luciano/Facultad/datos'
+elif loc==Location.cluster:
+	data_dir='/homedtic/lpaz/DecisionConfidenceKernels/data'
+elif loc==Location.unknown:
+	raise ValueError("Unknown data_dir location")
+
+try:
+	import matplotlib as mt
+	if loc==Location.cluster:
+		mt.use('Agg')
+	from matplotlib import pyplot as plt
+	from matplotlib.backends.backend_pdf import PdfPages
+	can_plot = True
+except:
+	can_plot = False
+import data_io as io
+import cost_time as ct
 
 if np.__version__<'1.9':
 	orig_unique = np.unique
@@ -44,32 +77,6 @@ if np.__version__<'1.8':
 		out/=n
 		return out
 	np.nanmean = np18_nanmean
-
-class Location(enum.Enum):
-	facu = 0
-	home = 1
-	cluster = 2
-	unknown = 3
-
-opsys,computer_name,kern,bla,bits = os.uname()
-if opsys.lower().startswith("linux"):
-	if computer_name=="facultad":
-		loc = Location.facu
-	elif computer_name.startswith("sge"):
-		loc = Location.cluster
-elif opsys.lower().startswith("darwin"):
-	loc = Location.home
-else:
-	loc = Location.unknown
-
-if loc==Location.facu:
-	data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'
-elif loc==Location.home:
-	data_dir='/Users/luciano/Facultad/datos'
-elif loc==Location.cluster:
-	data_dir='/homedtic/lpaz/DecisionConfidenceKernels/data'
-elif loc==Location.unknown:
-	raise ValueError("Unknown data_dir location")
 
 time_units = 'seconds'
 ISI = 0.04 #seconds
@@ -125,7 +132,7 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
-def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None):
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma'):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -157,33 +164,63 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 	scaling_factor = bounds[1]-bounds[0]
 	
 	if method=="two_step":
-		options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
 		#~ res = (start_point[:4],None,None,None,None,None,None,)
 		#~ res2 = (start_point[:4],None,None,None,None,None,None,)
-		res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res2 = []
-		two_step_merit(res[0][0],m,dat,mu,mu_indeces,res2)
-		res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
+		if optimizer=='cma':
+			options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
+			res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces,optimizer),restarts=1)
+			res2 = []
+			two_step_merit(res[0][0],m,dat,mu,mu_indeces,optimizer,res2)
+			res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
+		else:
+			_bounds = (bounds[0][0],bounds[1][0])
+			res = scipy.optimize.minimize(two_step_merit,[start_point[0]], method=optimizer,
+								args=(m,dat,mu,mu_indeces,optimizer),bounds=_bounds,
+								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+			res2 = []
+			two_step_merit(res.x,m,dat,mu,mu_indeces,optimizer,res2)
+			res = ({'cost':res2.x[0],'dead_time':res2.x[1],'dead_time_sigma':res2.x[2],'phase_out_prob':res2.x[3]},)+\
+				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
 	elif method=='full':
-		options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
 		#~ res = (start_point[:4],None,None,None,None,None,None,)
-		res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
+		if optimizer=='cma':
+			options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
+			res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+			res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
+		else:
+			_bounds = [(lb,ub) for lb,ub in zip(bounds[0][:4],bounds[1][:4])]
+			res = scipy.optimize.minimize(full_merit,start_point[:4], method=optimizer,
+									args=(m,dat,mu,mu_indeces),bounds=_bounds,
+									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+			res = ({'cost':res.x[0],'dead_time':res.x[1],'dead_time_sigma':res.x[2],'phase_out_prob':res.x[3]},)+\
+				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
 	elif method=='confidence_only':
 		if fixed_parameters is None:
 			f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
 			out = pickle.load(f)
 			f.close()
 			fixed_parameters = out['fit_output'][0]
-		options = cma.CMAOptions({'bounds':[bounds[0][-1],bounds[1][-1]],'CMA_stds':scaling_factor[-1]})
 		#~ res = ([start_point[-1]],None,None,None,None,None,None,)
-		res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,fixed_parameters),restarts=1)
-		res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
+		_bounds = (bounds[0][-1],bounds[1][-1])
+		res = scipy.optimize.minimize(confidence_only_merit,[start_point[-1]], method='Nelder-Mead',
+								args=(m,dat,mu,mu_indeces,fixed_parameters),bounds=_bounds,
+								options={'disp': True, 'maxiter': 500, 'maxfev': 10000})
+		res = ({'high_confidence_threshold':res.x},res.fun,res.nfev,res.nfev,res.nit,res.x,None)
+		#~ res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,fixed_parameters),restarts=1)
+		#~ res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
-		options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
 		#~ res = (start_point,None,None,None,None,None,None,)
-		res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
-		res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
+		if optimizer=='cma':
+			options = cma.CMAOptions({'bounds':bounds,'CMA_stds':scaling_factor})
+			res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
+			res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
+		else:
+			_bounds = [(lb,ub) for lb,ub in zip(bounds[0],bounds[1])]
+			res = scipy.optimize.minimize(full_confidence_merit,start_point, method=optimizer,
+									args=(m,dat,mu,mu_indeces),bounds=_bounds,
+									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+			res = ({'cost':res.x[0],'dead_time':res.x[1],'dead_time_sigma':res.x[2],'phase_out_prob':res.x[3],'high_confidence_threshold':res.x[4]},)+\
+				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
 	return res
@@ -214,7 +251,7 @@ def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt2_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
 	return nlog_likelihood
 
-def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
+def two_step_merit(cost,m,dat,mu,mu_indeces,optimizer='cma',output_list=None):
 	m.cost = cost[0]
 	xub,xlb = m.xbounds()
 	g1s = []
@@ -230,10 +267,18 @@ def two_step_merit(cost,m,dat,mu,mu_indeces,output_list=None):
 		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,30.])]
 		start_point = [0.0002,100,500,0.1,0.2]
 	scaling_factor = bounds[1]-bounds[0]
-	options = cma.CMAOptions({'bounds':[start_point[0][1:4],start_point[1][1:4]],'CMA_stds':scaling_factor[1:4]})
-	res = cma.fmin(dead_time_merit, start_point[1:4], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
-	params = res[0]
-	nlog_likelihood = res[1]
+	if optimizer=='cma':
+		options = cma.CMAOptions({'bounds':[bounds[0][1:4],bounds[1][1:4]],'CMA_stds':scaling_factor[1:4]})
+		res = cma.fmin(dead_time_merit, start_point[1:4], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
+		params = res[0]
+		nlog_likelihood = res[1]
+	else:
+		_bounds = [(lb,ub) for lb,ub in zip(bounds[0][1:4],bounds[1][1:4])]
+		res = scipy.optimize.minimize(two_step_merit,start_point[1:4], method=optimizer,
+									args=(m,dat,mu,mu_indeces),bounds=_bounds,
+									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+		params = res.x
+		nlog_likelihood = res.fun
 	#~ params,nlog_likelihood,niter,nfuncalls,warnflag =\
 		#~ scipy.optimize.fmin(dead_time_merit,[1.,0.1],args=(g1s,g2s,m,dat,mu,mu_indeces),\
 							#~ full_output=True,disp=False)
@@ -268,6 +313,7 @@ def full_merit(params,m,dat,mu,mu_indeces):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 			else:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
+	print nlog_likelihood, cost, dead_time, dead_time_sigma, phase_out_prob
 	return nlog_likelihood
 
 def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
@@ -275,7 +321,10 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 	dead_time = decision_parameters['dead_time']
 	dead_time_sigma = decision_parameters['dead_time_sigma']
 	phase_out_prob = decision_parameters['phase_out_prob']
-	high_confidence_threshold = params[0]
+	try:
+		high_confidence_threshold = params[0]
+	except:
+		high_confidence_threshold = params
 	if time_units=='seconds':
 		max_RT = np.max(dat[:,1])*1e-3
 	else:
@@ -508,60 +557,95 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	return rt
 
 def plot_fit(subject,method='full',save=None,display=True,suffix=''):
-	f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+suffix+'.pkl','r')
-	out = pickle.load(f)
-	f.close()
-	if isinstance(out,dict):
-		fit_output = out['fit_output']
-		options = out['options']
-		cost = fit_output[0]['cost']
-		dead_time = fit_output[0]['dead_time']
-		dead_time_sigma = fit_output[0]['dead_time_sigma']
-		phase_out_prob = fit_output[0]['phase_out_prob']
-		try:
-			high_conf_thresh = fit_output[0]['high_confidence_threshold']
-		except KeyError:
+	if not can_plot:
+		warnings.warn('Unable to plot. Matplotlib package could not be loaded')
+		return None
+	if method!='confidence_only':
+		f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+suffix+'.pkl','r')
+		out = pickle.load(f)
+		f.close()
+		if isinstance(out,dict):
+			fit_output = out['fit_output']
+			options = out['options']
+			cost = fit_output[0]['cost']
+			dead_time = fit_output[0]['dead_time']
+			dead_time_sigma = fit_output[0]['dead_time_sigma']
+			phase_out_prob = fit_output[0]['phase_out_prob']
 			try:
-				f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
-				out2 = pickle.load(f)
-				f.close()
-				if isinstance(out2,dict):
-					out2 = out2['fit_output']
-				high_conf_thresh = out2[0]['high_confidence_threshold']
-			except (IOError,EOFError):
-				hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
-				high_conf_thresh = hand_picked_thresh[subject.id]
-			except Exception as err:
-				high_conf_thresh = out2[0][0]
-	else:
-		options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
-		try:
-			cost = out[0]['cost']
-			dead_time = out[0]['dead_time']
-			dead_time_sigma = out[0]['dead_time_sigma']
-			phase_out_prob = out[0]['phase_out_prob']
-			try:
-				high_conf_thresh = out[0]['high_confidence_threshold']
+				high_conf_thresh = fit_output[0]['high_confidence_threshold']
 			except KeyError:
 				try:
 					f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
 					out2 = pickle.load(f)
 					f.close()
+					if isinstance(out2,dict):
+						out2 = out2['fit_output']
 					high_conf_thresh = out2[0]['high_confidence_threshold']
 				except (IOError,EOFError):
 					hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
 					high_conf_thresh = hand_picked_thresh[subject.id]
 				except Exception as err:
 					high_conf_thresh = out2[0][0]
-		except IndexError,TypeError:
-			cost = out[0][0]
-			dead_time = out[0][1]
-			dead_time_sigma = out[0][2]
-			phase_out_prob = out[0][3]
-			if 'confidence' in method:
-				high_conf_thresh = out[0][4]
+		else:
+			fit_output = out
+			options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
+			try:
+				cost = fit_output[0]['cost']
+				dead_time = fit_output[0]['dead_time']
+				dead_time_sigma = fit_output[0]['dead_time_sigma']
+				phase_out_prob = fit_output[0]['phase_out_prob']
+				try:
+					high_conf_thresh = fit_output[0]['high_confidence_threshold']
+				except KeyError:
+					try:
+						f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
+						out2 = pickle.load(f)
+						f.close()
+						high_conf_thresh = out2[0]['high_confidence_threshold']
+					except (IOError,EOFError):
+						hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
+						high_conf_thresh = hand_picked_thresh[subject.id]
+					except Exception as err:
+						high_conf_thresh = out2[0][0]
+			except IndexError,TypeError:
+				cost = fit_output[0][0]
+				dead_time = fit_output[0][1]
+				dead_time_sigma = fit_output[0][2]
+				phase_out_prob = fit_output[0][3]
+				if 'confidence' in method:
+					high_conf_thresh = fit_output[0][4]
+	else:
+		f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
+		out = pickle.load(f)
+		f.close()
+		if isinstance(out,dict):
+			fit_output = out['fit_output']
+			options = out['options']
+			cost = fit_output[0]['cost']
+			dead_time = fit_output[0]['dead_time']
+			dead_time_sigma = fit_output[0]['dead_time_sigma']
+			phase_out_prob = fit_output[0]['phase_out_prob']
+		else:
+			fit_output = out
+			cost = fit_output[0]['cost']
+			dead_time = fit_output[0]['dead_time']
+			dead_time_sigma = fit_output[0]['dead_time_sigma']
+			phase_out_prob = fit_output[0]['phase_out_prob']
+		f = open('fits/inference_fit_confidence_only_subject_'+str(subject.id)+suffix+'.pkl','r')
+		out = pickle.load(f)
+		f.close()
+		if isinstance(out,dict):
+			fit_output = out['fit_output']
+			options = out['options']
+			high_conf_thresh = fit_output[0]['high_confidence_threshold']
+		else:
+			fit_output = out
+			options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
+			high_conf_thresh = out[0]['high_confidence_threshold']
 	time_units = options['time_units']
 	set_time_units(options['time_units'])
+	#~ print fit_output[1], cost, dead_time, dead_time_sigma, phase_out_prob, high_conf_thresh
+	#~ return None
 	
 	dat,t,d = subject.load_data()
 	if time_units=='seconds':
@@ -689,7 +773,10 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 	#~ plt.legend()
 	
 	if save:
-		save.savefig()
+		if isinstance(save,str):
+			plt.savefig(save,bbox_inches='tight')
+		else:
+			save.savefig()
 	if display:
 		plt.show(True)
 
@@ -704,6 +791,7 @@ def parse_input():
  '-t' or '--task': Integer that identifies the task number when running multiple tasks in parallel. Is one based, thus the first task is task 1 [default 1]
  '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [default 1]
  '-m' or '--method': String that identifies the fit method. Available values are two_step, full, confidence_only and full_confidence. [default full]
+ '-o' or '--optimizer': String that identifies the optimizer used for fitting. Available values are 'cma' and all the scipy.optimize.minimize methods. [default cma]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--plot': This flag takes no values. If present it displays the plotted figure and freezes execution until the figure is closed.
  '--fit': This flag takes no values. If present it performs the fit for the selected method. By default, this flag is always set.
@@ -720,7 +808,7 @@ def parse_input():
  
  Example:
  python moving_bounds_fits.py -T 10 -dt 0.001 --save"""
-	options =  {'task':1,'ntasks':1,'method':'full','save':False,'plot':False,'fit':True,'time_units':'seconds',
+	options =  {'task':1,'ntasks':1,'method':'full','optimizer':'cma','save':False,'plot':False,'fit':True,'time_units':'seconds',
 				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101,'suffix':''}
 	
 	expecting_key = True
@@ -735,6 +823,9 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-m' or arg=='--method':
 				key = 'method'
+				expecting_key = False
+			elif arg=='-o' or arg=='--optimizer':
+				key = 'optimizer'
 				expecting_key = False
 			elif arg=='-s' or arg=='--save':
 				options['save'] = True
@@ -775,7 +866,7 @@ def parse_input():
 				print script_help
 				sys.exit()
 			else:
-				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format({'opt':arg,'pos':i+1}))
+				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format(opt=arg,pos=i+1))
 		else:
 			expecting_key = True
 			if key in ['n','task','ntasks']:
@@ -787,9 +878,9 @@ def parse_input():
 	# Shift task from 1 base to 0 based
 	options['task']-=1
 	if options['time_units'] not in ['seconds','milliseconds']:
-		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format({'units':options['time_units']}))
+		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format(units=options['time_units']))
 	if options['method'] not in ['two_step','full','confidence_only','full_confidence']:
-		raise ValueError("Unknown supplied method: '{method}'. Available values are two_step, full, confidence_only and full_confidence".format({'method':options['method']}))
+		raise ValueError("Unknown supplied method: '{method}'. Available values are two_step, full, confidence_only and full_confidence".format(method=options['method']))
 	return options
 
 if __name__=="__main__":
@@ -800,12 +891,17 @@ if __name__=="__main__":
 	ntasks = options['ntasks']
 	if save:
 		if task==0 and ntasks==1:
-			fname = "inference_fit_{method}{suffix}.pdf".format(method=method,suffix=options['suffix'])
+			fname = "inference_fit_{method}{suffix}".format(method=method,suffix=options['suffix'])
 		else:
-			fname = "inference_fit_{method}_{task}_{ntasks}{suffix}.pdf".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
+			fname = "inference_fit_{method}_{task}_{ntasks}{suffix}".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
 		if os.path.isdir("../../figs"):
 			fname = "../../figs/"+fname
-		save_object = PdfPages(fname)
+		if loc==Location.cluster:
+			fname+='.png'
+			save_object = fname
+		else:
+			fname+='.pdf'
+			save_object = PdfPages(fname)
 	else:
 		save_object = None
 	
@@ -815,16 +911,25 @@ if __name__=="__main__":
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
 			if options['fit']:
-				fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'])
-				f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
-				pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-				f.close()
-				if method=='full' or method=='two_step':
-					fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0])
+				if method!='confidence_only':
+					fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],optimizer=options['optimizer'])
+					f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
+					pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+					f.close()
+					if method=='full' or method=='two_step':
+						fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0],optimizer=options['optimizer'])
+						f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
+						pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
+						f.close()
+				else:
+					f = open("fits/inference_fit_full_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'r')
+					out = pickle.load(f)
+					f.close()
+					fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=out['fit_output'][0],optimizer=options['optimizer'])
 					f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
 					pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
 					f.close()
 			if options['plot'] or save:
 				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'])
-	if save:
+	if save and not isinstance(save,str):
 		save_object.close()
