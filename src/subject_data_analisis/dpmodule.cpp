@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <numpy/arrayobject.h>
 
 #define CUSTOM_NPY_1_7_API_VERSION 7
 #if NPY_API_VERSION<CUSTOM_NPY_1_7_API_VERSION
@@ -6,7 +7,6 @@
 #endif
 #undef CUSTOM_NPY_1_7_API_VERSION
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
 #include "DecisionPolicy.hpp"
 
 #include <cstdio>

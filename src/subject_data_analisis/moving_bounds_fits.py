@@ -1,6 +1,6 @@
 from __future__ import division
 
-import enum, os, sys, math, scipy, pickle, cma
+import enum, os, sys, math, scipy, pickle
 import numpy as np
 from utils import normpdf
 
@@ -41,6 +41,7 @@ except:
 	can_plot = False
 import data_io as io
 import cost_time as ct
+import cma
 
 if np.__version__<'1.9':
 	orig_unique = np.unique
@@ -132,7 +133,28 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
-def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma'):
+def repeat_minimize(merit,start_point_generator,bounds=None,optimizer=None,args=(),options=None):
+	output = {'xs':[],'funs':[],'nfev':0,'nit':0,'xbest':None,'funbest':None,'xmean':None,'xstd':None,'funmean':None,'funstd':None}
+	repetitions = 0
+	for start_point in start_point_generator:
+		repetitions+=1
+		res = scipy.optimize.minimize(merit,start_point, method=optimizer,args=args,bounds=bounds,options=options)
+		output['xs'].append(res.x)
+		output['funs'].append(res.fun)
+		output['nfev']+=res.nfev
+		output['nit']+=res.nit
+		if output['funbest'] is None or res.fun<output['funbest']:
+			output['funbest'] = res.fun
+			output['xbest'] = res.x
+	arr_xs = np.array(output['xs'])
+	arr_funs = np.array(output['funs'])
+	output['xmean'] = np.mean(arr_xs)
+	output['xstd'] = np.std(arr_xs)
+	output['funmean'] = np.mean(arr_funs)
+	output['funstd'] = np.std(arr_funs)
+	return output
+
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma',repetitions=20):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -163,37 +185,22 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 	scaling_factor = bounds[1]-bounds[0]
 	
-	if method=="two_step":
-		#~ res = (start_point[:4],None,None,None,None,None,None,)
-		#~ res2 = (start_point[:4],None,None,None,None,None,None,)
-		if optimizer=='cma':
-			options = cma.CMAOptions({'bounds':[bounds[0][0],bounds[1][0]],'CMA_stds':scaling_factor[0]})
-			res = cma.fmin(two_step_merit, [start_point[0]], 1./3.,options,args=(m,dat,mu,mu_indeces,optimizer),restarts=1)
-			res2 = []
-			two_step_merit(res[0][0],m,dat,mu,mu_indeces,optimizer,res2)
-			res = ({'cost':res2[0],'dead_time':res2[1],'dead_time_sigma':res2[2],'phase_out_prob':res2[3]},)+res[1:7]
-		else:
-			_bounds = (bounds[0][0],bounds[1][0])
-			res = scipy.optimize.minimize(two_step_merit,[start_point[0]], method=optimizer,
-								args=(m,dat,mu,mu_indeces,optimizer),bounds=_bounds,
-								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
-			res2 = []
-			two_step_merit(res.x,m,dat,mu,mu_indeces,optimizer,res2)
-			res = ({'cost':res2.x[0],'dead_time':res2.x[1],'dead_time_sigma':res2.x[2],'phase_out_prob':res2.x[3]},)+\
-				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
-	elif method=='full':
+	if method=='full':
 		#~ res = (start_point[:4],None,None,None,None,None,None,)
 		if optimizer=='cma':
 			options = cma.CMAOptions({'bounds':[bounds[0][:4],bounds[1][:4]],'CMA_stds':scaling_factor[:4]})
 			res = cma.fmin(full_merit, start_point[:4], 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 			res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3]},)+res[1:7]
 		else:
+			_start_points = [np.array(start_point[:4])]
+			_start_points.extend(list(np.random.rand(repetitions-1,4)*(bounds[1][:4]-bounds[0][:4])+bounds[0][:4]))
+			start_point_generator = iter(_start_points)
 			_bounds = [(lb,ub) for lb,ub in zip(bounds[0][:4],bounds[1][:4])]
-			res = scipy.optimize.minimize(full_merit,start_point[:4], method=optimizer,
-									args=(m,dat,mu,mu_indeces),bounds=_bounds,
-									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
-			res = ({'cost':res.x[0],'dead_time':res.x[1],'dead_time_sigma':res.x[2],'phase_out_prob':res.x[3]},)+\
-				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
+			res = repeat_minimize(full_merit,start_point_generator,bounds=_bounds,optimizer=optimizer,
+								args=(m,dat,mu,mu_indeces),
+								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+			res = ({'cost':res['xbest'][0],'dead_time':res['xbest'][1],'dead_time_sigma':res['xbest'][2],'phase_out_prob':res['xbest'][3]},)+\
+				   (res['funbest'],res.nfev,res.nfev,res.nit,res['xmean'],res['xstd'])
 	elif method=='confidence_only':
 		if fixed_parameters is None:
 			f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
@@ -201,11 +208,17 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 			f.close()
 			fixed_parameters = out['fit_output'][0]
 		#~ res = ([start_point[-1]],None,None,None,None,None,None,)
+		_start_points = [np.array(start_point[-1])]
+		_start_points.extend(list(np.random.rand(repetitions-1,1)*(bounds[1][-1]-bounds[0][-1])+bounds[0][-1]))
+		start_point_generator = iter(_start_points)
 		_bounds = (bounds[0][-1],bounds[1][-1])
-		res = scipy.optimize.minimize(confidence_only_merit,[start_point[-1]], method='Nelder-Mead',
-								args=(m,dat,mu,mu_indeces,fixed_parameters),bounds=_bounds,
-								options={'disp': True, 'maxiter': 500, 'maxfev': 10000})
-		res = ({'high_confidence_threshold':res.x},res.fun,res.nfev,res.nfev,res.nit,res.x,None)
+		if optimizer=='cma':
+			optimizer = 'L-BFGS-B'
+		res = repeat_minimize(confidence_only_merit,start_point_generator,bounds=_bounds,optimizer=optimizer,
+								args=(m,dat,mu,mu_indeces,fixed_parameters),
+								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+		res = ({'high_confidence_threshold':res['xbest'][0]},\
+				res['funbest'],res.nfev,res.nfev,res.nit,res['xmean'],res['xstd'])
 		#~ res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,fixed_parameters),restarts=1)
 		#~ res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
@@ -215,78 +228,18 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 			res = cma.fmin(full_confidence_merit, start_point, 1./3.,options,args=(m,dat,mu,mu_indeces),restarts=1)
 			res = ({'cost':res[0][0],'dead_time':res[0][1],'dead_time_sigma':res[0][2],'phase_out_prob':res[0][3],'high_confidence_threshold':res[0][4]},)+res[1:7]
 		else:
+			_start_points = [np.array(start_point[:])]
+			_start_points.extend(list(np.random.rand(repetitions-1,5)*(bounds[1]-bounds[0])+bounds[0]))
+			start_point_generator = iter(_start_points)
 			_bounds = [(lb,ub) for lb,ub in zip(bounds[0],bounds[1])]
-			res = scipy.optimize.minimize(full_confidence_merit,start_point, method=optimizer,
-									args=(m,dat,mu,mu_indeces),bounds=_bounds,
-									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
-			res = ({'cost':res.x[0],'dead_time':res.x[1],'dead_time_sigma':res.x[2],'phase_out_prob':res.x[3],'high_confidence_threshold':res.x[4]},)+\
-				   (res.fun,res.nfev,res.nfev,res.nit,res.x,None)
+			res = repeat_minimize(full_confidence_merit,start_point_generator,bounds=_bounds,optimizer=optimizer,
+								args=(m,dat,mu,mu_indeces),
+								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
+			res = ({'cost':res['xbest'][0],'dead_time':res['xbest'][1],'dead_time_sigma':res['xbest'][2],'phase_out_prob':res['xbest'][3],'high_confidence_threshold':res['xbest'][4]},)+\
+				   (res['funbest'],res.nfev,res.nfev,res.nit,res['xmean'],res['xstd'])
 	else:
 		raise ValueError('Unknown method: {0}'.format(method))
 	return res
-
-
-def dead_time_merit(params,g1s,g2s,m,dat,mu,mu_indeces):
-	dead_time = params[0]
-	dead_time_sigma = params[1]
-	phase_out_prob = params[2]
-	if time_units=='seconds':
-		max_RT = np.max(dat[:,1])*1e-3
-	else:
-		max_RT = np.max(dat[:,1])
-	phase_out_likelihood = phase_out_prob/max_RT
-	
-	nlog_likelihood = 0.
-	for index,(drift,g1,g2) in enumerate(zip(mu,g1s,g2s)):
-		rt1_likelihood,rt2_likelihood = add_dead_time((g1,g2),m.dt,dead_time,dead_time_sigma)
-		for drift_trial in dat[mu_indeces==index]:
-			if time_units=='seconds':
-				rt = drift_trial[1]*1e-3 # Response times are stored in ms while simulations assume times are written in seconds
-			else:
-				rt = drift_trial[1]
-			perf = drift_trial[2]
-			if perf==1:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt1_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
-			else:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(rt2_likelihood,rt))*(1-phase_out_prob)+0.5*phase_out_likelihood)
-	return nlog_likelihood
-
-def two_step_merit(cost,m,dat,mu,mu_indeces,optimizer='cma',output_list=None):
-	m.cost = cost[0]
-	xub,xlb = m.xbounds()
-	g1s = []
-	g2s = []
-	for drift in mu:
-		g1,g2 = m.rt(drift,bounds=(xub,xlb))
-		g1s.append(g1)
-		g2s.append(g2)
-	if time_units=='seconds':
-		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,30.])]
-		start_point = [0.2,0.1,0.5,0.1,0.2]
-	else:
-		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,30.])]
-		start_point = [0.0002,100,500,0.1,0.2]
-	scaling_factor = bounds[1]-bounds[0]
-	if optimizer=='cma':
-		options = cma.CMAOptions({'bounds':[bounds[0][1:4],bounds[1][1:4]],'CMA_stds':scaling_factor[1:4]})
-		res = cma.fmin(dead_time_merit, start_point[1:4], 1./3.,options,args=(g1s,g2s,m,dat,mu,mu_indeces),restarts=1)
-		params = res[0]
-		nlog_likelihood = res[1]
-	else:
-		_bounds = [(lb,ub) for lb,ub in zip(bounds[0][1:4],bounds[1][1:4])]
-		res = scipy.optimize.minimize(two_step_merit,start_point[1:4], method=optimizer,
-									args=(m,dat,mu,mu_indeces),bounds=_bounds,
-									options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
-		params = res.x
-		nlog_likelihood = res.fun
-	#~ params,nlog_likelihood,niter,nfuncalls,warnflag =\
-		#~ scipy.optimize.fmin(dead_time_merit,[1.,0.1],args=(g1s,g2s,m,dat,mu,mu_indeces),\
-							#~ full_output=True,disp=False)
-	if output_list is not None:
-		del output_list[:]
-		output_list.append(cost)
-		output_list.extend(params)
-	return nlog_likelihood
 
 def full_merit(params,m,dat,mu,mu_indeces):
 	cost = params[0]
@@ -313,7 +266,6 @@ def full_merit(params,m,dat,mu,mu_indeces):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 			else:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
-	print nlog_likelihood, cost, dead_time, dead_time_sigma, phase_out_prob
 	return nlog_likelihood
 
 def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
@@ -345,7 +297,7 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 		_nT = int(m.T/_dt)+1
 		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
 		log_odds = m.log_odds()
-		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[1])])
 	else:
 		_nT = m.nT
 		log_odds = m.log_odds()
@@ -407,12 +359,24 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 		_nT = int(m.T/_dt)+1
 		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
 		log_odds = m.log_odds()
-		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+		inf_log_odds = np.isinf(log_odds[0])
+		if np.any(inf_log_odds):
+			valid_t = np.logical_not(inf_log_odds)
+			min_valid_t = np.min(m.t[valid_t])
+			max_valid_t = np.max(m.t[valid_t])
+			valid__t = np.logical_and(_t>=min_valid_t,_t<=max_valid_t)
+			_log_odds = np.inf*np.ones((2,_t.shape[0]))
+			_log_odds[:,valid__t] = np.array([np.interp(_t[valid__t],m.t[valid_t],l[valid_t]) for l in log_odds])
+			log_odds = _log_odds
+		else:
+			log_odds = np.array([np.interp(_t,m.t,l) for l in log_odds])
+		
 	else:
 		_nT = m.nT
 		log_odds = m.log_odds()
 	
 	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
+	
 	phigh[log_odds<high_confidence_threshold] = 0.25*phase_out_prob
 	if _dt:
 		ratio = np.ceil(_nT/m.nT)
@@ -424,10 +388,10 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 		padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
 		phigh = np.nanmean(padded_phigh,axis=2)
 	plow = 1.-phigh
-	
 	for index,drift in enumerate(mu):
 		gs = np.array(m.rt(drift,bounds=(xub,xlb)))
 		confidence_rt = np.concatenate((phigh*gs,plow*gs))
+		#~ print confidence_rt
 		g1h,g2h,g1l,g2l = add_dead_time(confidence_rt,m.dt,dead_time,dead_time_sigma)
 		for drift_trial in dat[mu_indeces==index]:
 			if time_units=='seconds':
@@ -437,13 +401,15 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 			perf = drift_trial[2]
 			conf = drift_trial[3]
 			if perf==1 and conf==2:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1h,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
+				sample_nlog_likelihood=np.log(np.exp(-m.rt_nlog_like(g1h,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
 			elif perf==0 and conf==2:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2h,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
+				sample_nlog_likelihood=np.log(np.exp(-m.rt_nlog_like(g2h,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
 			elif perf==1 and conf==1:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g1l,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
+				sample_nlog_likelihood=np.log(np.exp(-m.rt_nlog_like(g1l,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
 			else:
-				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(g2l,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
+				sample_nlog_likelihood=np.log(np.exp(-m.rt_nlog_like(g2l,rt))*(1-phase_out_prob)+0.25*phase_out_prob/max_RT)
+			#~ print sample_nlog_likelihood
+			nlog_likelihood-= sample_nlog_likelihood
 	return nlog_likelihood
 
 def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None,include_t0=True):
@@ -515,7 +481,7 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 		_nT = int(m.T/_dt)+1
 		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
 		log_odds = m.log_odds()
-		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[0])])
+		log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[1])])
 	else:
 		_nT = m.nT
 		log_odds = m.log_odds()
@@ -790,7 +756,7 @@ def parse_input():
  Optional arguments are:
  '-t' or '--task': Integer that identifies the task number when running multiple tasks in parallel. Is one based, thus the first task is task 1 [default 1]
  '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [default 1]
- '-m' or '--method': String that identifies the fit method. Available values are two_step, full, confidence_only and full_confidence. [default full]
+ '-m' or '--method': String that identifies the fit method. Available values are full, confidence_only and full_confidence. [default full]
  '-o' or '--optimizer': String that identifies the optimizer used for fitting. Available values are 'cma' and all the scipy.optimize.minimize methods. [default cma]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--plot': This flag takes no values. If present it displays the plotted figure and freezes execution until the figure is closed.
@@ -879,8 +845,8 @@ def parse_input():
 	options['task']-=1
 	if options['time_units'] not in ['seconds','milliseconds']:
 		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format(units=options['time_units']))
-	if options['method'] not in ['two_step','full','confidence_only','full_confidence']:
-		raise ValueError("Unknown supplied method: '{method}'. Available values are two_step, full, confidence_only and full_confidence".format(method=options['method']))
+	if options['method'] not in ['full','confidence_only','full_confidence']:
+		raise ValueError("Unknown supplied method: '{method}'. Available values are full, confidence_only and full_confidence".format(method=options['method']))
 	return options
 
 if __name__=="__main__":

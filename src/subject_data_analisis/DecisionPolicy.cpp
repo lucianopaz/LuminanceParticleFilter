@@ -876,8 +876,15 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	g2[0] = 0.;
 	t0 = this->t[0];
 	
-	g1[1] = -2.*this->Psi(mu,xub,1,this->t[1],this->prior_mu_mean,t0);
-	g2[1] = 2.*this->Psi(mu,xlb,1,this->t[1],this->prior_mu_mean,t0);
+	if (xub[1]<=xlb[1]){
+		// If the bounds collapse to 0 instantly, the decision will be taken instantly and randomly
+		bounds_touched = true;
+		g1[1] = 0.5;
+		g2[1] = 0.5;
+	} else {
+		g1[1] = -2.*this->Psi(mu,xub,1,this->t[1],this->prior_mu_mean,t0);
+		g2[1] = 2.*this->Psi(mu,xlb,1,this->t[1],this->prior_mu_mean,t0);
+	}
 	// Because of numerical instabilities, we must take care that g1 and g2 are always positive
 	if (g1[1]<0.) g1[1] = 0.;
 	if (g2[1]<0.) g2[1] = 0.;
