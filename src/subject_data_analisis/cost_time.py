@@ -68,16 +68,18 @@ class DecisionPolicy():
 		self.dt = float(dt)
 		self.nT = int(self.T/self.dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-		self.cost = np.interp(self.t, oldt, self.cost)
+		if not isinstance(self.cost,float):
+			self.cost = np.interp(self.t, oldt, self.cost)
 	def set_T(self,T):
 		self.T = float(T)
 		old_nT = self.nT
 		self.nT = int(self.T/self.dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
 		old_cost = self.cost
-		self.cost = np.zeros_like(self.t)
-		self.cost[:old_nT] = old_cost
-		self.cost[old_nT:] = old_cost[-1]
+		if not isinstance(old_cost,float):
+			self.cost = np.zeros_like(self.t)
+			self.cost[:old_nT] = old_cost
+			self.cost[old_nT:] = old_cost[-1]
 	
 	def reset(self):
 		if self.store_p:
@@ -475,7 +477,8 @@ class DecisionPolicy():
 					self.dt = float(dt)
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					self.cost = np.interp(self.t, oldt, self.cost)
+					if not isinstance(self.cost,float):
+						self.cost = np.interp(self.t, oldt, self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
@@ -484,9 +487,10 @@ class DecisionPolicy():
 					old_cost = self.cost
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					self.cost = np.zeros_like(self.t)
-					self.cost[:old_nT] = old_cost
-					self.cost[old_nT:] = old_cost[-1]
+					if not isinstance(self.cost,float):
+						self.cost = np.zeros_like(self.t)
+						self.cost[:old_nT] = old_cost
+						self.cost[old_nT:] = old_cost[-1]
 			if n is not None:
 				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
@@ -528,7 +532,8 @@ class DecisionPolicy():
 					self.dt = float(dt)
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					self.cost = np.interp(self.t, oldt, self.cost)
+					if not isinstance(self.cost,float):
+						self.cost = np.interp(self.t, oldt, self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
@@ -536,10 +541,11 @@ class DecisionPolicy():
 					old_nT = self.nT
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					old_cost = self.cost
-					self.cost = np.zeros_like(self.t)
-					self.cost[:old_nT] = old_cost
-					self.cost[old_nT:] = old_cost[-1]
+					if not isinstance(self.cost,float):
+						old_cost = self.cost
+						self.cost = np.zeros_like(self.t)
+						self.cost[:old_nT] = old_cost
+						self.cost[old_nT:] = old_cost[-1]
 			if n is not None:
 				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
@@ -685,17 +691,46 @@ class DecisionPolicy():
 		ret[1]*=-1
 		return ret
 
-def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
-	sim = np.zeros(reps)
-	rt = np.zeros(reps)
-	decision = np.zeros(reps)
-	not_decided = np.ones(reps)
+def diffusion_path_samples(mu,var_rate,dt,T,xb,reps=10):
+	paths = []
+	sigma = np.sqrt(var_rate*dt)
+	if not isinstance(mu,np.ndarray):
+		mus = mu*np.ones(reps)
+	else:
+		mus = mu
+	for mu in mus:
+		path = {'x':[0],'t':[0]}
+		decided = False
+		for t_i,t in enumerate(np.arange(float(dt),float(T+dt),float(dt),np.float)):
+			stim = sigma*np.random.randn(1)+mu*dt
+			path['x'].append(path['x'][-1]+stim)
+			path['t'].append(t)
+			if path['x'][-1]>=xb[0][t_i+1]:
+				path['dec']=1
+				path['rt']=t
+				decided = True
+				break
+			elif path['x'][-1]<=xb[1][t_i+1]:
+				path['dec']=2
+				path['rt']=t
+				decided = True
+				break
+		if not decided:
+			path['dec']=None
+			path['rt']=None
+		paths.append(path)
+	return sorted(paths,key=lambda path:path['rt'], reverse=True)
+
+def sim_rt(mu,var_rate,dt,T,xb,reps=10000):
+	if not isinstance(mu,np.ndarray):
+		mu = mu*np.ones(reps)
+	sim = np.zeros_like(mu)
+	rt = np.zeros_like(mu)
+	decision = np.zeros_like(mu)
+	not_decided = np.ones_like(mu)
 	sigma = np.sqrt(dt*var_rate)
-	if checks:
-		variance = np.zeros(int(T/dt)+1)
 	for i,t in enumerate(np.arange(float(dt),float(T+dt),float(dt),np.float)):
-		sim+= sigma*np.random.randn(reps)
-		variance[i] = np.var(sim)
+		sim+= sigma*np.random.randn(*mu.shape)
 		stim = sim+t*mu
 		dec1 = np.logical_and(stim>=xb[0][i+1],not_decided)
 		dec2 = np.logical_and(stim<=xb[1][i+1],not_decided)
@@ -710,11 +745,7 @@ def sim_rt(mu,var_rate,dt,T,xb,reps=10000,checks=False):
 		if not any(not_decided):
 			break
 	out = (rt,decision)
-	if checks:
-		out+=(variance,)
 	return out
-		
-	return rt,decision
 
 def main():
 	from matplotlib import pyplot as plt

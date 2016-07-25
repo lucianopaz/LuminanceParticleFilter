@@ -14,7 +14,7 @@ from matplotlib.widgets import Slider
 class Sweeper:
 	subjects = io.unique_subjects(mo.data_dir)
 	subjects.append(io.merge_subjects(subjects))
-	fit_files = ["fits/inference_fit_full_subject_{0}.pkl".format(s.id) for s in subjects]
+	fit_files = ["fits/inference_fit_full_subject_{0}_seconds.pkl".format(s.id) for s in subjects]
 	
 	def sweep(self):
 		for i,(s,fname) in enumerate(zip(self.subjects,self.fit_files)):
@@ -35,10 +35,10 @@ class Sweeper:
 			reward = out['options']['reward']
 			penalty = out['options']['penalty']
 			n = out['options']['n']
-			cost = out[0]['cost']
-			dead_time = out[0]['dead_time']
-			dead_time_sigma = out[0]['dead_time_sigma']
-			phase_out_prob = out[0]['phase_out_prob']
+			self.cost = fit_output[0]['cost']
+			self.dead_time = fit_output[0]['dead_time']
+			self.dead_time_sigma = fit_output[0]['dead_time_sigma']
+			self.phase_out_prob = fit_output[0]['phase_out_prob']
 		else:
 			time_units = 'seconds'
 			T = None
@@ -147,10 +147,10 @@ class Sweeper:
 		conf_rt = mo.confidence_rt_distribution(self.dec_gs,self.cost,self.dead_time,self.dead_time_sigma,self.phase_out_prob,self.m,self.mu,self.mu_prob,self.max_RT,confidence_params,include_t0=False)
 		params = [self.cost, self.dead_time, self.dead_time_sigma, self.phase_out_prob, self.slider.val]
 		self.nLL = mo.full_confidence_merit(params,self.m,self.dat,self.mu,self.mu_indeces)
-		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(s.id)+' high',where='post',color='b')
-		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(s.id)+' low',where='post',color='r')
-		l1, = plt.plot(self.m.t[1:],np.sum(conf_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='b')
-		l2, = plt.plot(self.m.t[1:],-np.sum(conf_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='r')
+		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(s.id)+' high',where='post',color='forestgreen')
+		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(s.id)+' low',where='post',color='indigo')
+		l1, = plt.plot(self.m.t[1:],np.sum(conf_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
+		l2, = plt.plot(self.m.t[1:],-np.sum(conf_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='indigo')
 		self.lines = [l1,l2]
 		#~ l11,l12 = plt.plot(self.m.t[1:],conf_rt['full']['high'].T,label='Theoretical high',linewidth=2,color='b')
 		#~ l21,l22 = plt.plot(self.m.t[1:],-conf_rt['full']['low'].T,label='Theoretical low',linewidth=2,color='r')

@@ -98,12 +98,55 @@ def set_time_units(units='seconds'):
 		ISI = 40.
 		model_var = (patch_sigma**2)*2/ISI
 
+def sim_rt(mu,var_rate,dt,T,max_RT,xb,log_odds,dead_time,dead_time_sigma,phase_out_prob=0.,high_conf_thresh=None,reps=10000,cost_time_sim_rt_output=None):
+	if cost_time_sim_rt_output:
+		import copy
+		rts,decs = copy.deepcopy(cost_time_sim_rt_output)
+	else:
+		rts,decs = ct.sim_rt(mu,var_rate,dt,T,xb,reps)
+	confs = np.zeros_like(decs)
+	if phase_out_prob>0 or dead_time>0 or dead_time_sigma>0:
+		for i,(rt,dec) in enumerate(zip(rts,decs)):
+			if np.random.rand()<phase_out_prob:
+				# If a phaseout trial
+				r = np.random.rand()
+				rts[i] = np.random.rand()*max_RT
+				if r<0.25:
+					decs[i] = 1
+					confs[i] = 2
+				elif r<0.5:
+					decs[i] = 1
+					confs[i] = 1
+				elif r<0.75:
+					decs[i] = 0
+					confs[i] = 2
+				else:
+					decs[i] = 0
+					confs[i] = 1
+			else:
+				# If not a phaseout trial
+				if high_conf_thresh is not None:
+					if log_odds[dec][int(rt/dt)]>=high_conf_thresh:
+						confs[i] = 2
+					else:
+						confs[i] = 1
+				rts[i] = rt+dead_time+np.abs(np.random.randn())*dead_time_sigma
+	elif high_conf_thresh is not None:
+		confs = np.array([log_odds[dec][int(rt/dt)]>=high_conf_thresh for rt,dec in zip(rts,decs)])
+	if high_conf_thresh is None:
+		return (rts,decs)
+	else:
+		return (rts,decs,confs)
+
 def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	"""
 	new_gs = add_dead_time(gs,dt,dead_time_sigma,mode='full')
 	"""
-	if dead_time_sigma==0.:
-		return gs
+	if dead_time_sigma<=0.:
+		if dead_time_sigma==0:
+			return gs
+		else:
+			return np.zeros_like(gs)
 	gs = np.array(gs)
 	conv_window = np.linspace(-dead_time_sigma*6,dead_time_sigma*6,int(math.ceil(dead_time_sigma*12/dt))+1)
 	conv_window_size = conv_window.shape[0]
@@ -137,8 +180,10 @@ def repeat_minimize(merit,start_point_generator,bounds=None,optimizer=None,args=
 	output = {'xs':[],'funs':[],'nfev':0,'nit':0,'xbest':None,'funbest':None,'xmean':None,'xstd':None,'funmean':None,'funstd':None}
 	repetitions = 0
 	for start_point in start_point_generator:
+		print bounds,start_point
 		repetitions+=1
 		res = scipy.optimize.minimize(merit,start_point, method=optimizer,args=args,bounds=bounds,options=options)
+		print '1 round ended. Result: ',res.fun,res.x
 		output['xs'].append(res.x)
 		output['funs'].append(res.fun)
 		output['nfev']+=res.nfev
@@ -146,6 +191,7 @@ def repeat_minimize(merit,start_point_generator,bounds=None,optimizer=None,args=
 		if output['funbest'] is None or res.fun<output['funbest']:
 			output['funbest'] = res.fun
 			output['xbest'] = res.x
+		print 'Best so far: ',output['funbest'],output['xbest']
 	arr_xs = np.array(output['xs'])
 	arr_funs = np.array(output['funs'])
 	output['xmean'] = np.mean(arr_xs)
@@ -154,7 +200,7 @@ def repeat_minimize(merit,start_point_generator,bounds=None,optimizer=None,args=
 	output['funstd'] = np.std(arr_funs)
 	return output
 
-def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma',repetitions=20):
+def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma',repetitions=5):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
 	mus = np.concatenate((-mu[::-1],mu))
@@ -169,8 +215,8 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 			iti = 1.
 		if tp is None:
 			tp = 0.
-		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,30.])]
-		start_point = [0.2,0.1,0.5,0.1,0.2]
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,1.])]
+		start_point = [0.2,0.1,0.5,0.1,0.5]
 	else:
 		if T is None:
 			T = 10000.
@@ -178,8 +224,8 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 			iti = 1000.
 		if tp is None:
 			tp = 0.
-		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,30.])]
-		start_point = [0.0002,100,500,0.1,0.2]
+		bounds = [np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,1.,1.])]
+		start_point = [0.0002,100,500,0.1,0.5]
 	if dt is None:
 		dt = ISI
 	m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
@@ -211,14 +257,14 @@ def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=No
 		_start_points = [np.array(start_point[-1])]
 		_start_points.extend(list(np.random.rand(repetitions-1,1)*(bounds[1][-1]-bounds[0][-1])+bounds[0][-1]))
 		start_point_generator = iter(_start_points)
-		_bounds = (bounds[0][-1],bounds[1][-1])
+		_bounds = [(bounds[0][-1],bounds[1][-1])]
 		if optimizer=='cma':
-			optimizer = 'L-BFGS-B'
+			optimizer = 'Nelder-Mead'
 		res = repeat_minimize(confidence_only_merit,start_point_generator,bounds=_bounds,optimizer=optimizer,
 								args=(m,dat,mu,mu_indeces,fixed_parameters),
 								options={'disp': False, 'maxiter': 1000, 'maxfev': 10000})
 		res = ({'high_confidence_threshold':res['xbest'][0]},\
-				res['funbest'],res.nfev,res.nfev,res.nit,res['xmean'],res['xstd'])
+				res['funbest'],res['nfev'],res['nfev'],res['nit'],res['xmean'],res['xstd'])
 		#~ res = cma.fmin(confidence_only_merit, [start_point[-1]], 1./3.,options,args=(m,dat,mu,mu_indeces,fixed_parameters),restarts=1)
 		#~ res = ({'high_confidence_threshold':res[0][0]},)+res[1:7]
 	elif method=='full_confidence':
@@ -303,7 +349,7 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 		log_odds = m.log_odds()
 	
 	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
-	phigh[log_odds<high_confidence_threshold] = 0.25*phase_out_prob
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.25*phase_out_prob
 	if _dt:
 		ratio = np.ceil(_nT/m.nT)
 		tail = _nT%m.nT
@@ -331,6 +377,7 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gh,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
 			else:
 				nlog_likelihood-=np.log(np.exp(-m.rt_nlog_like(gl,rt))*(1-phase_out_prob)+0.5*phase_out_prob/max_RT)
+	print nlog_likelihood,high_confidence_threshold
 	return nlog_likelihood
 
 def full_confidence_merit(params,m,dat,mu,mu_indeces):
@@ -377,7 +424,7 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 	
 	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
 	
-	phigh[log_odds<high_confidence_threshold] = 0.25*phase_out_prob
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.25*phase_out_prob
 	if _dt:
 		ratio = np.ceil(_nT/m.nT)
 		tail = _nT%m.nT
@@ -490,7 +537,7 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
 	
 	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
-	phigh[log_odds<confidence_params[0]] = 0.25*phase_out_prob
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<confidence_params[0]] = 0.25*phase_out_prob
 	if _dt:
 		ratio = int(np.ceil(_nT/m.nT))
 		tail = _nT%m.nT
@@ -694,10 +741,10 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 	mt.rc('axes', color_cycle=['b','r'])
 	plt.figure(figsize=(11,8))
 	ax1 = plt.subplot(121)
-	plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post')
-	plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post')
-	plt.plot(m.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2)
-	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2)
+	plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post',color='b')
+	plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post',color='r')
+	plt.plot(m.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
+	plt.plot(m.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
 	plt.xlim([0,mxlim])
 	if time_units=='seconds':
 		plt.xlabel('T [s]')
@@ -706,10 +753,10 @@ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
 	plt.ylabel('Prob density')
 	plt.legend()
 	plt.subplot(122,sharey=ax1)
-	plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post')
-	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post')
-	plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2)
-	plt.plot(m.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2)
+	plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post',color='forestgreen')
+	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post',color='mediumpurple')
+	plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
+	plt.plot(m.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='mediumpurple')
 	plt.xlim([0,mxlim])
 	if time_units=='seconds':
 		plt.xlabel('T [s]')
