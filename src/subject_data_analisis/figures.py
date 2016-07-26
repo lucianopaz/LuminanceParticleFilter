@@ -300,9 +300,14 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	dat,t,d = subject.load_data()
 	mu_data = (dat[:,0]-mo.distractor)/mo.ISI
 	mu,mu_indeces,count = np.unique(mu_data,return_inverse=True,return_counts=True)
-	mus = np.concatenate((-mu[::-1],mu))
-	counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
-	p = counts/np.sum(counts)
+	mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
+	if mu[0]==0:
+		mus = np.concatenate((-mu[-1:0:-1],mu))
+		p = np.concatenate((mu_prob[-1:0:-1],mu_prob))
+		p[mus!=0]*=0.5
+	else:
+		mus = np.concatenate((-mu[::-1],mu))
+		p = np.concatenate((mu_prob[::-1],mu_prob))*0.5
 	
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	
@@ -322,32 +327,62 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	phased_out_rt = np.zeros_like(m.t)
 	phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
-	for drift,mu_prob in zip(mu,p):
+	for drift,drift_prob in zip(mu,mu_prob):
 		g = np.array(m.rt(drift,bounds=(xub,xlb)))
 		if difusion_teo_rt is None:
-			difusion_teo_rt = g*mu_prob
+			difusion_teo_rt = g[:]*drift_prob
 		else:
-			difusion_teo_rt+= g*mu_prob
+			difusion_teo_rt+= g[:]*drift_prob
 		g1,g2 = mo.add_dead_time(g,m.dt,dead_time,dead_time_sigma)
 		g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
 		g2 = g2*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
 		if model_teo_rt is None:
-			model_teo_rt = np.array([g1,g2])*mu_prob
+			model_teo_rt = np.array([g1,g2])*drift_prob
 		else:
-			model_teo_rt+= np.array([g1,g2])*mu_prob
+			model_teo_rt+= np.array([g1,g2])*drift_prob
 	
 	xb = np.array([xub,xlb])
 	log_odds = m.log_odds()
 	difusion_sim_rt,difusion_sim_dec = ct.sim_rt(mu_data,mo.model_var,m.dt,m.T,xb)
 	model_sim_rt,model_sim_dec = mo.sim_rt(mu_data,mo.model_var,m.dt,m.T,max_RT,xb,log_odds,dead_time,dead_time_sigma,phase_out_prob,cost_time_sim_rt_output=(difusion_sim_rt,difusion_sim_dec))
 	
-	plt.figure()
-	plt.subplot(121)
-	plt.hist(difusion_sim_rt[difusion_sim_dec==1],100,normed=True)
+	edges = m.t[:np.ceil(max_RT/m.dt)+1]
+	centers = [0.5*(em+eM) for em,eM in zip(edges[:-1],edges[1:])]
+	
+	difusion_sim_hit_hist,edges = np.histogram(difusion_sim_rt[difusion_sim_dec==1],edges)
+	difusion_sim_hit_hist = difusion_sim_hit_hist.astype(np.float64)
+	difusion_sim_miss_hist,edges = np.histogram(difusion_sim_rt[difusion_sim_dec==2],edges)
+	difusion_sim_miss_hist = difusion_sim_miss_hist.astype(np.float64)
+	norm = np.sum(difusion_sim_hit_hist+difusion_sim_miss_hist)*(edges[1]-edges[0])
+	difusion_sim_hit_hist/=norm
+	difusion_sim_miss_hist/=norm
+	
+	model_sim_hit_hist,edges = np.histogram(model_sim_rt[model_sim_dec==1],edges)
+	model_sim_hit_hist = model_sim_hit_hist.astype(np.float64)
+	model_sim_miss_hist,edges = np.histogram(model_sim_rt[model_sim_dec==2],edges)
+	model_sim_miss_hist = model_sim_miss_hist.astype(np.float64)
+	norm = np.sum(model_sim_hit_hist+model_sim_miss_hist)*(edges[1]-edges[0])
+	model_sim_hit_hist/=norm
+	model_sim_miss_hist/=norm
+	
+	plt.figure(figsize=(8,4))
+	ax1 = plt.subplot(121)
+	plt.step(edges[:-1],difusion_sim_hit_hist,where='pre')
 	plt.plot(m.t,difusion_teo_rt[0])
-	plt.subplot(122)
-	plt.hist(model_sim_rt[difusion_sim_dec==1],100,normed=True)
+	plt.step(edges[:-1],-difusion_sim_miss_hist,where='pre')
+	plt.plot(m.t,-difusion_teo_rt[1])
+	
+	plt.ylabel('Prob density')
+	plt.xlabel('T [s]')
+	
+	plt.subplot(122,sharex=ax1,sharey=ax1)
+	plt.step(edges[:-1],model_sim_hit_hist,where='pre')
 	plt.plot(m.t,model_teo_rt[0])
+	plt.step(edges[:-1],-model_sim_miss_hist,where='pre')
+	plt.plot(m.t,-model_teo_rt[1])
+	plt.gca().set_xlim([0,3])
+	
+	plt.xlabel('T [s]')
 	plt.show(True)
 
 def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg',show=False):

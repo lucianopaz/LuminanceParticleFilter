@@ -118,10 +118,10 @@ def sim_rt(mu,var_rate,dt,T,max_RT,xb,log_odds,dead_time,dead_time_sigma,phase_o
 					decs[i] = 1
 					confs[i] = 1
 				elif r<0.75:
-					decs[i] = 0
+					decs[i] = 2
 					confs[i] = 2
 				else:
-					decs[i] = 0
+					decs[i] = 2
 					confs[i] = 1
 			else:
 				# If not a phaseout trial

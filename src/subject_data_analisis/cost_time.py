@@ -727,9 +727,11 @@ def sim_rt(mu,var_rate,dt,T,xb,reps=10000):
 	sim = np.zeros_like(mu)
 	rt = np.zeros_like(mu)
 	decision = np.zeros_like(mu)
-	not_decided = np.ones_like(mu)
+	not_decided = np.ones_like(mu,dtype=np.bool)
 	sigma = np.sqrt(dt*var_rate)
-	for i,t in enumerate(np.arange(float(dt),float(T+dt),float(dt),np.float)):
+	nT = int(T/dt)+1
+	for i in range(1,nT):
+		t = float(dt)*i
 		sim+= sigma*np.random.randn(*mu.shape)
 		stim = sim+t*mu
 		dec1 = np.logical_and(stim>=xb[0][i+1],not_decided)
