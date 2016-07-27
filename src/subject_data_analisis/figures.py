@@ -357,6 +357,11 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	difusion_sim_hit_hist/=norm
 	difusion_sim_miss_hist/=norm
 	
+	likeliest_mu = [mu for mu,prob in zip(mu,mu_prob) if prob==np.max(mu_prob)][0]
+	dense_t = np.arange(0,int(m.T*1e3)+1)*1e-3
+	dense_bounds = np.array([np.interp(dense_t, m.t, xub),np.interp(dense_t, m.t, xlb)])
+	samples = ct.diffusion_path_samples(likeliest_mu,mo.model_var,1e-3,m.T,dense_bounds,reps=50)
+	
 	model_sim_hit_hist,edges = np.histogram(model_sim_rt[model_sim_dec==1],edges)
 	model_sim_hit_hist = model_sim_hit_hist.astype(np.float64)
 	model_sim_miss_hist,edges = np.histogram(model_sim_rt[model_sim_dec==2],edges)
@@ -365,25 +370,100 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	model_sim_hit_hist/=norm
 	model_sim_miss_hist/=norm
 	
-	plt.figure(figsize=(8,4))
-	ax1 = plt.subplot(121)
-	plt.step(edges[:-1],difusion_sim_hit_hist,where='pre')
-	plt.plot(m.t,difusion_teo_rt[0])
-	plt.step(edges[:-1],-difusion_sim_miss_hist,where='pre')
-	plt.plot(m.t,-difusion_teo_rt[1])
+	plt.figure(figsize=(12,6))
+	gs1 = gridspec.GridSpec(3, 1, left=0.05, right=0.32,hspace=0, height_ratios=[2,1,1])
+	gs2 = gridspec.GridSpec(1, 1, left=0.38, right=0.51, bottom=0.27, top=0.52)
+	gs3 = gridspec.GridSpec(1, 1, left=0.65, right=0.95)
+	ax1 = plt.subplot(gs1[0,0])
+	plt.step(edges[:-1],difusion_sim_hit_hist,where='pre',color='b',linewidth=1,label='Simulation')
+	plt.plot(m.t,difusion_teo_rt[0],color='b',linewidth=3,label='Theoretical')
+	plt.ylabel('Up RT dist')
+	ax1.spines['top'].set_visible(False)
+	ax1.spines['right'].set_visible(False)
+	ax1.get_xaxis().tick_bottom()
+	ax1.get_yaxis().tick_left()
+	ax1.tick_params(labelleft=True,labelbottom=False)
+	plt.legend()
+	plt.title('Diffusion first\npassage time')
 	
-	plt.ylabel('Prob density')
+	ax3 = plt.subplot(gs1[2,0],sharex=ax1)
+	plt.step(edges[:-1],difusion_sim_miss_hist,where='pre',color='r',linewidth=1)
+	plt.plot(m.t,difusion_teo_rt[1],color='r',linewidth=3)
+	ax3.set_ylim(np.array(ax1.get_ylim()[::-1])*0.5)
+	ax1.spines['right'].set_visible(False)
+	ax1.get_xaxis().tick_bottom()
+	ax1.get_yaxis().tick_left()
+	ax3.tick_params(labelleft=True)
+	plt.ylabel('Down RT dist')
 	plt.xlabel('T [s]')
 	
-	plt.subplot(122,sharex=ax1,sharey=ax1)
-	plt.step(edges[:-1],model_sim_hit_hist,where='pre')
-	plt.plot(m.t,model_teo_rt[0])
-	plt.step(edges[:-1],-model_sim_miss_hist,where='pre')
-	plt.plot(m.t,-model_teo_rt[1])
+	max_b = np.max(xb)
+	ax2 = plt.subplot(gs1[1,0],sharex=ax1)
+	ax2.tick_params(labelleft=False,labelbottom=False)
+	plt.plot(m.t,xub/max_b,color='b',linestyle='--')
+	plt.plot(m.t,xlb/max_b,color='r',linestyle='--')
+	ax2.set_yticks([])
+	
+	ndec = [1,1]
+	ax2 = plt.subplot(gs1[1,0],sharex=ax1)
+	for sample in reversed(samples):
+		if sample['dec'] and sample['rt']>=0.2:
+			if ndec[sample['dec']-1]>0:
+				ndec[sample['dec']-1]-=1
+				y = sample['x']
+				if sample['dec']==1:
+					color = 'b'
+					y[-1] = dense_bounds[0][len(y)-1]
+				else:
+					color = 'r'
+					y[-1] = dense_bounds[1][len(y)-1]
+				plt.plot(sample['t'],sample['x']/max_b,color=color)
+	plt.ylabel('$x(t)$',fontsize=15)
+	plt.gca().set_xlim([0,2])
+	
+	ax1.set_zorder(0.2)
+	ax2.set_zorder(0)
+	ax3.set_zorder(0.2)
+	
+	ax_conv = plt.subplot(gs2[0])
+	from scipy import stats
+	conv_x = np.linspace(0,2)
+	conv_y = np.zeros_like(conv_x)
+	conv_y[conv_x>=dead_time] = stats.norm.pdf(conv_x[conv_x>=dead_time],dead_time,dead_time_sigma)
+	plt.plot(conv_x,conv_y)
+	ax_conv.set_xlim([0,2])
+	ax_conv.set_yticks([])
+	ax_conv.set_xticks([])
+	plt.title('Convolve with\nno decision time')
+	plt.xlabel('T')
+	ax1.annotate('', xy=[0.38,0.40], xytext=[0.25,0.25],
+					size=10, va="center", ha="center",
+					xycoords=('figure fraction'), textcoords=(ax1,'axes fraction'),
+					arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=-0.3',color='gray'))
+	ax3.annotate('', xy=[0.38,0.39], xytext=[0.25,0.75],
+					size=10, va="center", ha="center",
+					xycoords=('figure fraction'), textcoords=(ax3,'axes fraction'),
+					arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0.3',color='gray'))
+	ax_conv.annotate('', xy=[0.65,0.39], xytext=[1,0.5],
+					size=10, va="center", ha="center",
+					xycoords=('figure fraction'), textcoords=(ax_conv,'axes fraction'),
+					arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='gray'))
+	
+	plt.subplot(gs3[0])
+	plt.step(edges[:-1],model_sim_hit_hist,where='pre',color='b',label='Simulation Up')
+	plt.plot(m.t,model_teo_rt[0],color='b',linewidth=3,label='Theoretical Up')
+	plt.step(edges[:-1],-model_sim_miss_hist,where='pre',color='r',label='Simulation Down')
+	plt.plot(m.t,-model_teo_rt[1],color='r',linewidth=3,label='Theoretical Down')
+	plt.plot([0,3],[0,0],'-k')
 	plt.gca().set_xlim([0,3])
-	
+	plt.gca().set_ylim([-0.5*ax1.get_ylim()[-1],ax1.get_ylim()[-1]])
+	plt.ylabel('RT dist')
 	plt.xlabel('T [s]')
-	plt.show(True)
+	plt.title('Response time')
+	
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	if show:
+		plt.show(True)
 
 def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg',show=False):
 	mo.set_time_units('seconds')

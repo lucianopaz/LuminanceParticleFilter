@@ -698,10 +698,12 @@ def diffusion_path_samples(mu,var_rate,dt,T,xb,reps=10):
 		mus = mu*np.ones(reps)
 	else:
 		mus = mu
+	nT = int(T/dt)+1
 	for mu in mus:
 		path = {'x':[0],'t':[0]}
 		decided = False
-		for t_i,t in enumerate(np.arange(float(dt),float(T+dt),float(dt),np.float)):
+		for t_i in np.arange(1,nT):
+			t = t_i*dt
 			stim = sigma*np.random.randn(1)+mu*dt
 			path['x'].append(path['x'][-1]+stim)
 			path['t'].append(t)
