@@ -10,7 +10,7 @@ import data_io as io
 import cost_time as ct
 import moving_bounds_fits as mo
 
-def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg',show=False):
+def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	mo.set_time_units('seconds')
 	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=0.01,reward=1,penalty=0,iti=3.,tp=0.)
 	m.cost = 0.1
@@ -64,20 +64,21 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg',show=False):
 		if sample['dec']:
 			if ndec[sample['dec']-1]>0:
 				ndec[sample['dec']-1]-=1
+				y = sample['x']
 				if sample['dec']==1:
 					color = 'b'
+					y[-1] = xub[len(y)-1]
 				else:
-					color = 'g'
+					color = 'r'
+					y[-1] = xlb[len(y)-1]
 				plt.plot(sample['t'],sample['x'],color=color)
 	
 	plt.ylabel(r'$x(t)$ bound')
 	plt.xlabel('T [s]')
 	
 	plt.savefig('../../figs/'+fname)
-	if show:
-		plt.show(True)
 
-def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=3.,tp=0.,show=False):
+def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=3.,tp=0.):
 	mo.set_time_units('seconds')
 	if dt is None:
 		dt = mo.ISI
@@ -113,10 +114,8 @@ def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=49
 	
 	plt.ylabel('Cost [Hz]',fontsize=16)
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
-	if show:
-		plt.show(True)
 
-def rt_fit(fname='rt_fit.svg',show=False):
+def rt_fit(fname='rt_fit.svg'):
 	subjects = io.unique_subjects(mo.data_dir)
 	files = ['fits/inference_fit_full_subject_'+str(sid)+'_seconds.pkl' for sid in range(1,7)]
 	files2 = ['fits/inference_fit_confidence_only_subject_'+str(sid)+'_seconds.pkl' for sid in range(1,7)]
@@ -262,10 +261,8 @@ def rt_fit(fname='rt_fit.svg',show=False):
 	plt.legend()
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
-	if show:
-		plt.show(True)
 
-def prior_sketch(fname='prior_sketch.svg',show=False):
+def prior_sketch(fname='prior_sketch.svg'):
 	from scipy import stats
 	mo.set_time_units('seconds')
 	subjects = io.unique_subjects(mo.data_dir)
@@ -288,13 +285,43 @@ def prior_sketch(fname='prior_sketch.svg',show=False):
 	plt.legend()
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
-	if show:
-		plt.show(True)
 
-def confidence_sketch(fname='confidence_sketch.svg',show=False):
-	pass
+def confidence_sketch(fname='confidence_sketch.svg'):
+	mo.set_time_units('seconds')
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=3.,tp=0.,store_p=False)
+	cost = 0.01
+	dead_time = 0.3
+	dead_time_sigma = 0.4
+	phase_out_prob = 0.05
+	xub,xlb = m.xbounds()
+	log_odds = m.log_odds()
+	high_conf_threshold = 1.
+	ind_bound = (log_odds[0]<=high_conf_threshold).nonzero()[0][0]
+	
+	plt.figure(figsize=(8,6))
+	ax1=plt.subplot(211)
+	p0, = plt.plot(m.t,log_odds[0],color='k',linewidth=3,label=r'$C(t)$')
+	plt.plot([0,3],high_conf_threshold*np.ones(2),'--k')
+	p1 = plt.Rectangle((0, 0), 1, 1, fc="forestgreen")
+	p2 = plt.Rectangle((0, 0), 1, 1, fc="mediumpurple")
+	plt.fill_between(m.t[:ind_bound+1],log_odds[0][:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
+	plt.fill_between(m.t[ind_bound:],log_odds[0][ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
+	plt.legend([p0,p1, p2], [r'$C(t)$','High confidence zone', 'Low confidence zone'])
+	plt.ylabel('Log odds')
+	ax1.tick_params(labelleft=True,labelbottom=False)
+	
+	plt.subplot(212,sharex=ax1)
+	plt.plot(m.t,xub,color='b')
+	plt.plot(m.t,xlb,color='r')
+	plt.fill_between(m.t[:ind_bound+1],xub[:ind_bound+1],xlb[:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
+	plt.fill_between(m.t[ind_bound:],xub[ind_bound:],xlb[ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
+	ax1.set_xlim([0,3])
+	plt.ylabel(r'Bound in $x(t)$ space')
+	plt.xlabel('T [s]')
+	
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
+def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	subjects = io.unique_subjects(mo.data_dir)
 	subject = io.merge_subjects(subjects)
 	dat,t,d = subject.load_data()
@@ -390,19 +417,20 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	plt.step(edges[:-1],difusion_sim_miss_hist,where='pre',color='r',linewidth=1)
 	plt.plot(m.t,difusion_teo_rt[1],color='r',linewidth=3)
 	ax3.set_ylim(np.array(ax1.get_ylim()[::-1])*0.5)
-	ax1.spines['right'].set_visible(False)
-	ax1.get_xaxis().tick_bottom()
-	ax1.get_yaxis().tick_left()
+	ax3.spines['right'].set_visible(False)
+	ax3.get_xaxis().tick_bottom()
+	ax3.get_yaxis().tick_left()
 	ax3.tick_params(labelleft=True)
 	plt.ylabel('Down RT dist')
 	plt.xlabel('T [s]')
 	
 	max_b = np.max(xb)
 	ax2 = plt.subplot(gs1[1,0],sharex=ax1)
-	ax2.tick_params(labelleft=False,labelbottom=False)
-	plt.plot(m.t,xub/max_b,color='b',linestyle='--')
-	plt.plot(m.t,xlb/max_b,color='r',linestyle='--')
+	ax2.spines['right'].set_visible(False)
+	plt.plot(m.t,xub,color='b',linestyle='--')
+	plt.plot(m.t,xlb,color='r',linestyle='--')
 	ax2.set_yticks([])
+	ax2.set_ylim([-np.ceil(max_b/10)*10,np.ceil(max_b/10)*10])
 	
 	ndec = [1,1]
 	ax2 = plt.subplot(gs1[1,0],sharex=ax1)
@@ -417,7 +445,7 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 				else:
 					color = 'r'
 					y[-1] = dense_bounds[1][len(y)-1]
-				plt.plot(sample['t'],sample['x']/max_b,color=color)
+				plt.plot(sample['t'],sample['x'],color=color)
 	plt.ylabel('$x(t)$',fontsize=15)
 	plt.gca().set_xlim([0,2])
 	
@@ -457,15 +485,17 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg',show=False):
 	plt.plot([0,3],[0,0],'-k')
 	plt.gca().set_xlim([0,3])
 	plt.gca().set_ylim([-0.5*ax1.get_ylim()[-1],ax1.get_ylim()[-1]])
+	plt.gca().spines['right'].set_visible(False)
+	plt.gca().spines['top'].set_visible(False)
+	plt.gca().get_xaxis().tick_bottom()
+	plt.gca().get_yaxis().tick_left()
 	plt.ylabel('RT dist')
 	plt.xlabel('T [s]')
 	plt.title('Response time')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
-	if show:
-		plt.show(True)
 
-def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg',show=False):
+def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	mo.set_time_units('seconds')
 	plt.figure(figsize=(10,4))
 	mt.rc('axes', color_cycle=['b','g'])
@@ -537,8 +567,6 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg',show=False):
 	plt.legend()
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
-	if show:
-		plt.show(True)
 
 def parse_input():
 	script_help = """ figures.py help
@@ -577,17 +605,19 @@ def parse_input():
 if __name__=="__main__":
 	opts = parse_input()
 	if opts['bounds_vs_cost']:
-		bounds_vs_cost(show=opts['show'])
+		bounds_vs_cost()
 	if opts['rt_fit']:
-		rt_fit(show=opts['show'])
+		rt_fit()
 	if opts['value_and_bounds_sketch']:
-		value_and_bounds_sketch(show=opts['show'])
+		value_and_bounds_sketch()
 	if opts['confidence_sketch']:
-		confidence_sketch(show=opts['show'])
+		confidence_sketch()
 	if opts['decision_rt_sketch']:
-		decision_rt_sketch(show=opts['show'])
+		decision_rt_sketch()
 	if opts['bounds_vs_T_n_dt_sketch']:
-		bounds_vs_T_n_dt_sketch(show=opts['show'])
+		bounds_vs_T_n_dt_sketch()
 	if opts['prior_sketch']:
-		prior_sketch(show=opts['show'])
-		
+		prior_sketch()
+	
+	if opts['show']:
+		plt.show(True)
