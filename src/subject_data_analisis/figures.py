@@ -12,7 +12,7 @@ import moving_bounds_fits as mo
 
 def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	mo.set_time_units('seconds')
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=0.01,reward=1,penalty=0,iti=3.,tp=0.)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=0.01,reward=1,penalty=0,iti=1.5,tp=0.)
 	m.cost = 0.1
 	m.xbounds()
 	m.refine_value(n=501)
@@ -78,7 +78,7 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname)
 
-def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=3.,tp=0.):
+def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=1.5,tp=0.):
 	mo.set_time_units('seconds')
 	if dt is None:
 		dt = mo.ISI
@@ -288,7 +288,7 @@ def prior_sketch(fname='prior_sketch.svg'):
 
 def confidence_sketch(fname='confidence_sketch.svg'):
 	mo.set_time_units('seconds')
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=3.,tp=0.,store_p=False)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
 	cost = 0.01
 	dead_time = 0.3
 	dead_time_sigma = 0.4
@@ -340,7 +340,7 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	
 	mo.set_time_units('seconds')
 	
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=3.,tp=0.,store_p=False)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
 	cost = 0.01
 	dead_time = 0.3
 	dead_time_sigma = 0.4
@@ -502,7 +502,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	ax1 = plt.subplot(131)
 	ax2 = plt.subplot(132,sharey=ax1)
 	ax3 = plt.subplot(133,sharey=ax1)
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=5.,tp=0.)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
 	m.cost = 0.1
 	xub,xlb,value1,ve1,v11,v22 = m.xbounds(return_values=True)
 	rho1 = m.rho
@@ -568,6 +568,32 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
+def vexplore_drop_sketch(fname='vexplore_drop_sketch.svg'):
+	mo.set_time_units('seconds')
+	
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
+	m.cost = 0.
+	xub,xlb,v,v_explore,v1,v2 = m.xbounds(return_values=True)
+	m.invert_belief()
+	p = m.belief_transition_p()
+	
+	mean_pg = np.sum(p*m.g,axis=2)
+	var_pg = np.sum(p*m.g**2,axis=2)-mean_pg**2
+	
+	plt.figure(figsize=(8,4))
+	gs = gridspec.GridSpec(1, 2, left=0.1,right=0.95, wspace=0.28)
+	plt.subplot(gs[1])
+	plt.plot(m.t[:-1],var_pg/var_pg[0],'-',color='k',alpha=0.5)
+	plt.xlabel('T [s]')
+	plt.ylabel('Normed Transition Var')
+	plt.gca().set_ylim([0,1])
+	plt.subplot(gs[0])
+	plt.plot(m.t[:-1],np.mean(v_explore,axis=1),color='k')
+	plt.xlabel('T [s]')
+	plt.ylabel('V explore')
+	
+	#~ plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -583,10 +609,11 @@ def parse_input():
  '--confidence_sketch': Plot confidence report sketch
  '--decision_rt_sketch': Plot decision rt consolidation sketch
  '--bounds_vs_T_n_dt_sketch': Plot bounds as a function of dt and T sketch
+ '--vexplore_drop_sketch': Plot variance of p(g+dg|g) as a function of time and also plot the drop in mean v_explore
  """
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
-				'prior_sketch':False,'show':False}
+				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False}
 	keys = options.keys()
 	for i,arg in enumerate(sys.argv[1:]):
 		if arg=='-h' or arg=='--help':
@@ -618,6 +645,8 @@ if __name__=="__main__":
 		bounds_vs_T_n_dt_sketch()
 	if opts['prior_sketch']:
 		prior_sketch()
+	if opts['vexplore_drop_sketch']:
+		vexplore_drop_sketch()
 	
 	if opts['show']:
 		plt.show(True)

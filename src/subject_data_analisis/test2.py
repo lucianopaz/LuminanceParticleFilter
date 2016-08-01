@@ -74,28 +74,39 @@ if dt is None:
 	dt = mo.ISI
 
 m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
+xub,xlb,v,v_explore,v1,v2 = m.xbounds(return_values=True)
 m.invert_belief()
 p = m.belief_transition_p()
 
-frameinterval = 0.01
-image = plt.imshow(p[0])
-cbar = plt.colorbar()
-plt.title('t = {0}'.format(m.t[0]))
-plt.pause(frameinterval)
-for i,pt in enumerate(p[1:]):
-	image.set_data(pt)
-	image.autoscale()
-	plt.title('t = {0}'.format(m.t[i+1]))
-	plt.pause(frameinterval)
+mean_pg = np.sum(p*m.g,axis=2)
+var_pg = np.sum(p*m.g**2,axis=2)-mean_pg**2
 
 plt.figure()
-#~ l, = plt.plot(m.g,np.diag(p[0]))
-l, = plt.plot(m.g,p[0][30])
-plt.title('t = {0}'.format(m.t[0]))
-plt.pause(frameinterval)
-for i,pt in enumerate(p[1:]):
-	#~ plt.plot(m.g,np.diag(pt))
-	l, = plt.plot(m.g,pt[30])
-	#~ l.set_data(m.g,np.diag(pt))
-	plt.title('t = {0}'.format(m.t[i+1]))
-	plt.pause(frameinterval)
+plt.subplot(121)
+plt.plot(m.t[:-1],var_pg/var_pg[0],'-',color='k')
+plt.subplot(122)
+plt.plot(m.t[:-1],np.mean(v_explore,axis=1))
+
+#~ plt.figure()
+#~ frameinterval = 0.01
+#~ image = plt.imshow(p[0])
+#~ cbar = plt.colorbar()
+#~ plt.title('t = {0}'.format(m.t[0]))
+#~ plt.pause(frameinterval)
+#~ for i,pt in enumerate(p[1:]):
+	#~ image.set_data(pt)
+	#~ image.autoscale()
+	#~ plt.title('t = {0}'.format(m.t[i+1]))
+	#~ plt.pause(frameinterval)
+#~ 
+#~ plt.figure()
+#~ #l, = plt.plot(m.g,np.diag(p[0]))
+#~ l, = plt.plot(m.g,p[0][30])
+#~ plt.title('t = {0}'.format(m.t[0]))
+#~ plt.pause(frameinterval)
+#~ for i,pt in enumerate(p[1:]):
+	#~ #plt.plot(m.g,np.diag(pt))
+	#~ l, = plt.plot(m.g,pt[30])
+	#~ #l.set_data(m.g,np.diag(pt))
+	#~ plt.title('t = {0}'.format(m.t[i+1]))
+	#~ plt.pause(frameinterval)
