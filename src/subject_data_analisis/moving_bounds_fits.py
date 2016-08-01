@@ -203,9 +203,14 @@ def repeat_minimize(merit,start_point_generator,bounds=None,optimizer=None,args=
 def fit(subject,method="full",time_units='seconds',T=None,dt=None,iti=None,tp=None,reward=1.,penalty=0.,n=101,suffix='',fixed_parameters=None,optimizer='cma',repetitions=5):
 	dat,t,d = subject.load_data()
 	mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
-	mus = np.concatenate((-mu[::-1],mu))
-	counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
-	p = counts/np.sum(counts)
+	mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
+	if mu[0]==0:
+		mus = np.concatenate((-mu[-1:0:-1],mu))
+		p = np.concatenate((mu_prob[-1:0:-1],mu_prob))
+		p[mus!=0]*=0.5
+	else:
+		mus = np.concatenate((-mu[::-1],mu))
+		p = np.concatenate((mu_prob[::-1],mu_prob))*0.5
 	
 	prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	if time_units=='seconds':
