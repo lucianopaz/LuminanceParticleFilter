@@ -51,12 +51,14 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	
 	# Plot decision bounds in belief space
 	plt.subplot(222)
-	plt.plot(m.t[m.t<3],b[:,m.t<3].T,linewidth=2)
+	plt.plot(m.t[m.t<3],b[0,m.t<3],linewidth=2,color='b')
+	plt.plot(m.t[m.t<3],b[1,m.t<3],linewidth=2,color='r')
 	plt.ylabel('$g$ bound')
 	plt.gca().set_ylim([0,1])
 	# Plot decision bounds in the diffusion space
 	plt.subplot(224)
-	plt.plot(m.t[m.t<3],xb[:,m.t<3].T,linewidth=2)
+	plt.plot(m.t[m.t<3],xb[0,m.t<3].T,linewidth=2,color='b')
+	plt.plot(m.t[m.t<3],xb[1,m.t<3].T,linewidth=2,color='r')
 	
 	samples = ct.diffusion_path_samples(0,mo.model_var,m.dt,m.T,xb)
 	ndec = [2,2]
@@ -76,7 +78,7 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	plt.ylabel(r'$x(t)$ bound')
 	plt.xlabel('T [s]')
 	
-	plt.savefig('../../figs/'+fname)
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=1.5,tp=0.):
 	mo.set_time_units('seconds')
@@ -234,12 +236,12 @@ def rt_fit(fname='rt_fit.svg'):
 	
 	# Plot decision data
 	mxlim = np.ceil(np.max(rt))
-	plt.figure(figsize=(11,8))
+	plt.figure(figsize=(10,5))
 	ax1 = plt.subplot(121)
-	plt.step(xh,hit_rt,label='Subjects hit rt',where='post',color='b')
-	plt.step(xh,-miss_rt,label='Subjects miss rt',where='post',color='r')
-	plt.plot(m.t,all_sim_rt['hit'],label='Theoretical hit rt',linewidth=2,color='b')
-	plt.plot(m.t,-all_sim_rt['miss'],label='Theoretical miss rt',linewidth=2,color='r')
+	plt.step(xh,hit_rt,label='Subjects hit',where='post',color='b')
+	plt.step(xh,-miss_rt,label='Subjects miss',where='post',color='r')
+	plt.plot(m.t,all_sim_rt['hit'],label='Theoretical hit',linewidth=3,color='b')
+	plt.plot(m.t,-all_sim_rt['miss'],label='Theoretical miss',linewidth=3,color='r')
 	plt.xlim([0,mxlim])
 	if options['time_units']=='seconds':
 		plt.xlabel('T [s]')
@@ -251,9 +253,10 @@ def rt_fit(fname='rt_fit.svg'):
 	plt.subplot(122,sharey=ax1)
 	plt.step(xh,high_hit_rt+high_miss_rt,label='Subjects high',where='post',color='forestgreen')
 	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subjects low',where='post',color='mediumpurple')
-	plt.plot(m.t,all_sim_rt['high'],label='Theoretical high',linewidth=2,color='forestgreen')
-	plt.plot(m.t,-all_sim_rt['low'],label='Theoretical low',linewidth=2,color='mediumpurple')
+	plt.plot(m.t,all_sim_rt['high'],label='Theoretical high',linewidth=3,color='forestgreen')
+	plt.plot(m.t,-all_sim_rt['low'],label='Theoretical low',linewidth=3,color='mediumpurple')
 	plt.xlim([0,mxlim])
+	plt.gca().tick_params(labelleft=False)
 	if options['time_units']=='seconds':
 		plt.xlabel('T [s]')
 	else:
@@ -295,26 +298,35 @@ def confidence_sketch(fname='confidence_sketch.svg'):
 	phase_out_prob = 0.05
 	xub,xlb = m.xbounds()
 	log_odds = m.log_odds()
-	high_conf_threshold = 1.
+	high_conf_threshold = 0.5
+	
+	_dt = 0.001
+	_nT = int(m.T/_dt)+1
+	_t = np.arange(_nT)*_dt
+	xub = np.interp(_t,m.t,xub)
+	xlb = np.interp(_t,m.t,xlb)
+	log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[1])])
+	
 	ind_bound = (log_odds[0]<=high_conf_threshold).nonzero()[0][0]
+	
 	
 	plt.figure(figsize=(8,6))
 	ax1=plt.subplot(211)
-	p0, = plt.plot(m.t,log_odds[0],color='k',linewidth=3,label=r'$C(t)$')
+	p0, = plt.plot(_t,log_odds[0],color='k',linewidth=3,label=r'$C(t)$')
 	plt.plot([0,3],high_conf_threshold*np.ones(2),'--k')
 	p1 = plt.Rectangle((0, 0), 1, 1, fc="forestgreen")
 	p2 = plt.Rectangle((0, 0), 1, 1, fc="mediumpurple")
-	plt.fill_between(m.t[:ind_bound+1],log_odds[0][:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
-	plt.fill_between(m.t[ind_bound:],log_odds[0][ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
+	plt.fill_between(_t[:ind_bound+1],log_odds[0][:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
+	plt.fill_between(_t[ind_bound:],log_odds[0][ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
 	plt.legend([p0,p1, p2], [r'$C(t)$','High confidence zone', 'Low confidence zone'])
 	plt.ylabel('Log odds')
 	ax1.tick_params(labelleft=True,labelbottom=False)
 	
 	plt.subplot(212,sharex=ax1)
-	plt.plot(m.t,xub,color='b')
-	plt.plot(m.t,xlb,color='r')
-	plt.fill_between(m.t[:ind_bound+1],xub[:ind_bound+1],xlb[:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
-	plt.fill_between(m.t[ind_bound:],xub[ind_bound:],xlb[ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
+	plt.plot(_t,xub,color='b')
+	plt.plot(_t,xlb,color='r')
+	plt.fill_between(_t[:ind_bound+1],xub[:ind_bound+1],xlb[:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
+	plt.fill_between(_t[ind_bound:],xub[ind_bound:],xlb[ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
 	ax1.set_xlim([0,3])
 	plt.ylabel(r'Bound in $x(t)$ space')
 	plt.xlabel('T [s]')
@@ -430,12 +442,13 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	plt.plot(m.t,xub,color='b',linestyle='--')
 	plt.plot(m.t,xlb,color='r',linestyle='--')
 	ax2.set_yticks([])
+	ax2.tick_params(labelbottom=False)
 	ax2.set_ylim([-np.ceil(max_b/10)*10,np.ceil(max_b/10)*10])
 	
 	ndec = [1,1]
 	ax2 = plt.subplot(gs1[1,0],sharex=ax1)
 	for sample in reversed(samples):
-		if sample['dec'] and sample['rt']>=0.2:
+		if sample['dec'] and sample['rt']>=0.15:
 			if ndec[sample['dec']-1]>0:
 				ndec[sample['dec']-1]-=1
 				y = sample['x']
@@ -447,7 +460,7 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 					y[-1] = dense_bounds[1][len(y)-1]
 				plt.plot(sample['t'],sample['x'],color=color)
 	plt.ylabel('$x(t)$',fontsize=15)
-	plt.gca().set_xlim([0,2])
+	plt.gca().set_xlim([0,1])
 	
 	ax1.set_zorder(0.2)
 	ax2.set_zorder(0)
@@ -483,7 +496,7 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	plt.step(edges[:-1],-model_sim_miss_hist,where='pre',color='r',label='Simulation Down')
 	plt.plot(m.t,-model_teo_rt[1],color='r',linewidth=3,label='Theoretical Down')
 	plt.plot([0,3],[0,0],'-k')
-	plt.gca().set_xlim([0,3])
+	plt.gca().set_xlim([0,2])
 	plt.gca().set_ylim([-0.5*ax1.get_ylim()[-1],ax1.get_ylim()[-1]])
 	plt.gca().spines['right'].set_visible(False)
 	plt.gca().spines['top'].set_visible(False)
@@ -502,7 +515,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	ax1 = plt.subplot(131)
 	ax2 = plt.subplot(132,sharey=ax1)
 	ax3 = plt.subplot(133,sharey=ax1)
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=3,tp=0.)
 	m.cost = 0.1
 	xub,xlb,value1,ve1,v11,v22 = m.xbounds(return_values=True)
 	rho1 = m.rho
@@ -546,6 +559,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	plt.plot(m.t,xb[0],linestyle='-',label="dt=10ms",linewidth=2)
 	plt.plot(m.t,xb[1],linestyle='-',label="",linewidth=2)
 	plt.xlabel('T [s]')
+	ax3.tick_params(labelleft=False)
 	plt.legend()
 	
 	plt.sca(ax2)
@@ -564,6 +578,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	plt.plot(m.t,xb[0],linestyle='-',label="n=25",linewidth=2)
 	plt.plot(m.t,xb[1],linestyle='-',label="",linewidth=2)
 	plt.xlabel('T [s]')
+	ax2.tick_params(labelleft=False)
 	plt.legend()
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')

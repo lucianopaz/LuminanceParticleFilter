@@ -144,9 +144,15 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	"""
 	if dead_time_sigma<=0.:
 		if dead_time_sigma==0:
-			return gs
+			dead_time_shift = math.floor(dead_time/dt)
+			output = np.zeros_like(gs)
+			if dead_time_shift==0:
+				output[:] = gs
+			else:
+				output[:,dead_time_shift:] = gs[:,:-dead_time_shift]
+			return output
 		else:
-			return np.zeros_like(gs)
+			raise ValueError("dead_time_sigma cannot take negative values. User supplied dead_time_sigma={0}".format(dead_time_sigma))
 	gs = np.array(gs)
 	conv_window = np.linspace(-dead_time_sigma*6,dead_time_sigma*6,int(math.ceil(dead_time_sigma*12/dt))+1)
 	conv_window_size = conv_window.shape[0]
@@ -353,8 +359,8 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 		_nT = m.nT
 		log_odds = m.log_odds()
 	
-	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
-	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.25*phase_out_prob
+	phigh = np.ones((2,_nT))
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.
 	if _dt:
 		ratio = np.ceil(_nT/m.nT)
 		tail = _nT%m.nT
@@ -427,9 +433,9 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 		_nT = m.nT
 		log_odds = m.log_odds()
 	
-	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
+	phigh = np.ones((2,_nT))
 	
-	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.25*phase_out_prob
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<high_confidence_threshold] = 0.
 	if _dt:
 		ratio = np.ceil(_nT/m.nT)
 		tail = _nT%m.nT
@@ -527,8 +533,6 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	else:
 		_dt = None
 	
-	orig_phigh = (1.-0.75*phase_out_prob)*np.ones((2,m.nT))
-	orig_phigh[m.log_odds()<confidence_params[0]] = 0.25*phase_out_prob
 	if _dt:
 		_nT = int(m.T/_dt)+1
 		_t = np.arange(0.,_nT,dtype=np.float64)*_dt
@@ -539,10 +543,8 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 		log_odds = m.log_odds()
 	
 	phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
-	#~ phased_out_rt[np.logical_and(m.t<_max_RT,m.t>_dead_time)] = 1./(_max_RT-_dead_time)
-	
-	phigh = (1.-0.75*phase_out_prob)*np.ones((2,_nT))
-	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<confidence_params[0]] = 0.25*phase_out_prob
+	phigh = np.ones((2,_nT))
+	phigh[(log_odds.T/np.max(log_odds,axis=1)).T<confidence_params[0]] = 0.
 	if _dt:
 		ratio = int(np.ceil(_nT/m.nT))
 		tail = _nT%m.nT
@@ -563,10 +565,10 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 			gh=phigh[:,1:]*g
 			gl=plow[:,1:]*g
 		g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((gh,gl)),m.dt,dead_time,dead_time_sigma)
-		g1h = g1h*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g2h = g2h*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g1l = g1l*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		g2l = g2l*(1-0.75*phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g1h = g1h*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2h = g2h*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g1l = g1l*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
+		g2l = g2l*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
 		rt[drift] = {}
 		rt[drift]['high'] = np.array([g1h,g2h])
 		rt[drift]['low'] = np.array([g1l,g2l])
