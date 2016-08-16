@@ -1,7 +1,7 @@
 from numpy.distutils.core import setup, Extension
 
 module1 = Extension('dp',
-                    sources = ['dpmodule.cpp', 'DecisionPolicy.cpp'],
+                    sources = ['dpmodule_orig.cpp', 'DecisionPolicy_orig.cpp'],
                     extra_compile_args = ['-Wno-write-strings','-O2'])
 
 setup (name = 'DP',

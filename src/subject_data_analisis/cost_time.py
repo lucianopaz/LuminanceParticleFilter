@@ -393,7 +393,7 @@ class DecisionPolicy():
 			'root_bounds' must be a tuple of two elements: (lower_bound, upper_bound). Both 'lower_bound' and 'upper_bound' must be floats that represent the lower and upper bounds in which to perform the root finding of rho.
 			"""
 			self.invert_belief()
-			if store_p:
+			if self.store_p:
 				self.belief_transition_p()
 			if root_bounds is None:
 				root_bounds=(-10.,10.)

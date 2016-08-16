@@ -119,8 +119,8 @@ def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=49
 
 def rt_fit(fname='rt_fit.svg'):
 	subjects = io.unique_subjects(mo.data_dir)
-	files = ['fits/inference_fit_full_subject_'+str(sid)+'_seconds.pkl' for sid in range(1,7)]
-	files2 = ['fits/inference_fit_confidence_only_subject_'+str(sid)+'_seconds.pkl' for sid in range(1,7)]
+	files = ['fits/inference_fit_full_subject_'+str(sid)+'_seconds_iti_1-5.pkl' for sid in range(1,7)]
+	files2 = ['fits/inference_fit_confidence_only_subject_'+str(sid)+'_seconds_iti_1-5.pkl' for sid in range(1,7)]
 	alldata = None
 	all_sim_rt = None
 	for subject,fn,fn2 in zip(subjects,files,files2):
