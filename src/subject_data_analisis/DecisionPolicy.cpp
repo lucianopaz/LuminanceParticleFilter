@@ -51,6 +51,103 @@ DecisionPolicyDescriptor::~DecisionPolicyDescriptor(){
 	}
 }
 
+DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost){
+	/***
+	 * Constructor that creates its own bound arrays
+	***/
+	int i;
+	
+	this->model_var = model_var;
+	this->_model_var = model_var;
+	this->prior_mu_mean = prior_mu_mean;
+	this->prior_mu_var = prior_mu_var;
+	if (n%2==0){
+		this->n = n+1;
+	} else {
+		this->n = n;
+	}
+	this->dt = dt;
+	this->T = T;
+	this->nT = (int)(T/dt)+1;
+	this->cost = cost;
+	this->reward = reward;
+	this->penalty = penalty;
+	this->iti = iti;
+	this->tp = tp;
+	this->rho = 0.;
+	this->dg = 1./double(n);
+	this->g = new double[n];
+	for (i=0;i<n;++i){
+		this->g[i] = (0.5+double(i))*this->dg;
+	}
+	this->t = new double[nT];
+	for (i=0;i<nT;++i){
+		this->t[i] = double(i)*dt;
+	}
+	this->owns_bounds = true;
+	this->ub = new double[nT];
+	this->lb = new double[nT];
+	this->bound_strides = 1;
+}
+
+DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb, int bound_strides){
+	/***
+	 * Constructor that shares its bound arrays
+	***/
+	int i;
+	
+	this->model_var = model_var;
+	this->_model_var = model_var;
+	this->prior_mu_mean = prior_mu_mean;
+	this->prior_mu_var = prior_mu_var;
+	if (n%2==0){
+		this->n = n+1;
+	} else {
+		this->n = n;
+	}
+	this->dt = dt;
+	this->T = T;
+	this->nT = (int)(T/dt)+1;
+	this->cost = cost;
+	this->reward = reward;
+	this->penalty = penalty;
+	this->iti = iti;
+	this->tp = tp;
+	this->rho = 0.;
+	this->dg = 1./double(n);
+	this->g = new double[n];
+	for (i=0;i<n;++i){
+		this->g[i] = (0.5+double(i))*this->dg;
+	}
+	this->t = new double[nT];
+	for (i=0;i<nT;++i){
+		this->t[i] = double(i)*dt;
+	}
+	this->owns_bounds = false;
+	this->ub = ub;
+	this->lb = lb;
+	this->bound_strides = bound_strides;
+}
+
+DecisionPolicy::~DecisionPolicy(){
+	/***
+	 * Destructor
+	***/
+	delete[] g;
+	delete[] t;
+	if (owns_bounds){
+		delete[] ub;
+		delete[] lb;
+	}
+	#ifdef DEBUG
+	std::cout<<"Destroyed DecisionPolicy instance"<<std::endl;
+	#endif
+}
+
 DecisionPolicy* DecisionPolicy::create(const DecisionPolicyDescriptor& dpc){
 	if (dpc.prior_type==1){
 		return new DecisionPolicyConjPrior(dpc.model_var, dpc.prior_mu_mean, dpc.prior_mu_var,
@@ -87,7 +184,7 @@ double DecisionPolicy::iterate_rho_value(double tolerance){
 	// Use arbitrary default upper and lower bounds
 	return this->iterate_rho_value(tolerance,-10.,10.);
 }
-
+//~ 
 double DecisionPolicy::iterate_rho_value(double tolerance, double lower_bound, double upper_bound){
 	/***
 	 * Function that implements Brent's algorithm for root finding.
@@ -285,7 +382,7 @@ double DecisionPolicy::Psi(double mu, double* bound, int itp, double tp, double 
 	} else {
 		bound_prime = 0.;
 	}
-	//~ double bound_prime = itp<int(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
+	// double bound_prime = itp<int(sizeof(bound)/sizeof(double)-1) ? (bound[itp+1]-bound[itp])/this->dt : 0.;
 	return 0.5*normpdf*(bound_prime-(bound[itp]-x0)/(tp-t0));
 }
 
@@ -369,106 +466,10 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
  * is limited to constant cost values.
 ***/
 
-DecisionPolicyConjPrior::DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
-				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost){
-	/***
-	 * Constructor that creates its own bound arrays
-	***/
-	int i;
-	
-	this->model_var = model_var;
-	this->_model_var = model_var;
-	this->prior_mu_mean = prior_mu_mean;
-	this->prior_mu_var = prior_mu_var;
-	if (n%2==0){
-		this->n = n+1;
-	} else {
-		this->n = n;
-	}
-	this->dt = dt;
-	this->T = T;
-	this->nT = (int)(T/dt)+1;
-	this->cost = cost;
-	this->reward = reward;
-	this->penalty = penalty;
-	this->iti = iti;
-	this->tp = tp;
-	this->rho = 0.;
-	this->dg = 1./double(n);
-	this->g = new double[n];
-	for (i=0;i<n;++i){
-		this->g[i] = (0.5+double(i))*this->dg;
-	}
-	this->t = new double[nT];
-	for (i=0;i<nT;++i){
-		this->t[i] = double(i)*dt;
-	}
-	this->owns_bounds = true;
-	this->ub = new double[nT];
-	this->lb = new double[nT];
-	this->bound_strides = 1;
-	
-	#ifdef DEBUG
-	std::cout<<"Created DecisionPolicyConjPrior instance at "<<this<<std::endl;
-	#endif
-}
-
-DecisionPolicyConjPrior::DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
-				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb, int bound_strides){
-	/***
-	 * Constructor that shares its bound arrays
-	***/
-	int i;
-	
-	this->model_var = model_var;
-	this->_model_var = model_var;
-	this->prior_mu_mean = prior_mu_mean;
-	this->prior_mu_var = prior_mu_var;
-	if (n%2==0){
-		this->n = n+1;
-	} else {
-		this->n = n;
-	}
-	this->dt = dt;
-	this->T = T;
-	this->nT = (int)(T/dt)+1;
-	this->cost = cost;
-	this->reward = reward;
-	this->penalty = penalty;
-	this->iti = iti;
-	this->tp = tp;
-	this->rho = 0.;
-	this->dg = 1./double(n);
-	this->g = new double[n];
-	for (i=0;i<n;++i){
-		this->g[i] = (0.5+double(i))*this->dg;
-	}
-	this->t = new double[nT];
-	for (i=0;i<nT;++i){
-		this->t[i] = double(i)*dt;
-	}
-	this->owns_bounds = false;
-	this->ub = ub;
-	this->lb = lb;
-	this->bound_strides = bound_strides;
-	
-	#ifdef DEBUG
-	std::cout<<"Created DecisionPolicyConjPrior instance at "<<this<<std::endl;
-	#endif
-}
-
 DecisionPolicyConjPrior::~DecisionPolicyConjPrior(){
 	/***
 	 * Destructor
 	***/
-	delete[] g;
-	delete[] t;
-	if (owns_bounds){
-		delete[] ub;
-		delete[] lb;
-	}
 	#ifdef DEBUG
 	std::cout<<"Destroyed DecisionPolicyConjPrior instance"<<std::endl;
 	#endif
@@ -895,112 +896,10 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 
 
 
-DecisionPolicyDiscretePrior::DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
-				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost){
-	/***
-	 * Constructor that creates its own bound arrays
-	***/
-	is_prior_set = false;
-	int i;
-	this->epsilon = 1e-10;
-	
-	this->model_var = model_var;
-	this->_model_var = model_var;
-	this->set_prior(n_prior,mu_prior,weight_prior);
-	if (n%2==0){
-		this->n = n+1;
-	} else {
-		this->n = n;
-	}
-	this->dt = dt;
-	this->T = T;
-	this->nT = (int)(T/dt)+1;
-	this->cost = cost;
-	this->reward = reward;
-	this->penalty = penalty;
-	this->iti = iti;
-	this->tp = tp;
-	this->rho = 0.;
-	this->dg = 1./double(n);
-	this->g = new double[n];
-	for (i=0;i<n;++i){
-		this->g[i] = (0.5+double(i))*this->dg;
-	}
-	this->t = new double[nT];
-	for (i=0;i<nT;++i){
-		this->t[i] = double(i)*dt;
-	}
-	this->owns_bounds = true;
-	this->ub = new double[nT];
-	this->lb = new double[nT];
-	this->bound_strides = 1;
-	
-	this->g2x_tolerance = 1e-12;
-	
-	#ifdef DEBUG
-	std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
-	#endif
-}
-
-DecisionPolicyDiscretePrior::DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
-				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides){
-	/***
-	 * Constructor that shares its bound arrays
-	***/
-	is_prior_set = false;
-	int i;
-	this->epsilon = 1e-10;
-	
-	this->model_var = model_var;
-	this->_model_var = model_var;
-	this->set_prior(n_prior,mu_prior,weight_prior);
-	if (n%2==0){
-		this->n = n+1;
-	} else {
-		this->n = n;
-	}
-	this->dt = dt;
-	this->T = T;
-	this->nT = (int)(T/dt)+1;
-	this->cost = cost;
-	this->reward = reward;
-	this->penalty = penalty;
-	this->iti = iti;
-	this->tp = tp;
-	this->rho = 0.;
-	this->dg = 1./double(n);
-	this->g = new double[n];
-	for (i=0;i<n;++i){
-		this->g[i] = (0.5+double(i))*this->dg;
-	}
-	this->t = new double[nT];
-	for (i=0;i<nT;++i){
-		this->t[i] = double(i)*dt;
-	}
-	this->owns_bounds = false;
-	this->ub = ub;
-	this->lb = lb;
-	this->bound_strides = bound_strides;
-	
-	this->g2x_tolerance = 1e-12;
-	
-	#ifdef DEBUG
-	std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
-	#endif
-}
-
 DecisionPolicyDiscretePrior::~DecisionPolicyDiscretePrior(){
 	/***
 	 * Destructor
 	***/
-	delete[] g;
-	delete[] t;
-	if (owns_bounds){
-		delete[] ub;
-		delete[] lb;
-	}
 	if (is_prior_set){
 		delete[] mu_prior;
 		delete[] mu2_prior;

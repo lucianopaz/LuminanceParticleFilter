@@ -20,7 +20,7 @@ class DecisionPolicy():
 	reward rate and computes the optimal decision bounds
 	"""
 	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.,\
-				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True):
+				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True,discrete_prior=None):
 		"""
 		Constructor input:
 		model_var = True variance of the process that generates samples per unit time. This value is then multiplied by dt.
@@ -35,11 +35,25 @@ class DecisionPolicy():
 		tp = Penalty time added to iti after failure
 		cost = Constant cost of accumulating new evidence
 		store_p = Boolean indicating whether to store the belief transition probability array (memory expensive!)
+		discrete_prior = can be None or a tuple like (mu_prior,weight_prior)
+			mu_prior and weight_prior must be numpy 1-D arrays of the same shape
+			that hold the discrete set of posible positive mu values (mu_prior) and their
+			weight (weight_prior). The initialization then renormalizes the weights to
+			0.5, because the prior is assumed symmetric around zero.
 		"""
 		self.model_var = model_var
 		self._model_var = model_var
-		self.prior_mu_mean = prior_mu_mean
-		self.prior_mu_var = prior_mu_var
+		if discrete_prior:
+			temp = copy.deepcopy(discrete_prior)
+			self.mu_prior,self.weight_prior = temp
+			self.prior_mu_mean = 0.
+			self.weight_prior/=(2*np.sum(weight_prior))
+			self.prior_mu_var = np.sum(2*self.weight_prior*self.mu_prior**2)
+			self.prior_type = 2
+		else:
+			self.prior_mu_mean = prior_mu_mean
+			self.prior_mu_var = prior_mu_var
+			self.prior_type = 1
 		self.n = int(n)
 		if self.n%2==0:
 			self.n+1
@@ -336,7 +350,6 @@ class DecisionPolicy():
 			self.bounds[:,i] = np.array([bound1,bound2])
 		self.bounds[:,-1] = np.array([0.5,0.5])
 		return self.bounds
-		
 	
 	def belief_bound_to_x_bound(self,bounds=None):
 		"""
@@ -376,6 +389,10 @@ class DecisionPolicy():
 		def values(self, rho=None):
 			return dp.values(self,rho=rho)
 		values.__doc__ = dp.values.__doc__
+		
+		def rt(self,mu,bounds=None):
+			return dp.rt(self,mu,bounds=bounds)
+		rt.__doc__ = dp.rt.__doc__
 	else:
 		def xbounds(self, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None):
 			"""
@@ -462,6 +479,52 @@ class DecisionPolicy():
 			v1 = self.reward*self.g-self.penalty*(1-self.g)-(self.iti+(1-self.g)*self.tp)*self.rho
 			v2 = self.reward*(1-self.g)-self.penalty*self.g-(self.iti+self.g*self.tp)*self.rho
 			return (value,v_explore,v1,v2)
+		
+		def rt(self,mu,bounds=None):
+			"""
+			Computes the rt distribution for a given drift rate, mu, decisionPolicy parameters and decision bounds in x space, bounds.
+			
+			(g1, g2) = values(dp,mu,bounds=None)
+			
+			Computes the rt distribution for selecting options 1 or 2 for a given drift rate mu and the parameters in the decisionPolicy instance dp. If bounds is None, then xbounds is called with default parameters to compute the decision bounds in x space. To avoid this, supply a tuple (xub,xlb) as the one that is returned by the function xbounds. xub and xlb must be one dimensional numpy arrays with the same elements as dp.t.
+			"""
+			if bounds is None:
+				xub,xlb = self.xbounds(set_rho=True, set_bounds=True)
+			else:
+				xub,xlb = bounds
+			g1 = np.zeros_like(self.t)
+			g2 = np.zeros_like(self.t)
+			bounds_touched = False
+			
+			for i,t in enumerate(self.t):
+				if bounds_touched:
+					g1[i] = 0.
+					g2[i] = 0.
+				else:
+					if i==0:
+						t0 = t
+						continue
+					elif i==1:
+						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)
+						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)
+					else:
+						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)+\
+							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xub,i,t,xub[:i],self.t[:i]))+\
+							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xub,i,t,xlb[:i],self.t[:i]))
+						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)-\
+							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xlb,i,t,xub[:i],self.t[:i]))-\
+							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xlb,i,t,xlb[:i],self.t[:i]))
+					if g1[i]<0:
+						g1[i] = 0.
+					if g2[i]<0:
+						g2[i] = 0.
+				if xub[i]<=xlb:
+					bounds_touched = True
+			# Normalize probability density
+			normalization = np.sum(g1+g2)*self.dt
+			g1/=normalization
+			g2/=normalization
+			return g1,g2
 	
 	if use_cpp_extension:
 		def refine_value(self,tolerance=1e-12,dt=None,n=None,T=None):
@@ -604,50 +667,6 @@ class DecisionPolicy():
 		elif type_of_bound.lower()=='mu':
 			bounds = self.belief_bound_to_mu_bound(bounds)
 		return bounds
-	
-	if use_cpp_extension:
-		def rt(self,mu,bounds=None):
-			return dp.rt(self,mu,bounds=bounds)
-		rt.__doc__ = dp.rt.__doc__
-	else:
-		def rt(self,mu,bounds=None):
-			if bounds is None:
-				xub,xlb = self.xbounds(set_rho=True, set_bounds=True)
-			else:
-				xub,xlb = bounds
-			g1 = np.zeros_like(self.t)
-			g2 = np.zeros_like(self.t)
-			bounds_touched = False
-			
-			for i,t in enumerate(self.t):
-				if bounds_touched:
-					g1[i] = 0.
-					g2[i] = 0.
-				else:
-					if i==0:
-						t0 = t
-						continue
-					elif i==1:
-						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)
-						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)
-					else:
-						g1[i] = -2*self.Psi(mu,xub,i,t,self.prior_mu_mean,t0)+\
-							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xub,i,t,xub[:i],self.t[:i]))+\
-							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xub,i,t,xlb[:i],self.t[:i]))
-						g2[i] = 2*self.Psi(mu,xlb,i,t,self.prior_mu_mean,t0)-\
-							2*self.dt*np.sum(g1[:i]*self.Psi(mu,xlb,i,t,xub[:i],self.t[:i]))-\
-							2*self.dt*np.sum(g2[:i]*self.Psi(mu,xlb,i,t,xlb[:i],self.t[:i]))
-					if g1[i]<0:
-						g1[i] = 0.
-					if g2[i]<0:
-						g2[i] = 0.
-				if xub[i]<=xlb:
-					bounds_touched = True
-			# Normalize probability density
-			normalization = np.sum(g1+g2)*self.dt
-			g1/=normalization
-			g2/=normalization
-			return g1,g2
 	
 	def Psi(self,mu,bound,itp,tp,x0,t0):
 		normpdf = 0.3989422804014327**np.exp(-0.5*(bound[itp]-x0-mu*(tp-t0))**2/self._model_var/(tp-t0))/(self._model_var*(tp-t0))

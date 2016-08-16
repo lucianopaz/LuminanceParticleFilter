@@ -111,7 +111,12 @@ public:
 	double *ub;
 	double *lb;
 	
-	DecisionPolicy(){};
+	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost);
+	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
 	virtual ~DecisionPolicy();
 	
 	static DecisionPolicy* create(const DecisionPolicyDescriptor& dpc);
@@ -122,9 +127,9 @@ public:
 	virtual inline double x2g(double t, double x){return NAN;};
 	virtual inline double g2x(double t, double g){return NAN;};
 	
-	virtual double backpropagate_value();
-	virtual double backpropagate_value(double rho, bool compute_bounds);
-	virtual double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2);
+	virtual double backpropagate_value(){return NAN;};
+	virtual double backpropagate_value(double rho, bool compute_bounds){return NAN;};
+	virtual double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2){return NAN;};
 	double value_for_root_finding(double rho);
 	double iterate_rho_value(double tolerance);
 	double iterate_rho_value(double tolerance, double lower_bound, double upper_bound);
@@ -144,10 +149,12 @@ public:
 	
 	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost);
+				   double iti, double tp, double cost):
+			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost){};
 	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides){};
 	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc);
 	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
 	~DecisionPolicyConjPrior();
@@ -190,10 +197,36 @@ protected:
 public:
 	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost);
+				   double iti, double tp, double cost):
+		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost)
+	{
+		/***
+		 * Constructor that shares its bound arrays
+		***/
+		is_prior_set = false;
+		this->epsilon = 1e-10;
+		this->set_prior(n_prior,mu_prior,weight_prior);
+		this->g2x_tolerance = 1e-12;
+		#ifdef DEBUG
+		std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
+		#endif
+	};
 	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides)
+	{
+		/***
+		 * Constructor that shares its bound arrays
+		***/
+		is_prior_set = false;
+		this->epsilon = 1e-10;
+		this->set_prior(n_prior,mu_prior,weight_prior);
+		this->g2x_tolerance = 1e-12;
+		#ifdef DEBUG
+		std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
+		#endif
+	};
 	DecisionPolicyDiscretePrior(const DecisionPolicyDescriptor& dpc);
 	DecisionPolicyDiscretePrior(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
 	~DecisionPolicyDiscretePrior();
