@@ -70,10 +70,19 @@ public:
 	double iti;
 	double tp;
 	double cost;
+	int prior_type;
+	int n_prior;
+	double *mu_prior;
+	double *weight_prior;
 	
 	DecisionPolicyDescriptor(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost);
+	DecisionPolicyDescriptor(double model_var, int n_prior, double* mu_prior, double* weight_prior,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost);
+	
+	~DecisionPolicyDescriptor();
 };
 
 class DecisionPolicy {
@@ -84,9 +93,9 @@ public:
 	int nT;
 	int bound_strides;
 	
-	double model_var;
 	double prior_mu_mean;
 	double prior_mu_var;
+	double model_var;
 	double dt;
 	double dg;
 	double T;
@@ -105,17 +114,50 @@ public:
 	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost);
-	
 	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
 				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
+	virtual ~DecisionPolicy();
 	
-	DecisionPolicy(const DecisionPolicyDescriptor& dpc);
+	static DecisionPolicy* create(const DecisionPolicyDescriptor& dpc);
+	static DecisionPolicy* create(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
 	
-	DecisionPolicy(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
+	void disp();
 	
+	virtual inline double x2g(double t, double x){return NAN;};
+	virtual inline double g2x(double t, double g){return NAN;};
 	
-	~DecisionPolicy();
+	virtual double backpropagate_value(){return NAN;};
+	virtual double backpropagate_value(double rho, bool compute_bounds){return NAN;};
+	virtual double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2){return NAN;};
+	double value_for_root_finding(double rho);
+	double iterate_rho_value(double tolerance);
+	double iterate_rho_value(double tolerance, double lower_bound, double upper_bound);
+	
+	double* x_ubound();
+	void x_ubound(double* xb);
+	double* x_lbound();
+	void x_lbound(double* xb);
+	double Psi(double mu, double* bound, int itp, double tp, double x0, double t0);
+	void rt(double mu, double* g1, double* g2, double* xub, double* xlb);
+protected:
+	double _model_var;
+};
+
+class DecisionPolicyConjPrior : public DecisionPolicy {
+public:
+	
+	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost):
+			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost){};
+	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides){};
+	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc);
+	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
+	~DecisionPolicyConjPrior();
 	
 	void disp();
 	
@@ -138,19 +180,70 @@ public:
 	double backpropagate_value();
 	double backpropagate_value(double rho, bool compute_bounds);
 	double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2);
-	double value_for_root_finding(double rho);
-	double iterate_rho_value(double tolerance);
-	double iterate_rho_value(double tolerance, double lower_bound, double upper_bound);
-	
-	double* x_ubound();
-	void x_ubound(double* xb);
-	double* x_lbound();
-	void x_lbound(double* xb);
-	double Psi(double mu, double* bound, int itp, double tp, double x0, double t0);
-	void rt(double mu, double* g1, double* g2, double* xub, double* xlb);
-
-protected:
-	double _model_var;
 };
 
+
+class DecisionPolicyDiscretePrior : public DecisionPolicy {
+protected:
+	int n_prior;
+	bool is_prior_set;
+	double* mu_prior;
+	double* mu2_prior;
+	double* weight_prior;
+	double epsilon;
+	double g2x_lower_bound;
+	double g2x_upper_bound;
+	double g2x_tolerance;
+public:
+	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost):
+		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost)
+	{
+		/***
+		 * Constructor that shares its bound arrays
+		***/
+		is_prior_set = false;
+		this->epsilon = 1e-10;
+		this->set_prior(n_prior,mu_prior,weight_prior);
+		this->g2x_tolerance = 1e-12;
+		#ifdef DEBUG
+		std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
+		#endif
+	};
+	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
+				   int n, double dt, double T, double reward, double penalty,
+				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides)
+	{
+		/***
+		 * Constructor that shares its bound arrays
+		***/
+		is_prior_set = false;
+		this->epsilon = 1e-10;
+		this->set_prior(n_prior,mu_prior,weight_prior);
+		this->g2x_tolerance = 1e-12;
+		#ifdef DEBUG
+		std::cout<<"Created DecisionPolicyDiscretePrior instance at "<<this<<std::endl;
+		#endif
+	};
+	DecisionPolicyDiscretePrior(const DecisionPolicyDescriptor& dpc);
+	DecisionPolicyDiscretePrior(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
+	~DecisionPolicyDiscretePrior();
+	
+	void set_prior(int n_prior,double* mu_prior, double* weight_prior);
+	double get_epsilon(){return this->epsilon;};
+	
+	void disp();
+	
+	inline double x2g(double t, double x);
+	
+	inline void set_g2x_bounds(double lower, double upper){this->g2x_lower_bound = lower; this->g2x_upper_bound = upper;};
+	inline void set_g2x_tolerance(double tolerance){this->g2x_tolerance = tolerance;};
+	inline double g2x(double t, double g);
+	
+	double backpropagate_value();
+	double backpropagate_value(double rho, bool compute_bounds);
+	double backpropagate_value(double rho, bool compute_bounds, double* value, double* v_explore, double* v1, double* v2);
+};
 #endif

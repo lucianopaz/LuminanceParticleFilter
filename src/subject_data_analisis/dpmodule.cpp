@@ -9,12 +9,30 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include "DecisionPolicy.hpp"
 
+#include <cmath>
 #include <cstdio>
 
 DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
+	int prior_type;
+	PyObject* py_prior_mu_mean = NULL;
+	PyObject* py_prior_mu_var = NULL;
+	PyObject* py_mu_prior = NULL;
+	PyObject* py_weight_prior = NULL;
 	PyObject* py_model_var = PyObject_GetAttrString(py_dp,"model_var");
-	PyObject* py_prior_mu_mean = PyObject_GetAttrString(py_dp,"prior_mu_mean");
-	PyObject* py_prior_mu_var = PyObject_GetAttrString(py_dp,"prior_mu_var");
+	PyObject* py_prior_type = PyObject_GetAttrString(py_dp,"prior_type");
+	if (py_prior_type==NULL){
+		prior_type = 1;
+	} else {
+		prior_type = int(PyInt_AS_LONG(py_prior_type));
+		Py_XDECREF(py_prior_type);
+	}
+	if (prior_type==1){
+		py_prior_mu_mean = PyObject_GetAttrString(py_dp,"prior_mu_mean");
+		py_prior_mu_var = PyObject_GetAttrString(py_dp,"prior_mu_var");
+	} else {
+		py_mu_prior = PyObject_GetAttrString(py_dp,"mu_prior");
+		py_weight_prior = PyObject_GetAttrString(py_dp,"weight_prior");
+	}
 	PyObject* py_n = PyObject_GetAttrString(py_dp,"n");
 	PyObject* py_dt = PyObject_GetAttrString(py_dp,"dt");
 	PyObject* py_T = PyObject_GetAttrString(py_dp,"T");
@@ -24,13 +42,17 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	PyObject* py_tp = PyObject_GetAttrString(py_dp,"tp");
 	PyObject* py_cost = PyObject_GetAttrString(py_dp,"cost");
 	
-	if (py_model_var==NULL || py_prior_mu_mean==NULL || py_prior_mu_var==NULL ||
-		py_n==NULL || py_dt==NULL || py_T==NULL || py_reward==NULL ||
-		py_penalty==NULL || py_iti==NULL || py_tp==NULL || py_cost==NULL){
+	if (py_model_var==NULL || py_n==NULL || py_dt==NULL || py_T==NULL ||
+		py_reward==NULL || py_penalty==NULL || py_iti==NULL || py_tp==NULL ||
+		py_cost==NULL ||
+		(prior_type==1 && (py_prior_mu_mean==NULL || py_prior_mu_var==NULL)) ||
+		(prior_type==2 && (py_mu_prior==NULL || py_weight_prior==NULL))){
 		PyErr_SetString(PyExc_ValueError, "Could not parse all decisionPolicy property values");
 		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
+		Py_XDECREF(py_mu_prior);
+		Py_XDECREF(py_weight_prior);
 		Py_XDECREF(py_n);
 		Py_XDECREF(py_dt);
 		Py_XDECREF(py_T);
@@ -42,8 +64,6 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 		return NULL;
 	}
 	double model_var = PyFloat_AsDouble(py_model_var);
-	double prior_mu_mean = PyFloat_AsDouble(py_prior_mu_mean);
-	double prior_mu_var = PyFloat_AsDouble(py_prior_mu_var);
 	int n = int(PyInt_AS_LONG(py_n));
 	double dt = PyFloat_AsDouble(py_dt);
 	double T = PyFloat_AsDouble(py_T);
@@ -51,13 +71,48 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	double penalty = PyFloat_AsDouble(py_penalty);
 	double iti = PyFloat_AsDouble(py_iti);
 	double tp = PyFloat_AsDouble(py_tp);
+	double prior_mu_mean = NAN;
+	double prior_mu_var = NAN;
+	int n_prior = 0;
+	double* mu_prior = NULL;
+	double* weight_prior = NULL;
+	if (prior_type==1){
+		prior_mu_mean = PyFloat_AsDouble(py_prior_mu_mean);
+		prior_mu_var = PyFloat_AsDouble(py_prior_mu_var);
+	} else {
+		if (!PyArray_Check(py_mu_prior) || !PyArray_Check(py_weight_prior)){
+			PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be numpy arrays.");
+		} else if (PyArray_NDIM((PyArrayObject*)py_mu_prior)!=1 || PyArray_NDIM((PyArrayObject*)py_weight_prior)!=1){
+			PyErr_SetString(PyExc_ValueError,"Supplied mu_prior and weight_prior must be one dimensional numpy arrays.");
+		} else if (PyArray_SHAPE((PyArrayObject*)py_mu_prior)[0]!=PyArray_SHAPE((PyArrayObject*)py_weight_prior)[0]){
+			PyErr_SetString(PyExc_ValueError,"Supplied mu_prior and weight_prior must have the same number of elements.");
+		} else {
+			n_prior = (int) PyArray_SHAPE((PyArrayObject*)py_mu_prior)[0];
+			int type = PyArray_TYPE((PyArrayObject*)py_mu_prior);
+			switch(type) {
+				case NPY_DOUBLE:
+					mu_prior = (double*) PyArray_DATA((PyArrayObject*)py_mu_prior);
+					break;
+				default:
+					PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be of type np.float64. Re-cast using astype.");
+			}
+			type = PyArray_TYPE((PyArrayObject*)py_weight_prior);
+			switch(type) {
+				case NPY_DOUBLE:
+					weight_prior = (double*) PyArray_DATA((PyArrayObject*)py_weight_prior);
+					break;
+				default:
+					PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be of type np.float64. Re-cast using astype.");
+			}
+		}
+	}
 	double cost = 0.;
 	if (PyObject_IsInstance(py_cost,(PyObject*)(&PyArray_Type))){
 		if (!PyArray_IsAnyScalar((PyArrayObject*)py_cost)){
 			PyErr_WarnEx(PyExc_RuntimeWarning,"dp module's function xbounds is only capable of handling integer cost values. It will assume that the cost is constant and equal to the first element of the supplied cost array.",1);
 		}
 		if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
-			PyErr_SetString(PyExc_ValueError,"Supplied cost must be a floating point number that can be casted to double.");
+			PyErr_SetString(PyExc_TypeError,"Supplied cost must be a floating point number that can be casted to double.");
 		} else {
 			cost = ((double*)PyArray_DATA((PyArrayObject*)py_cost))[0];
 		}
@@ -69,6 +124,8 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
+		Py_XDECREF(py_mu_prior);
+		Py_XDECREF(py_weight_prior);
 		Py_XDECREF(py_n);
 		Py_XDECREF(py_dt);
 		Py_XDECREF(py_T);
@@ -82,8 +139,10 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	
 	
 	Py_DECREF(py_model_var);
-	Py_DECREF(py_prior_mu_mean);
-	Py_DECREF(py_prior_mu_var);
+	Py_XDECREF(py_prior_mu_mean);
+	Py_XDECREF(py_prior_mu_var);
+	Py_XDECREF(py_mu_prior);
+	Py_XDECREF(py_weight_prior);
 	Py_DECREF(py_n);
 	Py_DECREF(py_dt);
 	Py_DECREF(py_T);
@@ -93,8 +152,13 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	Py_DECREF(py_tp);
 	Py_DECREF(py_cost);
 	
-	return new DecisionPolicyDescriptor(model_var, prior_mu_mean, prior_mu_var,
-				   n, dt, T, reward, penalty, iti, tp, cost);
+	if (prior_type==1){
+		return new DecisionPolicyDescriptor(model_var, prior_mu_mean, prior_mu_var,
+						n, dt, T, reward, penalty, iti, tp, cost);
+	} else {
+		return new DecisionPolicyDescriptor(model_var, n_prior, mu_prior, weight_prior,
+						n, dt, T, reward, penalty, iti, tp, cost);
+	}
 }
 
 /* method xbounds(decisionPolicy, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None) */
@@ -168,7 +232,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 	npy_intp py_nT[1] = {nT};
 	
 	if (!touch_py_bounds){
-		dp = new DecisionPolicy(*dpd);
+		dp = DecisionPolicy::create(*dpd);
 	} else {
 		npy_intp bounds_shape[2] = {2,nT};
 		py_bounds = PyObject_GetAttrString(py_dp,"bounds");
@@ -205,7 +269,7 @@ static PyObject* dpmod_xbounds(PyObject* self, PyObject* args, PyObject* keywds)
 			}
 			must_dec_ref_py_bounds = 0;
 		}
-		dp = new DecisionPolicy(*dpd,
+		dp = DecisionPolicy::create(*dpd,
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)0,(npy_intp)0),
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)1,(npy_intp)0),
 								((int) PyArray_STRIDE((PyArrayObject*)py_bounds,1))/sizeof(double)); // We divide by sizeof(double) because strides determines the number of bytes to stride in each dimension. As we cast the supplied void pointer to double*, each element has sizeof(double) bytes instead of 1 byte.
@@ -354,7 +418,7 @@ static PyObject* dpmod_xbounds_fixed_rho(PyObject* self, PyObject* args, PyObjec
 	npy_intp py_nT[1] = {nT};
 	
 	if (!touch_py_bounds){
-		dp = new DecisionPolicy(*dpd);
+		dp = DecisionPolicy::create(*dpd);
 	} else {
 		npy_intp bounds_shape[2] = {2,nT};
 		py_bounds = PyObject_GetAttrString(py_dp,"bounds");
@@ -391,7 +455,7 @@ static PyObject* dpmod_xbounds_fixed_rho(PyObject* self, PyObject* args, PyObjec
 			}
 			must_dec_ref_py_bounds = 0;
 		}
-		dp = new DecisionPolicy(*dpd,
+		dp = DecisionPolicy::create(*dpd,
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)0,(npy_intp)0),
 								(double*)PyArray_GETPTR2((PyArrayObject*)py_bounds,(npy_intp)1,(npy_intp)0),
 								((int) PyArray_STRIDE((PyArrayObject*)py_bounds,1))/sizeof(double)); // We divide by sizeof(double) because strides determines the number of bytes to stride in each dimension. As we cast the supplied void pointer to double*, each element has sizeof(double) bytes instead of 1 byte.
@@ -476,6 +540,7 @@ static PyObject* dpmod_values(PyObject* self, PyObject* args, PyObject* keywds){
 	PyObject* py_v_explore = NULL;
 	PyObject* py_v1 = NULL;
 	PyObject* py_v2 = NULL;
+	DecisionPolicy* dp;
 	DecisionPolicyDescriptor* dpd;
 	
 	static char* kwlist[] = {"decPol", "rho", NULL};
@@ -504,13 +569,12 @@ static PyObject* dpmod_values(PyObject* self, PyObject* args, PyObject* keywds){
 		// An error occurred while getting the descriptor and the error message was set within get_descriptor
 		return NULL;
 	}
+	dp = DecisionPolicy::create(*dpd);
+	dp->rho = rho;
 	
-	DecisionPolicy dp = DecisionPolicy(*dpd);
-	dp.rho = rho;
-	
-	npy_intp py_value_shape[2] = {dp.nT,dp.n};
-	npy_intp py_v_explore_shape[2] = {dp.nT-1,dp.n};
-	npy_intp py_v12_shape[1] = {dp.n};
+	npy_intp py_value_shape[2] = {dp->nT,dp->n};
+	npy_intp py_v_explore_shape[2] = {dp->nT-1,dp->n};
+	npy_intp py_v12_shape[1] = {dp->n};
 	
 	py_out = PyTuple_New(4);
 	py_value = PyArray_SimpleNew(2, py_value_shape, NPY_DOUBLE);
@@ -527,16 +591,18 @@ static PyObject* dpmod_values(PyObject* self, PyObject* args, PyObject* keywds){
 	PyTuple_SET_ITEM(py_out, 2, py_v1); // Steals a reference to py_v1 so no dec_ref must be called on py_v1 on cleanup
 	PyTuple_SET_ITEM(py_out, 3, py_v2); // Steals a reference to py_v2 so no dec_ref must be called on py_v2 on cleanup
 		
-	dp.backpropagate_value(dp.rho,false,
+	dp->backpropagate_value(dp->rho,false,
 			(double*) PyArray_DATA((PyArrayObject*) py_value),
 			(double*) PyArray_DATA((PyArrayObject*) py_v_explore),
 			(double*) PyArray_DATA((PyArrayObject*) py_v1),
 			(double*) PyArray_DATA((PyArrayObject*) py_v2));
 	
+	delete(dp);
 	delete(dpd);
 	return py_out;
 
 error_cleanup:
+	delete(dp);
 	delete(dpd);
 	Py_XDECREF(py_value);
 	Py_XDECREF(py_v_explore);
@@ -557,6 +623,7 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	PyObject* py_out = NULL;
 	PyObject* py_g1 = NULL;
 	PyObject* py_g2 = NULL;
+	DecisionPolicy* dp;
 	DecisionPolicyDescriptor* dpd;
 	
 	static char* kwlist[] = {"decPol", "mu", "bounds", NULL};
@@ -582,8 +649,8 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	}
 	Py_DECREF(py_rho);
 	
-	DecisionPolicy dp = DecisionPolicy(*dpd);
-	dp.rho = rho;
+	dp = DecisionPolicy::create(*dpd);
+	dp->rho = rho;
 	
 	if (py_bounds==Py_None) { // Compute xbounds if they are not provided
 		PyObject* args2 = PyTuple_Pack(1,py_dp);
@@ -617,11 +684,12 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	PyTuple_SET_ITEM(py_out, 0, py_g1); // Steals a reference
 	PyTuple_SET_ITEM(py_out, 1, py_g2); // Steals a reference
 		
-	dp.rt(mu,(double*) PyArray_DATA((PyArrayObject*) py_g1),
+	dp->rt(mu,(double*) PyArray_DATA((PyArrayObject*) py_g1),
 			 (double*) PyArray_DATA((PyArrayObject*) py_g2),
 			 (double*) PyArray_DATA((PyArrayObject*) py_xub),
 			 (double*) PyArray_DATA((PyArrayObject*) py_xlb));
 	
+	delete(dp);
 	delete(dpd);
 	if (must_decref_py_bounds){
 		Py_XDECREF(py_bounds);
@@ -631,6 +699,7 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	return py_out;
 
 error_cleanup:
+	delete(dp);
 	delete(dpd);
 	if (must_decref_py_bounds){
 		Py_XDECREF(py_bounds);
