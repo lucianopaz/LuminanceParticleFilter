@@ -56,6 +56,8 @@ inline double normcdfinv(double y, double mu, double sigma){
 }
 
 class DecisionPolicyDescriptor {
+protected:
+	bool owns_cost;
 public:
 	double model_var;
 	double prior_mu_mean;
@@ -69,7 +71,7 @@ public:
 	double penalty;
 	double iti;
 	double tp;
-	double cost;
+	double* cost;
 	int prior_type;
 	int n_prior;
 	double *mu_prior;
@@ -77,10 +79,10 @@ public:
 	
 	DecisionPolicyDescriptor(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost);
+				   double iti, double tp, double* cost, bool owns_cost);
 	DecisionPolicyDescriptor(double model_var, int n_prior, double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost);
+				   double iti, double tp, double* cost, bool owns_cost);
 	
 	~DecisionPolicyDescriptor();
 };
@@ -99,7 +101,7 @@ public:
 	double dt;
 	double dg;
 	double T;
-	double cost;
+	double* cost;
 	double reward;
 	double penalty;
 	double iti;
@@ -113,10 +115,10 @@ public:
 	
 	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost);
+				   double iti, double tp, double* cost);
 	DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides);
+				   double iti, double tp, double* cost, double* ub, double* lb,int bound_strides);
 	virtual ~DecisionPolicy();
 	
 	static DecisionPolicy* create(const DecisionPolicyDescriptor& dpc);
@@ -149,11 +151,11 @@ public:
 	
 	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost):
+				   double iti, double tp, double* cost):
 			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost){};
 	DecisionPolicyConjPrior(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+				   double iti, double tp, double* cost, double* ub, double* lb,int bound_strides):
 			DecisionPolicy(model_var, prior_mu_mean, prior_mu_var, n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides){};
 	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc);
 	DecisionPolicyConjPrior(const DecisionPolicyDescriptor& dpc, double* ub, double* lb, int bound_strides);
@@ -197,7 +199,7 @@ protected:
 public:
 	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost):
+				   double iti, double tp, double* cost):
 		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost)
 	{
 		/***
@@ -213,7 +215,7 @@ public:
 	};
 	DecisionPolicyDiscretePrior(double model_var, int n_prior,double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb,int bound_strides):
+				   double iti, double tp, double* cost, double* ub, double* lb,int bound_strides):
 		DecisionPolicy(model_var, 0., 0., n, dt, T, reward, penalty, iti, tp, cost, ub, lb, bound_strides)
 	{
 		/***

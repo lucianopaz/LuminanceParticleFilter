@@ -2,7 +2,7 @@
 
 DecisionPolicyDescriptor::DecisionPolicyDescriptor(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost){
+				   double iti, double tp, double* cost, bool owns_cost){
 	this->model_var = model_var;
 	this->prior_mu_mean = prior_mu_mean;
 	this->prior_mu_var = prior_mu_var;
@@ -17,12 +17,13 @@ DecisionPolicyDescriptor::DecisionPolicyDescriptor(double model_var, double prio
 	this->iti = iti;
 	this->tp = tp;
 	this->cost = cost;
+	this->owns_cost = owns_cost;
 	this->prior_type = 1; // Conjugate prior
 }
 
 DecisionPolicyDescriptor::DecisionPolicyDescriptor(double model_var, int n_prior, double* mu_prior, double* weight_prior,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost){
+				   double iti, double tp, double* cost, bool owns_cost){
 	this->model_var = model_var;
 	this->n_prior = n_prior;
 	this->mu_prior = new double[n_prior];
@@ -41,6 +42,7 @@ DecisionPolicyDescriptor::DecisionPolicyDescriptor(double model_var, int n_prior
 	this->iti = iti;
 	this->tp = tp;
 	this->cost = cost;
+	this->owns_cost = owns_cost;
 	this->prior_type = 2; // Symmetric discrete prior
 }
 
@@ -49,11 +51,14 @@ DecisionPolicyDescriptor::~DecisionPolicyDescriptor(){
 		delete[] this->mu_prior;
 		delete[] this->weight_prior;
 	}
+	if (this->owns_cost){
+		delete[] this->cost;
+	}
 }
 
 DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost){
+				   double iti, double tp, double* cost){
 	/***
 	 * Constructor that creates its own bound arrays
 	***/
@@ -94,7 +99,7 @@ DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double pr
 
 DecisionPolicy::DecisionPolicy(double model_var, double prior_mu_mean, double prior_mu_var,
 				   int n, double dt, double T, double reward, double penalty,
-				   double iti, double tp, double cost, double* ub, double* lb, int bound_strides){
+				   double iti, double tp, double* cost, double* ub, double* lb, int bound_strides){
 	/***
 	 * Constructor that shares its bound arrays
 	***/
@@ -597,6 +602,7 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];
+		const double cost_rho_dt = (cost[i]+rho)*dt;
 		post_var_t = post_mu_var(t_i);
 		for (j=0;j<n;++j){
 			v_explore[j] = 0.;
@@ -625,7 +631,7 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 				v_explore[j]+= p[k]*value[k];
 			}
 			// Divide the value of exploring by the normalization factor and discount the cost and rho
-			v_explore[j] = v_explore[j]/norm_p - (cost+rho)*dt;
+			v_explore[j] = v_explore[j]/norm_p - cost_rho_dt;
 			
 			#ifdef DEBUG
 			for (k=0;k<n-1;++k){
@@ -790,6 +796,7 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];
+		const double cost_rho_dt = (cost[i]+rho)*dt;
 		post_var_t = post_mu_var(t_i);
 		for (j=0;j<n;++j){
 			v_explore[j+i*n] = 0.;
@@ -818,7 +825,7 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 				v_explore[j+i*n]+= p[k]*value[k+(i+1)*n];
 			}
 			// Divide the value of exploring by the normalization factor and discount the cost and rho
-			v_explore[j+i*n] = v_explore[j+i*n]/norm_p - (cost+rho)*dt;
+			v_explore[j+i*n] = v_explore[j+i*n]/norm_p - cost_rho_dt;
 			
 			#ifdef DEBUG
 			for (k=0;k<n-1;++k){
@@ -1218,6 +1225,7 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 		//Speed increase by reducing array access
 		const double t_i = t[i];
 		const double t_i1 = t[i+1];
+		const double cost_rho_dt = (cost[i]+rho)*dt;
 		for (j=0;j<n;++j){
 			v_explore[j] = 0.;
 			invg[curr_invg][j] = g2x(t_i,g[j]);
@@ -1258,7 +1266,7 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 				v_explore[j]+= p[k]*value[k];
 			}
 			// Divide the value of exploring by the normalization factor and discount the cost and rho
-			v_explore[j] = v_explore[j]/norm_p - (cost+rho)*dt;
+			v_explore[j] = v_explore[j]/norm_p - cost_rho_dt;
 			
 			#ifdef DEBUG
 			for (k=0;k<n-1;++k){
@@ -1424,6 +1432,7 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 		//Speed increase by reducing array access
 		const double t_i = t[i];
 		const double t_i1 = t[i+1];
+		const double cost_rho_dt = (cost[i]+rho)*dt;
 		for (j=0;j<n;++j){
 			v_explore[j+i*n] = 0.;
 			invg[curr_invg][j] = g2x(t_i,g[j]);
@@ -1463,7 +1472,7 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 				v_explore[j+i*n]+= p[k]*value[k+(i+1)*n];
 			}
 			// Divide the value of exploring by the normalization factor and discount the cost and rho
-			v_explore[j+i*n] = v_explore[j+i*n]/norm_p - (cost+rho)*dt;
+			v_explore[j+i*n] = v_explore[j+i*n]/norm_p - cost_rho_dt;
 			
 			#ifdef DEBUG
 			for (k=0;k<n-1;++k){

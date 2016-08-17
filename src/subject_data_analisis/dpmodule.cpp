@@ -74,6 +74,7 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	double prior_mu_mean = NAN;
 	double prior_mu_var = NAN;
 	int n_prior = 0;
+	int nT = (int)(T/dt)+1;
 	double* mu_prior = NULL;
 	double* weight_prior = NULL;
 	if (prior_type==1){
@@ -86,38 +87,44 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 			PyErr_SetString(PyExc_ValueError,"Supplied mu_prior and weight_prior must be one dimensional numpy arrays.");
 		} else if (PyArray_SHAPE((PyArrayObject*)py_mu_prior)[0]!=PyArray_SHAPE((PyArrayObject*)py_weight_prior)[0]){
 			PyErr_SetString(PyExc_ValueError,"Supplied mu_prior and weight_prior must have the same number of elements.");
+		} else if ((!PyArray_ISFLOAT((PyArrayObject*)py_mu_prior)) || (!PyArray_ISFLOAT((PyArrayObject*)py_weight_prior))){
+			PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be of type np.float. Re-cast using astype.");
 		} else {
 			n_prior = (int) PyArray_SHAPE((PyArrayObject*)py_mu_prior)[0];
-			int type = PyArray_TYPE((PyArrayObject*)py_mu_prior);
-			switch(type) {
-				case NPY_DOUBLE:
-					mu_prior = (double*) PyArray_DATA((PyArrayObject*)py_mu_prior);
-					break;
-				default:
-					PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be of type np.float64. Re-cast using astype.");
-			}
-			type = PyArray_TYPE((PyArrayObject*)py_weight_prior);
-			switch(type) {
-				case NPY_DOUBLE:
-					weight_prior = (double*) PyArray_DATA((PyArrayObject*)py_weight_prior);
-					break;
-				default:
-					PyErr_SetString(PyExc_TypeError,"Supplied mu_prior and weight_prior must be of type np.float64. Re-cast using astype.");
-			}
+			mu_prior = (double*) PyArray_DATA((PyArrayObject*)py_mu_prior);
+			weight_prior = (double*) PyArray_DATA((PyArrayObject*)py_weight_prior);
 		}
 	}
-	double cost = 0.;
+	double* cost = NULL;
+	bool owns_cost = false;
 	if (PyObject_IsInstance(py_cost,(PyObject*)(&PyArray_Type))){
 		if (!PyArray_IsAnyScalar((PyArrayObject*)py_cost)){
-			PyErr_WarnEx(PyExc_RuntimeWarning,"dp module's function xbounds is only capable of handling integer cost values. It will assume that the cost is constant and equal to the first element of the supplied cost array.",1);
-		}
-		if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
+			if (PyArray_NDIM((PyArrayObject*)py_cost)!=1){
+				PyErr_SetString(PyExc_ValueError,"Supplied cost must be a scalar or a one dimensional numpy ndarray.");
+			} else if ((int)PyArray_SHAPE((PyArrayObject*)py_cost)[0]!=nT-1){
+				PyErr_SetString(PyExc_ValueError,"Supplied cost must have the length = len(t)-1.");
+			} else if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
+				PyErr_SetString(PyExc_TypeError,"Supplied cost must be a floating point number or numpy array that can be casted to double.");
+			} else {
+				cost = ((double*)PyArray_DATA((PyArrayObject*)py_cost));
+			}
+		} else if (!PyArray_ISFLOAT((PyArrayObject*)py_cost)){
 			PyErr_SetString(PyExc_TypeError,"Supplied cost must be a floating point number that can be casted to double.");
 		} else {
-			cost = ((double*)PyArray_DATA((PyArrayObject*)py_cost))[0];
+			double _constant_cost = ((double*)PyArray_DATA((PyArrayObject*)py_cost))[0];
+			owns_cost = true;
+			cost = new double[nT-1];
+			for (int i=0;i<nT-1;++i){
+				cost[i] = _constant_cost;
+			}
 		}
 	} else {
-		cost = PyFloat_AsDouble(py_cost);
+		double _constant_cost = PyFloat_AsDouble(py_cost);
+		owns_cost = true;
+		cost = new double[nT-1];
+		for (int i=0;i<nT-1;++i){
+			cost[i] = _constant_cost;
+		}
 	}
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
@@ -154,10 +161,10 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	
 	if (prior_type==1){
 		return new DecisionPolicyDescriptor(model_var, prior_mu_mean, prior_mu_var,
-						n, dt, T, reward, penalty, iti, tp, cost);
+						n, dt, T, reward, penalty, iti, tp, cost, owns_cost);
 	} else {
 		return new DecisionPolicyDescriptor(model_var, n_prior, mu_prior, weight_prior,
-						n, dt, T, reward, penalty, iti, tp, cost);
+						n, dt, T, reward, penalty, iti, tp, cost, owns_cost);
 	}
 }
 
