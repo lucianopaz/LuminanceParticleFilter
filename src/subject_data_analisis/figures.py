@@ -10,10 +10,10 @@ import data_io as io
 import cost_time as ct
 import moving_bounds_fits as mo
 
-def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
+def value_and_bounds_sketch(fname='value_and_bounds_sketch',suffix='.svg'):
+	fname+=suffix
 	mo.set_time_units('seconds')
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=0.01,reward=1,penalty=0,iti=1.5,tp=0.)
-	m.cost = 0.1
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=0.01,cost=0.1,reward=1,penalty=0,iti=1.5,tp=0.)
 	m.xbounds()
 	m.refine_value(n=501)
 	xub,xlb,value,v_explore,v1,v2 = m.xbounds_fixed_rho(set_bounds=True,return_values=True)
@@ -31,7 +31,7 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	
 	# Plot how the value of exploring changes through time
 	plt.subplot(223)
-	plt.plot(m.g,np.max(np.array([v1,v2]),axis=0),linestyle='--',color='k',linewidth=3)
+	plt.plot(m.g,np.max(np.array([v1,v2]),axis=0),linestyle='--',color='k',linewidth=3,zorder=2.1)
 	#~ inds = np.array([0,50,100,250,len(m.t)-2])
 	inds = np.array([0,10,20,30,50])
 	cmap = plt.get_cmap('RdYlGn')
@@ -80,7 +80,8 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=1.5,tp=0.):
+def bounds_vs_cost(fname='bounds_cost',suffix='.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=1.5,tp=0.):
+	fname+=suffix
 	mo.set_time_units('seconds')
 	if dt is None:
 		dt = mo.ISI
@@ -97,7 +98,7 @@ def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=49
 	ax = plt.subplot(gs1[0])
 	plt.sca(ax)
 	for cost,c1,c2 in zip(costs,s1_colors,s2_colors):
-		m.cost = cost
+		m.set_cost(cost)
 		xub,xlb = m.xbounds()
 		plt.plot(m.t,xub,color=c1)
 		plt.plot(m.t,xlb,color=c2)
@@ -117,7 +118,8 @@ def bounds_vs_cost(fname='bounds_cost.svg',n_costs=20,maxcost=1.,prior_mu_var=49
 	plt.ylabel('Cost [Hz]',fontsize=16)
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def rt_fit(fname='rt_fit.svg'):
+def rt_fit(fname='rt_fit',suffix='.svg'):
+	fname+=suffix
 	subjects = io.unique_subjects(mo.data_dir)
 	files = ['fits/inference_fit_full_subject_'+str(sid)+'_seconds_iti_1-5.pkl' for sid in range(1,7)]
 	files2 = ['fits/inference_fit_confidence_only_subject_'+str(sid)+'_seconds_iti_1-5.pkl' for sid in range(1,7)]
@@ -184,7 +186,7 @@ def rt_fit(fname='rt_fit.svg'):
 		if dt is None:
 			dt = mo.ISI
 		
-		m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
+		m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,cost=cost,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
 		sim_rt = mo.theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,[high_conf_thresh])
 		if all_sim_rt is None:
 			all_sim_rt = {'hit':sim_rt['full']['all'][0]*ntrials,
@@ -265,7 +267,8 @@ def rt_fit(fname='rt_fit.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def prior_sketch(fname='prior_sketch.svg'):
+def prior_sketch(fname='prior_sketch',suffix='.svg'):
+	fname+=suffix
 	from scipy import stats
 	mo.set_time_units('seconds')
 	subjects = io.unique_subjects(mo.data_dir)
@@ -289,10 +292,10 @@ def prior_sketch(fname='prior_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def confidence_sketch(fname='confidence_sketch.svg'):
+def confidence_sketch(fname='confidence_sketch',suffix='.svg'):
+	fname+=suffix
 	mo.set_time_units('seconds')
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
-	cost = 0.01
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,cost=0.1,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
 	dead_time = 0.3
 	dead_time_sigma = 0.4
 	phase_out_prob = 0.05
@@ -333,7 +336,8 @@ def confidence_sketch(fname='confidence_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def decision_rt_sketch(fname='decision_rt_sketch.svg'):
+def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
+	fname+=suffix
 	subjects = io.unique_subjects(mo.data_dir)
 	subject = io.merge_subjects(subjects)
 	dat,t,d = subject.load_data()
@@ -352,8 +356,7 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	
 	mo.set_time_units('seconds')
 	
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
-	cost = 0.01
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI,cost=0.1,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
 	dead_time = 0.3
 	dead_time_sigma = 0.4
 	phase_out_prob = 0.05
@@ -508,15 +511,15 @@ def decision_rt_sketch(fname='decision_rt_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
+def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
+	fname+=suffix
 	mo.set_time_units('seconds')
 	plt.figure(figsize=(10,4))
 	mt.rc('axes', color_cycle=['b','g'])
 	ax1 = plt.subplot(131)
 	ax2 = plt.subplot(132,sharey=ax1)
 	ax3 = plt.subplot(133,sharey=ax1)
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,reward=1,penalty=0,iti=3,tp=0.)
-	m.cost = 0.1
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,cost=0.1,reward=1,penalty=0,iti=3,tp=0.)
 	xub,xlb,value1,ve1,v11,v22 = m.xbounds(return_values=True)
 	rho1 = m.rho
 	xb = np.array([xub,xlb])
@@ -583,11 +586,11 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def vexplore_drop_sketch(fname='vexplore_drop_sketch.svg'):
+def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
+	fname+=suffix
 	mo.set_time_units('seconds')
 	
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
-	m.cost = 0.
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=30,dt=mo.ISI,cost=0,reward=1,penalty=0,iti=1.5,tp=0.)
 	xub,xlb,v,v_explore,v1,v2 = m.xbounds(return_values=True)
 	m.invert_belief()
 	p = m.belief_transition_p()
@@ -607,12 +610,12 @@ def vexplore_drop_sketch(fname='vexplore_drop_sketch.svg'):
 	plt.xlabel('T [s]')
 	plt.ylabel('V explore')
 	
-	#~ plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
- figures.py [option flag] [option value]
+ figures.py [figure flags] [--show] [--suffix suffix_value]
  
  figures.py -h [or --help] displays help
  
@@ -625,19 +628,29 @@ def parse_input():
  '--decision_rt_sketch': Plot decision rt consolidation sketch
  '--bounds_vs_T_n_dt_sketch': Plot bounds as a function of dt and T sketch
  '--vexplore_drop_sketch': Plot variance of p(g+dg|g) as a function of time and also plot the drop in mean v_explore
+ 
+ '--show': Show the matplotlib figures after all have been created
+ '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
  """
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
-				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False}
+				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg'}
 	keys = options.keys()
+	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
+		if skip_arg:
+			skip_arg = False
+			continue
 		if arg=='-h' or arg=='--help':
 			print script_help
 			sys.exit()
 		elif arg=='--all':
 			for key in keys:
-				if key!='show':
+				if not (key=='show' or key=='suffix'):
 					options[key] = True
+		elif arg[2:]=='suffix':
+			options['suffix'] = sys.argv[i+2]
+			skip_arg = True
 		elif arg[2:] in keys:
 			options[arg[2:]] = True
 		else:
@@ -647,21 +660,21 @@ def parse_input():
 if __name__=="__main__":
 	opts = parse_input()
 	if opts['bounds_vs_cost']:
-		bounds_vs_cost()
+		bounds_vs_cost(suffix=opts['suffix'])
 	if opts['rt_fit']:
-		rt_fit()
+		rt_fit(suffix=opts['suffix'])
 	if opts['value_and_bounds_sketch']:
-		value_and_bounds_sketch()
+		value_and_bounds_sketch(suffix=opts['suffix'])
 	if opts['confidence_sketch']:
-		confidence_sketch()
+		confidence_sketch(suffix=opts['suffix'])
 	if opts['decision_rt_sketch']:
-		decision_rt_sketch()
+		decision_rt_sketch(suffix=opts['suffix'])
 	if opts['bounds_vs_T_n_dt_sketch']:
-		bounds_vs_T_n_dt_sketch()
+		bounds_vs_T_n_dt_sketch(suffix=opts['suffix'])
 	if opts['prior_sketch']:
-		prior_sketch()
+		prior_sketch(suffix=opts['suffix'])
 	if opts['vexplore_drop_sketch']:
-		vexplore_drop_sketch()
+		vexplore_drop_sketch(suffix=opts['suffix'])
 	
 	if opts['show']:
 		plt.show(True)

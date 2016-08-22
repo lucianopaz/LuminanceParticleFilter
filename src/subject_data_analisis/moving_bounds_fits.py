@@ -309,7 +309,7 @@ def full_merit(params,m,dat,mu,mu_indeces):
 		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
-	m.cost = cost
+	m.set_cost(cost)
 	xub,xlb = m.xbounds()
 	for index,drift in enumerate(mu):
 		g1,g2 = add_dead_time(m.rt(drift,bounds=(xub,xlb)),m.dt,dead_time,dead_time_sigma)
@@ -340,7 +340,7 @@ def confidence_only_merit(params,m,dat,mu,mu_indeces,decision_parameters):
 		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
-	m.cost = cost
+	m.set_cost(cost)
 	xub,xlb = m.xbounds()
 	
 	if time_units=='seconds' and m.dt>1e-3:
@@ -403,7 +403,7 @@ def full_confidence_merit(params,m,dat,mu,mu_indeces):
 		max_RT = np.max(dat[:,1])
 	
 	nlog_likelihood = 0.
-	m.cost = cost
+	m.set_cost(cost)
 	xub,xlb = m.xbounds()
 	
 	if time_units=='seconds' and m.dt>1e-3:
@@ -487,7 +487,7 @@ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,
 		rt = {'full':{'all':np.zeros((2,m.t.shape[0]-1))}}
 		gs = {'full':{'all':np.zeros((2,m.t.shape[0]-1))}}
 		phased_out_rt = np.zeros_like(m.t)[1:]
-	m.cost = cost
+	m.set_cost(cost)
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
 	if include_t0:
@@ -522,7 +522,7 @@ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_p
 	else:
 		rt = {'full':{'high':np.zeros((2,m.t.shape[0]-1)),'low':np.zeros((2,m.t.shape[0]-1))}}
 		phased_out_rt = np.zeros_like(m.t)[1:]
-	m.cost = cost
+	m.set_cost(cost)
 	_max_RT = m.t[np.ceil(max_RT/m.dt)]
 	_dead_time = m.t[np.floor(dead_time/m.dt)]
 	

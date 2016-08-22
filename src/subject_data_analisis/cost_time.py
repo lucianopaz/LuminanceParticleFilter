@@ -33,7 +33,7 @@ class DecisionPolicy():
 		penalty = Numerical value of penalty upon failure
 		iti = Inter trial interval
 		tp = Penalty time added to iti after failure
-		cost = Constant cost of accumulating new evidence
+		cost = Cost of accumulating new evidence. Can be a float or a numpy array. See set_cost for details of the accepted costs.
 		store_p = Boolean indicating whether to store the belief transition probability array (memory expensive!)
 		discrete_prior = can be None or a tuple like (mu_prior,weight_prior)
 			mu_prior and weight_prior must be numpy 1-D arrays of the same shape
@@ -63,7 +63,7 @@ class DecisionPolicy():
 		self.T = float(T)
 		self.nT = int(T/dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-		self.cost = cost*np.ones_like(self.t)
+		self.set_cost(cost)
 		self.store_p = store_p
 		self.reward = reward
 		self.penalty = penalty
@@ -82,18 +82,26 @@ class DecisionPolicy():
 		self.dt = float(dt)
 		self.nT = int(self.T/self.dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-		if not isinstance(self.cost,float):
-			self.cost = np.interp(self.t, oldt, self.cost)
+		if self._cost_details['type']==0:
+			self.set_constant_cost(self._cost_details['details'])
+		elif self._cost_details['type']==1:
+			self.set_polynomial_cost(self._cost_details['details'])
+		else:
+			self.cost = np.interp(self.t[:-1], oldt[:-1], self.cost)
 	def set_T(self,T):
 		self.T = float(T)
 		old_nT = self.nT
 		self.nT = int(self.T/self.dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-		old_cost = self.cost
-		if not isinstance(old_cost,float):
+		if self._cost_details['type']==0:
+			self.set_constant_cost(self._cost_details['details'])
+		elif self._cost_details['type']==1:
+			self.set_polynomial_cost(self._cost_details['details'])
+		else:
+			old_cost = self.cost
 			self.cost = np.zeros_like(self.t)
-			self.cost[:old_nT] = old_cost
-			self.cost[old_nT:] = old_cost[-1]
+			self.cost[:old_nT-1] = old_cost
+			self.cost[old_nT-1:] = old_cost[-1]
 	
 	def reset(self):
 		if self.store_p:
@@ -124,12 +132,73 @@ class DecisionPolicy():
 			pass
 		try:
 			out.cost = copy.deepcoy(self.cost)
+			out._cost_details = copy.deepcoy(self._cost_details)
 		except:
 			pass
 		return out
 	
+	def set_cost(self,cost):
+		"""
+		This function constructs a DecisionPolicy's cost array of shape
+		(nT-1,).
+		
+		Syntax:
+		self.set_cost(cost)
+		
+		Input:
+			cost: a float or a numpy ndarray.
+			 If cost is a float, self.cost set as a numpy array with all
+			of its values equal to the supplied float.
+			 If cost is a numpy ndarray, the cost array is constructed
+			in one of two ways. If the supplied cost's shape is equal to
+			(nT-1,) then the array is copied as is to the DecisionPolicy's
+			cost array. If the shape is not equal, then the supplied array
+			is assumed to hold the coefficients of a polynomial and
+			the cost array is constructed as a polyval(cost,self.t[:-1]).
+		
+		Related functions:
+		set_constant_cost, set_polynomial_cost, set_array_cost
+		"""
+		if isinstance(cost,np.ndarray):
+			s = cost.shape
+			if len(s)>1:
+				raise ValueError("Cost must be a scalar or a one dimensional numpy ndarray")
+			if s[0]==self.nT-1:
+				self.set_cost_array(cost)
+			else:
+				self.set_polynomial_cost(cost)
+		else:
+			self.set_constant_cost(cost)
+	
 	def set_constant_cost(self,cost):
-		self.cost = cost*np.ones_like(self.cost)
+		"""
+		self.set_constant_cost(cost)
+		
+		Primitive function that sets the instances cost array as
+		self.cost = float(cost)*numpy.ones(self.nT-1)
+		"""
+		self.cost = float(cost)*np.ones(self.nT-1)
+		self._cost_details = {'type':0,'details':cost}
+	
+	def set_polynomial_cost(self,coefs):
+		"""
+		self.set_polynomial_cost(coefs)
+		
+		Primitive function that sets the instances cost array as
+		self.cost = numpy.polyval(coefs,self.t[:-1])
+		"""
+		self.cost = np.polyval(coefs,self.t[:-1])
+		self._cost_details = {'type':1,'details':coefs[:]}
+	
+	def set_array_cost(self,cost):
+		"""
+		self.set_array_cost(cost)
+		
+		Primitive function that sets the instances cost array as
+		self.cost = cost[:]
+		"""
+		self.cost = cost[:]
+		self._cost_details = {'type':2,'details':None}
 	
 	def post_mu_var(self,t):
 		"""
@@ -540,8 +609,12 @@ class DecisionPolicy():
 					self.dt = float(dt)
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					if not isinstance(self.cost,float):
-						self.cost = np.interp(self.t, oldt, self.cost)
+					if self._cost_details['type']==0:
+						self.set_constant_cost(self._cost_details['details'])
+					elif self._cost_details['type']==1:
+						self.set_polynomial_cost(self._cost_details['details'])
+					else:
+						self.cost = np.interp(self.t[:-1], oldt[:-1], self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
@@ -550,10 +623,14 @@ class DecisionPolicy():
 					old_cost = self.cost
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					if not isinstance(self.cost,float):
+					if self._cost_details['type']==0:
+						self.set_constant_cost(self._cost_details['details'])
+					elif self._cost_details['type']==1:
+						self.set_polynomial_cost(self._cost_details['details'])
+					else:
 						self.cost = np.zeros_like(self.t)
-						self.cost[:old_nT] = old_cost
-						self.cost[old_nT:] = old_cost[-1]
+						self.cost[:old_nT-1] = old_cost
+						self.cost[old_nT-1:] = old_cost[-1]
 			if n is not None:
 				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
@@ -595,8 +672,12 @@ class DecisionPolicy():
 					self.dt = float(dt)
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					if not isinstance(self.cost,float):
-						self.cost = np.interp(self.t, oldt, self.cost)
+					if self._cost_details['type']==0:
+						self.set_constant_cost(self._cost_details['details'])
+					elif self._cost_details['type']==1:
+						self.set_polynomial_cost(self._cost_details['details'])
+					else:
+						self.cost = np.interp(self.t[:-1], oldt[:-1], self.cost)
 			if T is not None:
 				if T>self.T:
 					change = True
@@ -604,11 +685,15 @@ class DecisionPolicy():
 					old_nT = self.nT
 					self.nT = int(self.T/self.dt)+1
 					self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
-					if not isinstance(self.cost,float):
+					if self._cost_details['type']==0:
+						self.set_constant_cost(self._cost_details['details'])
+					elif self._cost_details['type']==1:
+						self.set_polynomial_cost(self._cost_details['details'])
+					else:
 						old_cost = self.cost
 						self.cost = np.zeros_like(self.t)
-						self.cost[:old_nT] = old_cost
-						self.cost[old_nT:] = old_cost[-1]
+						self.cost[:old_nT-1] = old_cost
+						self.cost[old_nT-1:] = old_cost[-1]
 			if n is not None:
 				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
