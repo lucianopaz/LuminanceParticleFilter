@@ -47,7 +47,7 @@ class DecisionPolicy():
 			temp = copy.deepcopy(discrete_prior)
 			self.mu_prior,self.weight_prior = temp
 			self.prior_mu_mean = 0.
-			self.weight_prior/=(2*np.sum(weight_prior))
+			self.weight_prior/=(2*np.sum(self.weight_prior))
 			self.prior_mu_var = np.sum(2*self.weight_prior*self.mu_prior**2)
 			self.prior_type = 2
 		else:
