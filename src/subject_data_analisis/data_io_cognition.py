@@ -9,24 +9,39 @@ import os, itertools, sys, random, re
 
 class SubjectSession:
 	def __init__(self,name,session,experiment,data_dir):
-		self.name = name
+		self.name = str(name)
 		try:
 			self.session = int(session)
 			self._single_session = True
 		except:
-			self.session = list(session)
+			self.session = [int(s) for s in session]
 			self._single_session = False
-		self.experiment = experiment
-		self.data_dir = data_dir
+		self.experiment = str(experiment)
+		if isinstance(data_dir,list):
+			self.data_dir = [str(d) for d in data_dir]
+			self._single_data_dir = False
+		else:
+			self.data_dir = str(data_dir)
+			self._single_data_dir = True
+	
+	def list_data_files(self):
+		if self._single_data_dir:
+			return [os.path.join(self.data_dir,f) for f in os.listdir(self.data_dir) if os.path.isfile(os.path.join(self.data_dir,f))]
+		else:
+			listdirs = []
+			for dd in self.data_dir:
+				listdirs.extend([os.path.join(dd,f) for f in os.listdir(dd) if os.path.isfile(os.path.join(dd,f))])
+			return list(set(listdirs))
 	
 	def iter_data(self):
 		if self.experiment=='Luminancia':
 			if self._single_session:
-				data_files = [f for f in os.listdir(self.data_dir) if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1)==self.session]
+				data_files = [f for f in self.list_data_files() if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1)==self.session and f.endswith('.mat')]
 			else:
-				data_files = [f for f in os.listdir(self.data_dir) if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) in self.session]
-			for f in data_files:
-				aux = io.loadmat(os.path.join(self.data_dir,f))
+				data_files = [f for f in self.list_data_files() if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) in self.session and f.endswith('.mat')]
+			sessions = [((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) for f in data_files]
+			for f,session in zip(data_files,sessions):
+				aux = io.loadmat(f)
 				mean_target_lum = aux['trial'][:,1]
 				rt = aux['trial'][:,5]*1e-3 # Convert to seconds
 				performance = aux['trial'][:,7] # 1 for success, 0 for fail
@@ -37,32 +52,34 @@ class SubjectSession:
 					selected_side = np.nan*np.ones_like(rt)
 				if isinstance(self.name,int):
 					data_matrix = np.array([mean_target_lum,rt,performance,confidence,selected_side,
-										self.name*np.ones_like(rt),self.session*np.ones_like(rt)]).squeeze().T
+										self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([mean_target_lum,rt,performance,confidence,selected_side,
-										self.session*np.ones_like(rt)]).squeeze().T
+										session*np.ones_like(rt)]).squeeze().T
 				yield data_matrix
 		elif self.experiment=='2AFC':
 			if self._single_session:
-				data_files = [f for f in os.listdir(self.data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and f.endswith('.txt')]
+				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and f.endswith('.txt')]
 			else:
-				data_files = [f for f in os.listdir(self.data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and f.endswith('.txt')]
-			for f in data_files:
-				selected_side, performance, rt, contraste, confidence, phase, orientation = np.loadtxt(os.path.join(self.data_dir,f), delimiter=' ', unpack=True)
+				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and f.endswith('.txt')]
+			sessions = [int(re.search('(?<=sesion)[0-9]+',f).group()) for f in data_files]
+			for f,session in zip(data_files,sessions):
+				selected_side, performance, rt, contraste, confidence, phase, orientation = np.loadtxt(f, delimiter=' ', unpack=True)
 				if isinstance(self.name,int):
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										orientation,phase,self.name*np.ones_like(rt),self.session*np.ones_like(rt)]).squeeze().T
+										orientation,phase,self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										orientation,phase,self.session*np.ones_like(rt)]).squeeze().T
+										orientation,phase,session*np.ones_like(rt)]).squeeze().T
 				yield data_matrix
 		elif self.experiment=='Auditivo':
 			if self._single_session:
-				data_files = [f for f in os.listdir(self.data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and not f.endswith('quest.mat')]
+				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
 			else:
-				data_files = [f for f in os.listdir(self.data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and not f.endswith('quest.mat')]
-			for f in data_files:
-				aux = io.loadmat(os.path.join(self.data_dir,f))
+				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
+			sessions = [int(re.search('(?<=sesion)[0-9]+',f).group()) for f in data_files]
+			for f,session in zip(data_files,sessions):
+				aux = io.loadmat(f)
 				contraste = aux['QQ']
 				rt = aux['RT']
 				performance = aux['correct']
@@ -74,10 +91,10 @@ class SubjectSession:
 				target_location = aux['orden']
 				if isinstance(self.name,int):
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										confidence_rt,target_location,self.name*np.ones_like(rt),self.session*np.ones_like(rt)]).squeeze().T
+										confidence_rt,target_location,self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										confidence_rt,target_location,self.session*np.ones_like(rt)]).squeeze().T
+										confidence_rt,target_location,session*np.ones_like(rt)]).squeeze().T
 				yield data_matrix
 	
 	def load_data(self):
@@ -112,13 +129,14 @@ class SubjectSession:
 	
 	def __getstate__(self):
 		return {'name':self.name,'session':self.session,'_single_session':self._single_session,\
-				'experiment':self.experiment,'data_dir':self.data_dir}
+				'experiment':self.experiment,'_single_data_dir':self._single_data_dir,'data_dir':self.data_dir}
 	
 	def __setstate__(self,state):
 		self.name = state['name']
 		self.session = state['session']
 		self._single_session = state['_single_session']
 		self.experiment = state['experiment']
+		self._single_data_dir = state['_single_data_dir']
 		self.data_dir = state['data_dir']
 
 def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_session=None):
@@ -227,6 +245,58 @@ def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by
 		output[experiment] = merged_data
 	return output
 
+def merge_subjectSessions(subjectSessions,criteria='all'):
+	criteria = criteria.lower()
+	if criteria=='all':
+		data_dirs = {}
+		sessions = {}
+		for ss in subjectSessions:
+			exp = ss.experiment
+			if exp not in data_dirs.keys():
+				data_dirs[exp] = []
+			if ss._single_data_dir:
+				data_dirs[exp].append(ss.data_dir)
+			else:
+				data_dirs[exp].extend(ss.data_dir)
+			if exp not in sessions.keys():
+				sessions[exp] = []
+			if ss._single_session:
+				sessions[exp].append(ss.session)
+			else:
+				sessions[exp].extend(ss.session)
+		output = [SubjectSession('all',sessions[exp],exp,data_dirs[exp]) for exp in data_dirs.keys()]
+	elif criteria=='all_sessions':
+		sessions = {}
+		for ss in subjectSessions:
+			exp = str(ss.experiment)
+			name = str(ss.name)
+			data_dir = ss.data_dir
+			key = exp+'_'+name
+			if key not in sessions.keys():
+				sessions[key] = {'data':[],'name':name,'experiment':exp,'data_dir':data_dir}
+			if ss._single_session:
+				sessions[key]['data'].append(ss.session)
+			else:
+				sessions[key]['data'].extend(ss.session)
+		output = [SubjectSession(sessions[key]['name'],sessions[key]['data'],sessions[key]['experiment'],sessions[key]['data_dir']) for key in sessions.keys()]
+	elif criteria=='all_subjects':
+		data_dirs = {}
+		for ss in subjectSessions:
+			exp = str(ss.experiment)
+			session = ss.session
+			data_dir = ss.data_dir
+			key = exp+'_'+str(session)
+			if key not in data_dirs.keys():
+				data_dirs[key] = {'data':[],'session':session,'experiment':exp}
+			if ss._single_data_dir:
+				data_dirs[key]['data'].append(ss.data_dir)
+			else:
+				data_dirs[key]['data'].extend(ss.data_dir)
+		output = [SubjectSession('all',data_dirs[key]['session'],data_dirs[key]['experiment'],data_dirs[key]['data']) for key in data_dirs.keys()]
+	else:
+		ValueError('Unknown merge criteria "{0}"'.format(criteria))
+	return output
+
 def increase_histogram_count(d,n):
 	"""
 	(out,indexes)=increase_histogram_count(d,n)
@@ -282,13 +352,45 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 	subjects = filter_subjects_list(subjects,'all_sessions_by_experiment')
 	print str(len(subjects))+' filtered subjectSessions with all_sessions_by_experiment criteria'
 	
-	experiments_data = merge_data_by_experiment(filtered_subjects,return_column_headers=True)
+	merged_all = merge_subjectSessions(subjects,criteria='all')
+	print str(len(merged_all))+' merged subjectSessions with criteria all'
+	merged_all_sessions = merge_subjectSessions(subjects,criteria='all_sessions')
+	print str(len(merged_all_sessions))+' merged subjectSessions with criteria all_sessions'
+	merged_all_subjects = merge_subjectSessions(subjects,criteria='all_subjects')
+	print str(len(merged_all_subjects))+' merged subjectSessions with criteria all_subjects'
+	
+	experiments_data = merge_data_by_experiment(subjects,return_column_headers=True)
+	
 	print 'Successfully merged all subjects data in '+str(len([k for k in experiments_data.keys() if k!='headers']))+' experiments'
 	headers = experiments_data['headers']
 	for key in experiments_data.keys():
 		if key=='headers':
 			continue
 		data = experiments_data[key]
+		matches = True
+		for test_subj in [t for t in merged_all if t.experiment==key]:
+			testdata = test_subj.load_data()
+			test = testdata.shape[0]==data.shape[0]
+			if not test:
+				print testdata.shape,data.shape
+			matches = matches and test
+		print 'Merged all matches shape? {0}'.format('Yes' if matches else 'No')
+		matches = True
+		for test_subj in [t for t in merged_all_sessions if t.experiment==key]:
+			testdata = test_subj.load_data()
+			test = testdata.shape[0]==data[data[:,-2]==int(test_subj.name)].shape[0]
+			if not test:
+				print test_subj.name,testdata.shape,data[data[:,-2]==test_subj.name].shape
+			matches = matches and test
+		print 'Merged all sessions matches shape? {0}'.format('Yes' if matches else 'No')
+		matches = True
+		for test_subj in [t for t in merged_all_subjects if t.experiment==key]:
+			testdata = test_subj.load_data()
+			test = testdata.shape[0]==data[data[:,-1]==test_subj.session].shape[0]
+			if not test:
+				print testdata.shape,data[data[:,-1]==test_subj.session].shape
+			matches = matches and test
+		print 'Merged all subjects matches shape? {0}'.format('Yes' if matches else 'No')
 		print '{0}: {1} trials, {2} sessions, {3} subjects'.format(key,data.shape[0],len(np.unique(data[:,-1])),len(np.unique(data[:,-2])))
 		if loaded_plot_libs:
 			inds = data[:,1]<14.

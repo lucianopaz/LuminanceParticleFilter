@@ -1,6 +1,6 @@
 from __future__ import division
 
-import enum, os, sys, math, scipy, pickle
+import enum, os, sys, math, scipy, pickle, warnings, json
 import numpy as np
 from utils import normpdf
 
@@ -79,22 +79,75 @@ if np.__version__<'1.8':
 		return out
 	np.nanmean = np18_nanmean
 
+# Static functions
+def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
+	"""
+	new_gs = add_dead_time(gs,dt,dead_time_sigma,mode='full')
+	"""
+	if dead_time_sigma<=0.:
+		if dead_time_sigma==0:
+			dead_time_shift = math.floor(dead_time/dt)
+			output = np.zeros_like(gs)
+			if dead_time_shift==0:
+				output[:] = gs
+			else:
+				output[:,dead_time_shift:] = gs[:,:-dead_time_shift]
+			return output
+		else:
+			raise ValueError("dead_time_sigma cannot take negative values. User supplied dead_time_sigma={0}".format(dead_time_sigma))
+	gs = np.array(gs)
+	conv_window = np.linspace(-dead_time_sigma*6,dead_time_sigma*6,int(math.ceil(dead_time_sigma*12/dt))+1)
+	conv_window_size = conv_window.shape[0]
+	conv_val = np.zeros_like(conv_window)
+	conv_val[conv_window_size//2:] = normpdf(conv_window[conv_window_size//2:],0,dead_time_sigma)
+	conv_val/=(np.sum(conv_val)*dt)
+	cgs = []
+	for g in gs:
+		cgs.append(np.convolve(g,conv_val,mode=mode))
+	cgs = np.array(cgs)
+	a = int(0.5*(cgs.shape[1]-gs.shape[1]))
+	if a==0:
+		if cgs.shape[1]==gs.shape[1]:
+			ret = cgs[:]
+		else:
+			ret = cgs[:,:-1]
+	elif a==0.5*(cgs.shape[1]-gs.shape[1]):
+		ret = cgs[:,a:-a]
+	else:
+		ret = cgs[:,a:-a-1]
+	dead_time_shift = math.floor(dead_time/dt)
+	output = np.zeros_like(ret)
+	if dead_time_shift==0:
+		output = ret
+	else:
+		output[:,dead_time_shift:] = ret[:,:-dead_time_shift]
+	normalization = np.sum(output)*dt
+	return tuple(output/normalization)
+
+def load_Fitter_from_file(fname):
+	f = open(fname,'r')
+	fitter = pickle.load(f)
+	f.close()
+	return fitter
+
 class Fitter:
 	# Initer
-	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',decisionPolicyArgs=(),\
+	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=14.):
-		self.experiment = subjectSession.experiment
-		self.rt_cutoff = rt_cutoff
-		self.set_time_units(time_units)
+		self.set_experiment(subjectSession.experiment)
+		self.rt_cutoff = float(rt_cutoff)
+		self.set_time_units(str(time_units))
 		self.set_subjectSession_data(subjectSession)
-		self.method = method
-		self.optimizer = optimizer
-		self.suffix = suffix
+		self.method = str(method)
+		self.optimizer = str(optimizer)
+		self.suffix = str(suffix)
 		if decisionPolicyArgs or decisionPolicyKwArgs:
 			if 'dt' not in decisionPolicyKwArgs:
 				decisionPolicyKwArgs['dt'] = self._ISI
 			if 'model_var' not in decisionPolicyKwArgs:
 				decisionPolicyKwArgs['model_var'] = self._model_var
+			if 'internal_var' not in decisionPolicyKwArgs:
+				decisionPolicyKwArgs['internal_var'] = self._internal_var
 			if 'T' not in decisionPolicyKwArgs:
 				decisionPolicyKwArgs['T'] = self._T
 			if 'iti' not in decisionPolicyKwArgs:
@@ -103,11 +156,15 @@ class Fitter:
 				decisionPolicyKwArgs['tp'] = self._tp
 			if 'stim_duration' not in decisionPolicyKwArgs:
 				decisionPolicyKwArgs['stim_duration'] = self._stim_duration
-		self._dp_arguments = {'decisionPolicyArgs':decisionPolicyArgs,
-							  'decisionPolicyKwArgs':decisionPolicyKwArgs}
-		self.dp = ct.decisionPolicy(*decisionPolicyArgs,**decisionPolicyKwArgs)
+		self._decisionPolicyKwArgs = decisionPolicyKwArgs
+		self.dp = ct.decisionPolicy(**decisionPolicyKwArgs)
 	
 	# Setters
+	def set_experiment(self,experiment):
+		self.experiment = str(experiment)
+		if self.experiment not in ['Luminancia']:#,'Auditivo','2AFC']:
+			raise ValueError('Fitter class does not support the experiment "{0}"'.format(experiment))
+	
 	def set_subjectSession_data(self,subjectSession):
 		self._subjectSession_state = subjectSession.__getstate__()
 		dat = subjectSession.load_data()
@@ -115,7 +172,7 @@ class Fitter:
 		self.rt = dat[:,1]
 		if self.time_units=='milliseconds':
 			self.rt*=1e3
-		valid_trials = rt<self.rt_cutoff
+		valid_trials = self.rt<self.rt_cutoff
 		self.rt = self.rt[valid_trials]
 		self.max_RT = np.max(self.rt)
 		dat = dat[valid_trials]
@@ -128,17 +185,17 @@ class Fitter:
 		self.confidence = dat[:,3]
 		self.mu,self.mu_indeces,count = np.unique(self.contrast/self._ISI,return_inverse=True,return_counts=True)
 		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
-		if mu[0]==0:
-			mus = np.concatenate((-mu[-1:0:-1],mu))
+		if self.mu[0]==0:
+			mus = np.concatenate((-self.mu[-1:0:-1],self.mu))
 			p = np.concatenate((self.mu_prob[-1:0:-1],self.mu_prob))
 			p[mus!=0]*=0.5
 		else:
-			mus = np.concatenate((-mu[::-1],mu))
+			mus = np.concatenate((-self.mu[::-1],self.mu))
 			p = np.concatenate((self.mu_prob[::-1],self.mu_prob))*0.5
 		
 		self._prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 	
-	def set_time_units(time_units='seconds'):
+	def set_time_units(self,time_units='seconds'):
 		if time_units not in ('seconds','milliseconds'):
 			raise ValueError("Invalid time units '{0}'. Available units are seconds and milliseconds".format(units))
 		self.time_units = time_units
@@ -158,6 +215,27 @@ class Fitter:
 			self._model_var = 50./self._ISI
 			self._internal_var = 0.
 	
+	def __setstate__(self,state):
+		self.set_experiment(state['experiment'])
+		self.set_time_units = state['time_units']
+		self.rt_cutoff = state['rt_cutoff']
+		self.set_subjectSession_data(SubjectSession(name=state['subjectSession_state']['name'],
+													session=state['subjectSession_state']['session'],
+													experiment=self.experiment,
+													data_dir=state['subjectSession_state']['data_dir']))
+		self.method = state['method']
+		self.optimizer = state['optimizer']
+		self.suffix = state['suffix']
+		self._decisionPolicyKwArgs = state['decisionPolicyKwArgs']
+		self.dp = ct.decisionPolicy(**decisionPolicyKwArgs)
+		
+		if 'fit_arguments' in state.keys():
+			self.fixed_parameters = state['fit_arguments']['fixed_parameters']
+			self.fitted_parameters = state['fit_arguments']['fitted_parameters']
+			self._fit_arguments = state['fit_arguments']
+		if 'fit_output' in state.keys():
+			self._fit_output = state['fit_output']
+	
 	# Getters
 	def get_parameters_dict(self,x):
 		parameters = self.fixed_parameters.copy()
@@ -165,21 +243,53 @@ class Fitter:
 			parameters[key] = x[index]
 		return parameters
 	
+	def get_parameters_dict_from_fit_output(self,fit_output=None):
+		if fit_output is None:
+			fit_output = self._fit_output
+		parameters = self.fixed_parameters.copy()
+		parameters.update(fit_output[0])
+		return parameters
+	
+	def __getstate__(self):
+		state = {'experiment':self.experiment,
+				 'time_units':self.time_units,
+				 'rt_cutoff':self.rt_cutoff,
+				 'subjectSession_state':self._subjectSession_state,
+				 'method':self.method,
+				 'optimizer':self.optimizer,
+				 'suffix':self.suffix,
+				 'decisionPolicyKwArgs':self._decisionPolicyKwArgs}
+		if hasattr(self,'_fit_arguments'):
+			state['fit_arguments'] = self._fit_arguments
+		if hasattr(self,'_fit_output'):
+			state['fit_output'] = self._fit_output
+	
 	# Defaults
 	def default_fixed_parameters(self):
-		return {}
+		if self.experiment=='Luminance':
+			return {'internal_var':0.}
+		else:
+			return {}
 	
 	def default_start_point(self):
 		if self.time_units=='seconds':
-			return = [0.2,0.1,0.5,0.1,self._internal_var,0.5,np.inf]
+			return {'cost':0.2,'dead_time':0.1,'dead_time_sigma':0.5,
+					'phase_out_prob':0.1,'internal_var':self._internal_var,
+					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
 		else:
-			return = [0.0002,100,500,0.1,self._internal_var,0.5,np.inf]
+			return {'cost':0.0002,'dead_time':100.,'dead_time_sigma':500.,
+					'phase_out_prob':0.1,'internal_var':self._internal_var,
+					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
 	
 	def default_bounds(self):
 		if self.time_units=='seconds':
-			bounds = np.array([np.array([0.,0.,0.,0.,0.]),np.array([10.,0.4,3.,1.,self._internal_var*50,1.])])
+			return {'cost':[0.,10],'dead_time':[0.,0.4],'dead_time_sigma':[0.,3.],
+					'phase_out_prob':[0.,1.],'internal_var':[self._internal_var*1e-6,self._internal_var*1e3],
+					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
 		else:
-			bounds = np.array([np.array([0.,0.,0.,0.,0.]),np.array([0.01,400,3000,self._internal_var*1e-6,1.])])
+			return {'cost':[0.,0.01],'dead_time':[0.,400.],'dead_time_sigma':[0.,3000.],
+					'phase_out_prob':[0.,1.],'internal_var':[self._internal_var*1e-6,self._internal_var*1e3],
+					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
 	
 	def default_optimizer_kwargs(self):
 		if self.optimizer=='cma':
@@ -188,24 +298,31 @@ class Fitter:
 			return {'disp': False, 'maxiter': 1000, 'maxfev': 10000, 'repetitions': 10}
 	
 	# Main fit method
-	def fit(self,fixed_parameters=None,start_point=None,bounds=None,optimizer_kwargs=None):
-		if fixed_parameters is None:
-			fixed_parameters = self.default_fixed_parameters()
-		if start_point is None:
-			start_point = self.default_start_point()
-		if bounds is None:
-			bounds = self.default_bounds()
-		start_point,bounds = self.sanitize_x0_bounds(fixed_parameters,start_point,bounds)
-		start_point = start_point[self.method]
-		bounds = bounds[self.method]
-		
-		default_optimizer_kwargs = self.default_optimizer_kwargs()
-		if optimizer_kwargs:
-			for key in optimizer_kwargs.keys():
-				default_optimizer_kwargs[key] = optimizer_kwargs[key]
-		optimizer_kwargs = default_optimizer_kwargs
-		self._fit_arguments = {'fitted_args':fitted_args,'start_point':start_point,\
-							   'bounds':bounds,'optimizer_kwargs':optimizer_kwargs}
+	def fit(self,fixed_parameters=None,start_point=None,bounds=None,optimizer_kwargs=None,fit_arguments=None):
+		if fit_arguments is None:
+			if fixed_parameters is None:
+				fixed_parameters = self.default_fixed_parameters()
+			default_start_point = self.default_start_point()
+			if not start_point is None:
+				self.default_start_point.update(start_point)
+			default_bounds = self.default_bounds()
+			if not bounds is None:
+				default_bounds.update(bounds)
+			start_point,bounds = self.sanitize_x0_bounds(fixed_parameters,start_point,bounds)
+			
+			default_optimizer_kwargs = self.default_optimizer_kwargs()
+			if optimizer_kwargs:
+				for key in optimizer_kwargs.keys():
+					default_optimizer_kwargs[key] = optimizer_kwargs[key]
+			optimizer_kwargs = default_optimizer_kwargs
+			self._fit_arguments = {'fixed_parameters':self.fixed_parameters,'fitted_parameters':self.fitted_parameters,\
+								   'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs}
+		else:
+			start_point = fit_arguments['start_point']
+			bounds = fit_arguments['bounds']
+			optimizer_kwargs = fit_arguments['optimizer_kwargs']
+			self.fitted_parameters = fit_arguments['fitted_parameters']
+			self._fit_arguments = fit_arguments
 		
 		minimizer = self.init_minimizer(start_point,bounds,optimizer_kwargs)
 		if self.experiment=='Luminance':
@@ -241,75 +358,68 @@ class Fitter:
 		return self._fit_output
 	
 	# Savers
-	def save_fit_output(self):
-		detailed_output = {'experiment':self.experiment,\
-						   'time_units':self.time_units,\
-						   'rt_cutoff':self.rt_cutoff,\
-						   'subjectSession_state':self:_subjectSession_state,\
-						   'method':self.method,\
-						   'optimizer':self.optimizer,\
-						   'decisionPolicyArgs':self._dp_arguments['decisionPolicyArgs'],\
-						   'decisionPolicyKwArgs':self._dp_arguments['decisionPolicyKwArgs'],\
-						   'fit_arguments':self._fit_arguments,\
-						   'fit_output':self._fit_output}
+	def save_fit_output(self,fit_output):
+		state = self.__getstate__()
+		if 'fit_output' not in state:
+			raise ValueError('The Fitter instance has not performed any fit and still has no _fit_output attribute set')
 		session = self._subjectSession_state['session']
 		if isinstance(session,int):
 			session = str(session)
 		else:
 			session = '-'.join([str(s) for s in session])
-		fname = 'fits/{experiment}_fit_{method}_subject_{name}_session_{session}_{suffix}.pkl'.format(
+		fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{suffix}.pkl'.format(
 				experiment=self.experiment,method=self.method,name=self._subjectSession_state['name'],
 				session=session,suffix=self.suffix)
 		f = open(fname,'w')
-		pickle.dump(f,detailed_output,pickle.HIGHEST_PROTOCOL)
+		pickle.dump(f,state,pickle.HIGHEST_PROTOCOL)
 		f.close()
 	
 	# Sanitizers
 	def sanitize_x0_bounds(self,fixed_parameters,start_point,bounds):
-		fittable_parameters = ['cost','dead_time','dead_time_sigma','phase_out_prob','model_var','high_confidence_threshold','confidence_map_slope']
+		fittable_parameters = ['cost','dead_time','dead_time_sigma','phase_out_prob','internal_var','high_confidence_threshold','confidence_map_slope']
 		confidence_parameters = ['high_confidence_threshold','confidence_map_slope']
-		if len(start_point)!=len(bounds[0]) or len(bounds[0])!=len(bounds[1]):
-			raise ValueError('Supplied fixed_parameters must have the same number of columns as bounds')
-		if (len(start_point)+len(fixed_parameters.keys()))!=len(fittable_parameters):
-			raise ValueError('Inconsistent number of fixed_parameters and start_points supplied')
 		self.fixed_parameters = fixed_parameters
-		sane_index = 0
-		self.fitted_parameters = []
+		fitted_parameters = []
 		temp_x0 = []
 		temp_b = [[],[]]
 		for par in fittable_parameters:
 			if par not in fixed_parameters.keys():
-				self.fitted_parameters.append(par)
-				temp_x0.append(start_point[sane_index])
-				temp_b[0].append(bounds[0])
-				temp_b[1].append(bounds[1])
-				sane_index+=1
-		full_confidence_method_sp = np.array(temp_x0[:])
-		full_confidence_method_b = np.array([np.array(temp_b[0]),np.array(temp_b[1])])
-		full_method_sp = []
-		full_method_b = [[],[]]
-		confidence_only_method_sp = []
-		confidence_only_method_b = [[],[]]
-		for index,par in self.fitted_parameters:
+				fitted_parameters.append(par)
+				temp_x0.append(start_point[par])
+				temp_b[0].append(bounds[par][0])
+				temp_b[1].append(bounds[par][1])
+		method_fitted_parameters = {'full_confidence':fitted_parameters,'full':[],'confidence_only':[]}
+		method_fixed_parameters = {'full_confidence':fixed_parameters.copy(),'full':fixed_parameters.copy(),'confidence_only':fixed_parameters.copy()}
+		method_sp = {'full_confidence':np.array(temp_x0[:]),'full':[],'confidence_only':[]}
+		method_b = {'full_confidence':np.array([np.array(temp_b[0]),np.array(temp_b[1])]),'full':[[],[]],'confidence_only':[[],[]]}
+		for index,par in fitted_parameters:
 			if par not in confidence_parameters:
-				full_method_sp.append(temp_x0[index])
-				full_method_b[0].append(temp_b[0][index])
-				full_method_b[1].append(temp_b[1][index])
+				method_fitted_parameters['full'].append(par)
+				method_fixed_parameters['confidence_only'][par] = temp_x0[index]
+				method_sp['full'].append(temp_x0[index])
+				method_b['full'][0].append(temp_b[0][index])
+				method_b['full'][1].append(temp_b[1][index])
 			else:
-				confidence_only_method_sp.append(temp_x0[index])
-				confidence_only_method_b[0].append(temp_b[0][index])
-				confidence_only_method_b[1].append(temp_b[1][index])
-		full_method_sp = np.array(full_method_sp)
-		full_method_b = np.array(full_method_b)
-		confidence_only_method_sp = np.array(confidence_only_method_sp)
-		confidence_only_method_b = np.array(confidence_only_method_b)
-		if self.optimizer!='cma':
-			full_method_b = [(lb,ub) for lb,ub in zip(full_method_b[0],full_method_b[1])]
-			confidence_only_method_b = [(lb,ub) for lb,ub in zip(confidence_only_method_b[0],confidence_only_method_b[1])]
-			full_confidence_method_b = [(lb,ub) for lb,ub in zip(full_confidence_method_b[0],full_confidence_method_b[1])]
+				method_fitted_parameters['confidence_only'].append(par)
+				method_fixed_parameters['full'][par] = temp_x0[index]
+				method_sp['confidence_only'].append(temp_x0[index])
+				method_b['confidence_only'][0].append(temp_b[0][index])
+				method_b['confidence_only'][1].append(temp_b[1][index])
+		method_sp['full'] = np.array(method_sp['full'])
+		method_b['full'] = np.array(method_sp['full'])
+		method_sp['confidence_only'] = np.array(method_b['confidence_only'])
+		method_b['confidence_only'] = np.array(method_b['confidence_only'])
 		
-		sanitized_start_point = {'full':full_method_sp,'full_confidence':full_confidence_method_sp,'confidence_only':confidence_only_method_sp}
-		sanitized_bounds = {'full':full_method_b,'full_confidence':full_confidence_method_b,'confidence_only':confidence_only_method_b}
+		sanitized_start_point = method_sp[self.method]
+		sanitized_bounds = method_b[self.method]
+		self.fitted_parameters = method_fitted_parameters[self.method]
+		self.fixed_parameters = method_fixed_parameters[self.method]
+		if len(fitted_parameters)==1 and self.optimizer=='cma':
+			warnings.warn('CMA is unsuited for optimization of single dimensional parameter spaces. Optimizer was changed to Nelder-Mead')
+			self.optimizer = 'Nelder-Mead'
+		
+		if self.optimizer!='cma':
+			sanitized_bounds = [(lb,ub) for lb,ub in zip(sanitized_bounds[0],sanitized_bounds[1])]
 		return (sanitized_start_point,sanitized_bounds)
 	
 	def sanitize_fmin_output(self,output,package='cma'):
@@ -322,7 +432,7 @@ class Fitter:
 			fitted_x = {}
 			for index,par in enumerate(self.fitted_parameters):
 				fitted_x[par] = output['xbest'][index]
-			return (fitted_x,output['funbest'],output.nfev,output.nfev,output.nit,output['xmean'],output['xstd'])
+			return (fitted_x,output['funbest'],output['nfev'],output['nfev'],output['nit'],output['xmean'],output['xstd'])
 		else:
 			raise ValueError('Unknown package used for optimization. Unable to sanitize the fmin output')
 	
@@ -337,21 +447,25 @@ class Fitter:
 				restarts = optimizer_kwargs['restarts']
 			else:
 				restarts = 1
-			return lambda x: self.sanitize_fmin_output(cma.fim(x,start_point,1./3.,options,restarts=restarts),package='cma')
+			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts),package='cma')
+			minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
 		else:
 			repetitions = optimizer_kwargs['repetitions']
 			_start_points = [start_point]
 			_start_points.append(np.random.rand(repetitions-1,len(start_point))*(bounds[1]-bounds[0])+bounds[0])
 			start_point_generator = iter(_start_points)
-			return lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs))
+			minimizer = lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='scipy')
+			minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
+		
+		return minimizer
 	
-	def repeat_minimize(self,merit,start_point_generator,bounds=bounds,optimizer_kwargs):
+	def repeat_minimize(self,merit,start_point_generator,bounds,optimizer_kwargs):
 		output = {'xs':[],'funs':[],'nfev':0,'nit':0,'xbest':None,'funbest':None,'xmean':None,'xstd':None,'funmean':None,'funstd':None}
 		repetitions = 0
 		for start_point in start_point_generator:
 			print bounds,start_point
 			repetitions+=1
-			res = scipy.optimize.minimize(merit,start_point, method=optimizer,bounds=bounds,options=options)
+			res = scipy.optimize.minimize(merit,start_point, method=optimizer,bounds=bounds,options=optimizer_kwargs)
 			print 'round {0} ended. Result: '.format(repetitions),res.fun,res.x
 			output['xs'].append(res.x)
 			output['funs'].append(res.fun)
@@ -467,8 +581,6 @@ class Fitter:
 					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g2l,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
-	
-#################################################################################################
 	# 2AFC experiment
 	def afc_full_merit(self,parameters):
 		return np.nan
@@ -488,352 +600,157 @@ class Fitter:
 	
 	def aud_full_confidence_merit(self,parameters):
 		return np.nan
-
-# Global functions
-def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
-	"""
-	new_gs = add_dead_time(gs,dt,dead_time_sigma,mode='full')
-	"""
-	if dead_time_sigma<=0.:
-		if dead_time_sigma==0:
-			dead_time_shift = math.floor(dead_time/dt)
-			output = np.zeros_like(gs)
-			if dead_time_shift==0:
-				output[:] = gs
+	
+	# Theoretical predictions
+	def theoretical_rt_distribution(self,fit_output=None,return_confidence=True,include_t0=True):
+		parameters = self.get_parameters_dict(fit_output)
+		rt,dec_gs = self.decision_rt_distribution(parameters,return_gs=True,include_t0=include_t0)
+		if return_confidence:
+			dec_conf = self.confidence_rt_distribution(parameters,dec_gs,include_t0=include_t0)
+			for key in rt.keys():
+				rt[key].update(dec_conf[key])
+		return rt
+	
+	def decision_rt_distribution(self,parameters,return_gs=False,include_t0=True):
+		if self.experiment=='Luminancia':
+			if include_t0:
+				rt = {'full':{'all':np.zeros((2,self.dp.t.shape[0]))}}
+				gs = {'full':{'all':np.zeros((2,self.dp.t.shape[0]))}}
+				phased_out_rt = np.zeros_like(self.dp.t)
 			else:
-				output[:,dead_time_shift:] = gs[:,:-dead_time_shift]
-			return output
+				rt = {'full':{'all':np.zeros((2,self.dp.t.shape[0]-1))}}
+				gs = {'full':{'all':np.zeros((2,self.dp.t.shape[0]-1))}}
+				phased_out_rt = np.zeros_like(self.dp.t)[1:]
+			self.dp.internal_var = parameters['internal_var']
+			self.dp.set_cost(parameters['cost'])
+			_max_RT = self.dp.t[np.ceil(self.max_RT/self.dp.dt)]
+			if include_t0:
+				phased_out_rt[self.dp.t<_max_RT] = 1./(_max_RT)
+			else:
+				phased_out_rt[self.dp.t[1:]<_max_RT] = 1./(_max_RT)
+			xub,xlb = self.dp.xbounds()
+			for index,drift in enumerate(self.mu):
+				g = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if not include_t0:
+					g = g[:,1:]
+				g1,g2 = add_dead_time(g,self.dp.dt,parameters['dead_time'],parameters['dead_time_sigma'])
+				g1 = g1*(1-parameters['phase_out_prob'])+0.5*parameters['phase_out_prob']*phased_out_rt
+				g2 = g2*(1-parameters['phase_out_prob'])+0.5*parameters['phase_out_prob']*phased_out_rt
+				rt[drift] = {}
+				rt[drift]['all'] = np.array([g1,g2])
+				rt['full']['all']+=rt[drift]['all']*self.mu_prob[index]
+				gs[drift] = {}
+				gs[drift]['all'] = np.array(g)
+				gs['full']['all']+=gs[drift]['all']*self.mu_prob[index]
+			output = (rt,)
+			if return_gs:
+				output+=(gs,)
 		else:
-			raise ValueError("dead_time_sigma cannot take negative values. User supplied dead_time_sigma={0}".format(dead_time_sigma))
-	gs = np.array(gs)
-	conv_window = np.linspace(-dead_time_sigma*6,dead_time_sigma*6,int(math.ceil(dead_time_sigma*12/dt))+1)
-	conv_window_size = conv_window.shape[0]
-	conv_val = np.zeros_like(conv_window)
-	conv_val[conv_window_size//2:] = normpdf(conv_window[conv_window_size//2:],0,dead_time_sigma)
-	conv_val/=(np.sum(conv_val)*dt)
-	cgs = []
-	for g in gs:
-		cgs.append(np.convolve(g,conv_val,mode=mode))
-	cgs = np.array(cgs)
-	a = int(0.5*(cgs.shape[1]-gs.shape[1]))
-	if a==0:
-		if cgs.shape[1]==gs.shape[1]:
-			ret = cgs[:]
+			raise ValueError('Decision RT distribution not implemented for experiment "{0}"'.format(self.experiment))
+		return output
+	
+	def confidence_rt_distribution(self,parameters,dec_gs,include_t0=True):
+		if self.experiment=='Luminancia':
+			if include_t0:
+				rt = {'full':{'high':np.zeros((2,self.dp.t.shape[0])),'low':np.zeros((2,self.dp.t.shape[0]))}}
+				phased_out_rt = np.zeros_like(self.dp.t)
+			else:
+				rt = {'full':{'high':np.zeros((2,self.dp.t.shape[0]-1)),'low':np.zeros((2,self.dp.t.shape[0]-1))}}
+				phased_out_rt = np.zeros_like(self.dp.t)[1:]
+			self.dp.set_cost(cost)
+			_max_RT = self.dp.t[np.ceil(max_RT/self.dp.dt)]
+			
+			phigh,plow = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+			phased_out_rt[self.dp.t<_max_RT] = 1./(_max_RT)
+			
+			for index,drift in enumerate(mu):
+				g = dec_gs[drift]['all']
+				if include_t0:
+					gh=phigh*g
+					gl=plow*g
+				else:
+					gh=phigh[:,1:]*g
+					gl=plow[:,1:]*g
+				g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((gh,gl)),self.dp.dt,parameters['dead_time'],parameters['dead_time_sigma'])
+				g1h = g1h*(1-parameters['phase_out_prob'])+0.25*parameters['phase_out_prob']*phased_out_rt
+				g2h = g2h*(1-parameters['phase_out_prob'])+0.25*parameters['phase_out_prob']*phased_out_rt
+				g1l = g1l*(1-parameters['phase_out_prob'])+0.25*parameters['phase_out_prob']*phased_out_rt
+				g2l = g2l*(1-parameters['phase_out_prob'])+0.25*parameters['phase_out_prob']*phased_out_rt
+				rt[drift] = {}
+				rt[drift]['high'] = np.array([g1h,g2h])
+				rt[drift]['low'] = np.array([g1l,g2l])
+				rt['full']['high']+= rt[drift]['high']*mu_prob[index]
+				rt['full']['low']+= rt[drift]['low']*mu_prob[index]
 		else:
-			ret = cgs[:,:-1]
-	elif a==0.5*(cgs.shape[1]-gs.shape[1]):
-		ret = cgs[:,a:-a]
-	else:
-		ret = cgs[:,a:-a-1]
-	dead_time_shift = math.floor(dead_time/dt)
-	output = np.zeros_like(ret)
-	if dead_time_shift==0:
-		output = ret
-	else:
-		output[:,dead_time_shift:] = ret[:,:-dead_time_shift]
-	normalization = np.sum(output)*dt
-	return tuple(output/normalization)
-
-#~ def theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params=None,include_t0=True):
-	#~ rt,dec_gs = decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,return_gs=True,include_t0=include_t0)
-	#~ if confidence_params:
-		#~ dec_conf = confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params,include_t0=include_t0)
-		#~ for key in rt.keys():
-			#~ rt[key].update(dec_conf[key])
-	#~ return rt
-#~ 
-#~ def decision_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,return_gs=False,include_t0=True):
-	#~ if include_t0:
-		#~ rt = {'full':{'all':np.zeros((2,m.t.shape[0]))}}
-		#~ gs = {'full':{'all':np.zeros((2,m.t.shape[0]))}}
-		#~ phased_out_rt = np.zeros_like(m.t)
-	#~ else:
-		#~ rt = {'full':{'all':np.zeros((2,m.t.shape[0]-1))}}
-		#~ gs = {'full':{'all':np.zeros((2,m.t.shape[0]-1))}}
-		#~ phased_out_rt = np.zeros_like(m.t)[1:]
-	#~ m.set_cost(cost)
-	#~ _max_RT = m.t[np.ceil(max_RT/m.dt)]
-	#~ _dead_time = m.t[np.floor(dead_time/m.dt)]
-	#~ if include_t0:
-		#~ phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
-	#~ else:
-		#~ phased_out_rt[m.t[1:]<_max_RT] = 1./(_max_RT)
-	#~ xub,xlb = m.xbounds()
-	#~ for index,drift in enumerate(mu):
-		#~ g = np.array(m.rt(drift,bounds=(xub,xlb)))
-		#~ if not include_t0:
-			#~ g = g[:,1:]
-		#~ g1,g2 = add_dead_time(g,m.dt,dead_time,dead_time_sigma)
-		#~ g1 = g1*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
-		#~ g2 = g2*(1-phase_out_prob)+0.5*phase_out_prob*phased_out_rt
-		#~ rt[drift] = {}
-		#~ rt[drift]['all'] = np.array([g1,g2])
-		#~ rt['full']['all']+=rt[drift]['all']*mu_prob[index]
-		#~ gs[drift] = {}
-		#~ gs[drift]['all'] = np.array(g)
-		#~ gs['full']['all']+=gs[drift]['all']*mu_prob[index]
-	#~ output = (rt,)
-	#~ if return_gs:
-		#~ output+=(gs,)
-	#~ return output
-#~ 
-#~ def confidence_rt_distribution(dec_gs,cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params,include_t0=True):
-	#~ if include_t0:
-		#~ rt = {'full':{'high':np.zeros((2,m.t.shape[0])),'low':np.zeros((2,m.t.shape[0]))}}
-		#~ phased_out_rt = np.zeros_like(m.t)
-	#~ else:
-		#~ rt = {'full':{'high':np.zeros((2,m.t.shape[0]-1)),'low':np.zeros((2,m.t.shape[0]-1))}}
-		#~ phased_out_rt = np.zeros_like(m.t)[1:]
-	#~ m.set_cost(cost)
-	#~ _max_RT = m.t[np.ceil(max_RT/m.dt)]
-	#~ _dead_time = m.t[np.floor(dead_time/m.dt)]
-	#~ 
-	#~ if time_units=='seconds' and m.dt>1e-3:
-		#~ _dt = 1e-3
-	#~ elif time_units=='milliseconds' and m.dt>1.:
-		#~ _dt = 1.
-	#~ else:
-		#~ _dt = None
-	#~ 
-	#~ if _dt:
-		#~ _nT = int(m.T/_dt)+1
-		#~ _t = np.arange(0.,_nT,dtype=np.float64)*_dt
-		#~ log_odds = m.log_odds()
-		#~ log_odds = np.array([np.interp(_t,m.t,log_odds[0]),np.interp(_t,m.t,log_odds[1])])
-	#~ else:
-		#~ _nT = m.nT
-		#~ log_odds = m.log_odds()
-	#~ 
-	#~ phased_out_rt[m.t<_max_RT] = 1./(_max_RT)
-	#~ phigh = np.ones((2,_nT))
-	#~ phigh[(log_odds.T/np.max(log_odds,axis=1)).T<confidence_params[0]] = 0.
-	#~ if _dt:
-		#~ ratio = int(np.ceil(_nT/m.nT))
-		#~ tail = _nT%m.nT
-		#~ if tail!=0:
-			#~ padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,m.nT-tail),dtype=np.float)),axis=1)
-		#~ else:
-			#~ padded_phigh = phigh
-		#~ padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
-		#~ phigh = np.nanmean(padded_phigh,axis=2)
-	#~ plow = 1.-phigh
-	#~ 
-	#~ for index,drift in enumerate(mu):
-		#~ g = dec_gs[drift]['all']
-		#~ if include_t0:
-			#~ gh=phigh*g
-			#~ gl=plow*g
-		#~ else:
-			#~ gh=phigh[:,1:]*g
-			#~ gl=plow[:,1:]*g
-		#~ g1h,g2h,g1l,g2l = add_dead_time(np.concatenate((gh,gl)),m.dt,dead_time,dead_time_sigma)
-		#~ g1h = g1h*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		#~ g2h = g2h*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		#~ g1l = g1l*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		#~ g2l = g2l*(1-phase_out_prob)+0.25*phase_out_prob*phased_out_rt
-		#~ rt[drift] = {}
-		#~ rt[drift]['high'] = np.array([g1h,g2h])
-		#~ rt[drift]['low'] = np.array([g1l,g2l])
-		#~ rt['full']['high']+= rt[drift]['high']*mu_prob[index]
-		#~ rt['full']['low']+= rt[drift]['low']*mu_prob[index]
-	#~ return rt
-#~ 
-#~ def plot_fit(subject,method='full',save=None,display=True,suffix=''):
-	#~ if not can_plot:
-		#~ warnings.warn('Unable to plot. Matplotlib package could not be loaded')
-		#~ return None
-	#~ if method!='confidence_only':
-		#~ f = open('fits/inference_fit_'+method+'_subject_'+str(subject.id)+suffix+'.pkl','r')
-		#~ out = pickle.load(f)
-		#~ f.close()
-		#~ if isinstance(out,dict):
-			#~ fit_output = out['fit_output']
-			#~ options = out['options']
-			#~ cost = fit_output[0]['cost']
-			#~ dead_time = fit_output[0]['dead_time']
-			#~ dead_time_sigma = fit_output[0]['dead_time_sigma']
-			#~ phase_out_prob = fit_output[0]['phase_out_prob']
-			#~ try:
-				#~ high_conf_thresh = fit_output[0]['high_confidence_threshold']
-			#~ except KeyError:
-				#~ try:
-					#~ f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
-					#~ out2 = pickle.load(f)
-					#~ f.close()
-					#~ if isinstance(out2,dict):
-						#~ out2 = out2['fit_output']
-					#~ high_conf_thresh = out2[0]['high_confidence_threshold']
-				#~ except (IOError,EOFError):
-					#~ hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
-					#~ high_conf_thresh = hand_picked_thresh[subject.id]
-				#~ except Exception as err:
-					#~ high_conf_thresh = out2[0][0]
-		#~ else:
-			#~ fit_output = out
-			#~ options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
-			#~ try:
-				#~ cost = fit_output[0]['cost']
-				#~ dead_time = fit_output[0]['dead_time']
-				#~ dead_time_sigma = fit_output[0]['dead_time_sigma']
-				#~ phase_out_prob = fit_output[0]['phase_out_prob']
-				#~ try:
-					#~ high_conf_thresh = fit_output[0]['high_confidence_threshold']
-				#~ except KeyError:
-					#~ try:
-						#~ f = open("fits/inference_fit_confidence_only_subject_"+str(subject.id)+suffix+".pkl",'r')
-						#~ out2 = pickle.load(f)
-						#~ f.close()
-						#~ high_conf_thresh = out2[0]['high_confidence_threshold']
-					#~ except (IOError,EOFError):
-						#~ hand_picked_thresh = [0.77,0.6,0.79,0.61,0.62,0.90,0.81]
-						#~ high_conf_thresh = hand_picked_thresh[subject.id]
-					#~ except Exception as err:
-						#~ high_conf_thresh = out2[0][0]
-			#~ except IndexError,TypeError:
-				#~ cost = fit_output[0][0]
-				#~ dead_time = fit_output[0][1]
-				#~ dead_time_sigma = fit_output[0][2]
-				#~ phase_out_prob = fit_output[0][3]
-				#~ if 'confidence' in method:
-					#~ high_conf_thresh = fit_output[0][4]
-	#~ else:
-		#~ f = open('fits/inference_fit_full_subject_'+str(subject.id)+suffix+'.pkl','r')
-		#~ out = pickle.load(f)
-		#~ f.close()
-		#~ if isinstance(out,dict):
-			#~ fit_output = out['fit_output']
-			#~ options = out['options']
-			#~ cost = fit_output[0]['cost']
-			#~ dead_time = fit_output[0]['dead_time']
-			#~ dead_time_sigma = fit_output[0]['dead_time_sigma']
-			#~ phase_out_prob = fit_output[0]['phase_out_prob']
-		#~ else:
-			#~ fit_output = out
-			#~ cost = fit_output[0]['cost']
-			#~ dead_time = fit_output[0]['dead_time']
-			#~ dead_time_sigma = fit_output[0]['dead_time_sigma']
-			#~ phase_out_prob = fit_output[0]['phase_out_prob']
-		#~ f = open('fits/inference_fit_confidence_only_subject_'+str(subject.id)+suffix+'.pkl','r')
-		#~ out = pickle.load(f)
-		#~ f.close()
-		#~ if isinstance(out,dict):
-			#~ fit_output = out['fit_output']
-			#~ options = out['options']
-			#~ high_conf_thresh = fit_output[0]['high_confidence_threshold']
-		#~ else:
-			#~ fit_output = out
-			#~ options = {'time_units':'seconds','T':10.,'iti':1.,'tp':0.,'dt':ISI,'reward':1,'penalty':0,'n':101}
-			#~ high_conf_thresh = out[0]['high_confidence_threshold']
-	#~ time_units = options['time_units']
-	#~ set_time_units(options['time_units'])
-	#~ 
-	#~ dat,t,d = subject.load_data()
-	#~ if time_units=='seconds':
-		#~ rt = dat[:,1]*1e-3
-	#~ else:
-		#~ rt = dat[:,1]
-	#~ max_RT = np.max(rt)
-	#~ perf = dat[:,2]
-	#~ conf = dat[:,3]
-	#~ temp,edges = np.histogram(rt,100)
-	#~ 
-	#~ high_hit_rt,temp = np.histogram(rt[np.logical_and(perf==1,conf==2)],edges)
-	#~ low_hit_rt,temp = np.histogram(rt[np.logical_and(perf==1,conf==1)],edges)
-	#~ high_miss_rt,temp = np.histogram(rt[np.logical_and(perf==0,conf==2)],edges)
-	#~ low_miss_rt,temp = np.histogram(rt[np.logical_and(perf==0,conf==1)],edges)
-	#~ 
-	#~ high_hit_rt = high_hit_rt.astype(np.float64)
-	#~ low_hit_rt = low_hit_rt.astype(np.float64)
-	#~ high_miss_rt = high_miss_rt.astype(np.float64)
-	#~ low_miss_rt = low_miss_rt.astype(np.float64)
-	#~ 
-	#~ hit_rt = high_hit_rt+low_hit_rt
-	#~ miss_rt = high_miss_rt+low_miss_rt
-	#~ 
-	#~ xh = np.array([0.5*(x+y) for x,y in zip(edges[1:],edges[:-1])])
-	#~ 
-	#~ normalization = np.sum(hit_rt+miss_rt)*(xh[1]-xh[0])
-	#~ hit_rt/=normalization
-	#~ miss_rt/=normalization
-	#~ 
-	#~ high_hit_rt/=normalization
-	#~ high_miss_rt/=normalization
-	#~ low_hit_rt/=normalization
-	#~ low_miss_rt/=normalization
-	#~ 
-	#~ mu,mu_indeces,count = np.unique((dat[:,0]-distractor)/ISI,return_inverse=True,return_counts=True)
-	#~ mu_prob = count.astype(np.float64)
-	#~ mu_prob/=np.sum(mu_prob)
-	#~ mus = np.concatenate((-mu[::-1],mu))
-	#~ counts = np.concatenate((count[::-1].astype(np.float64),count.astype(np.float64)))*0.5
-	#~ p = counts/np.sum(counts)
-	#~ prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
-	#~ 
-	#~ T = options['T']
-	#~ dt = options['dt']
-	#~ iti = options['iti']
-	#~ tp = options['tp']
-	#~ reward = options['reward']
-	#~ penalty = options['penalty']
-	#~ n = options['n']
-	#~ if time_units=='seconds':
-		#~ if T is None:
-			#~ T = 10.
-		#~ if iti is None:
-			#~ iti = 1.
-		#~ if tp is None:
-			#~ tp = 0.
-	#~ else:
-		#~ if T is None:
-			#~ T = 10000.
-		#~ if iti is None:
-			#~ iti = 1000.
-		#~ if tp is None:
-			#~ tp = 0.
-	#~ if dt is None:
-		#~ dt = ISI
-	#~ 
-	#~ m = ct.DecisionPolicy(model_var=model_var,prior_mu_var=prior_mu_var,n=n,T=T,dt=dt,reward=reward,penalty=penalty,iti=iti,tp=tp,store_p=False)
-	#~ 
-	#~ confidence_params = [high_conf_thresh]
-	#~ sim_rt = theoretical_rt_distribution(cost,dead_time,dead_time_sigma,phase_out_prob,m,mu,mu_prob,max_RT,confidence_params)
-	#~ 
-	#~ mxlim = np.ceil(max_RT)
-	#~ mt.rc('axes', color_cycle=['b','r'])
-	#~ plt.figure(figsize=(11,8))
-	#~ ax1 = plt.subplot(121)
-	#~ plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post',color='b')
-	#~ plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post',color='r')
-	#~ plt.plot(m.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
-	#~ plt.plot(m.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
-	#~ plt.xlim([0,mxlim])
-	#~ if time_units=='seconds':
-		#~ plt.xlabel('T [s]')
-	#~ else:
-		#~ plt.xlabel('T [ms]')
-	#~ plt.ylabel('Prob density')
-	#~ plt.legend()
-	#~ plt.subplot(122,sharey=ax1)
-	#~ plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post',color='forestgreen')
-	#~ plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post',color='mediumpurple')
-	#~ plt.plot(m.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
-	#~ plt.plot(m.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='mediumpurple')
-	#~ plt.xlim([0,mxlim])
-	#~ if time_units=='seconds':
-		#~ plt.xlabel('T [s]')
-	#~ else:
-		#~ plt.xlabel('T [ms]')
-	#~ plt.legend()
-	#~ 
-	#~ 
-	#~ 
-	#~ if save:
-		#~ if isinstance(save,str):
-			#~ plt.savefig(save,bbox_inches='tight')
-		#~ else:
-			#~ save.savefig()
-	#~ if display:
-		#~ plt.show(True)
+			raise ValueError('Confidence RT distribution not implemented for experiment "{0}"'.format(self.experiment))
+		return rt
+	
+	# Plotter
+	def plot_fit(self,fit_output=None,saver=None,display=True):
+		if not can_plot:
+			raise ImportError('Could not import matplotlib package and it is imposible to plot fit')
+		theo_rt = self.theoretical_rt_distribution(fit_output)
+		
+		median_confidence = np.median(self.confidence)
+		temp,edges = np.histogram(self.rt,100)
+		
+		high_hit_rt,temp = np.histogram(self.rt[np.logical_and(self.performance==1,self.confidence>=median_confidence)],edges)
+		low_hit_rt,temp = np.histogram(self.rt[np.logical_and(self.performance==1,self.confidence<median_confidence)],edges)
+		high_miss_rt,temp = np.histogram(self.rt[np.logical_and(self.performance==0,self.confidence>=median_confidence)],edges)
+		low_miss_rt,temp = np.histogram(self.rt[np.logical_and(self.performance==0,self.confidence<median_confidence)],edges)
+		
+		high_hit_rt = high_hit_rt.astype(np.float64)
+		low_hit_rt = low_hit_rt.astype(np.float64)
+		high_miss_rt = high_miss_rt.astype(np.float64)
+		low_miss_rt = low_miss_rt.astype(np.float64)
+		hit_rt = high_hit_rt+low_hit_rt
+		miss_rt = high_miss_rt+low_miss_rt
+		
+		xh = np.array([0.5*(x+y) for x,y in zip(edges[1:],edges[:-1])])
+		
+		normalization = np.sum(hit_rt+miss_rt)*(xh[1]-xh[0])
+		hit_rt/=normalization
+		miss_rt/=normalization
+		
+		high_hit_rt/=normalization
+		high_miss_rt/=normalization
+		low_hit_rt/=normalization
+		low_miss_rt/=normalization
+		
+		mxlim = np.ceil(max_RT)
+		plt.figure(figsize=(11,8))
+		ax1 = plt.subplot(121)
+		plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post',color='b')
+		plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post',color='r')
+		plt.plot(self.dp.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
+		plt.plot(self.dp.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
+		plt.xlim([0,mxlim])
+		if self.time_units=='seconds':
+			plt.xlabel('T [s]')
+		else:
+			plt.xlabel('T [ms]')
+		plt.ylabel('Prob density')
+		plt.legend()
+		plt.subplot(122,sharey=ax1)
+		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post',color='forestgreen')
+		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post',color='mediumpurple')
+		plt.plot(self.dp.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
+		plt.plot(self.dp.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='mediumpurple')
+		plt.xlim([0,mxlim])
+		if time_units=='seconds':
+			plt.xlabel('T [s]')
+		else:
+			plt.xlabel('T [ms]')
+		plt.legend()
+		
+		
+		if saver:
+			if isinstance(saver,str):
+				plt.savefig(saver,bbox_inches='tight')
+			else:
+				saver.savefig()
+		if display:
+			plt.show(True)
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help
@@ -843,30 +760,92 @@ def parse_input():
  moving_bounds_fits.py -h [or --help] displays help
  
  Optional arguments are:
- '-t' or '--task': Integer that identifies the task number when running multiple tasks in parallel. Is one based, thus the first task is task 1 [default 1]
- '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [default 1]
- '-m' or '--method': String that identifies the fit method. Available values are full, confidence_only and full_confidence. [default full]
- '-o' or '--optimizer': String that identifies the optimizer used for fitting. Available values are 'cma' and all the scipy.optimize.minimize methods. [default cma]
+ '-t' or '--task': Integer that identifies the task number when running multiple tasks
+                   in parallel. By default it is one based but this behavior can be
+                   changed with the option --task_base. [Default 1]
+ '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [Default 1]
+ '-tb' or '--task_base': Integer that identifies the task base. Can be 0 or 1, indicating
+                         the task number of the root task. [Default 1]
+ '-m' or '--method': String that identifies the fit method. Available values are full,
+                     confidence_only and full_confidence. [Default full]
+ '-o' or '--optimizer': String that identifies the optimizer used for fitting.
+                        Available values are 'cma' and all the scipy.optimize.minimize methods.
+                        WARNING, cma is suited for problems with more than one dimensional
+                        parameter spaces. If the optimization is performed on a single
+                        dimension, the optimizer is changed to 'Nelder-Mead'. [Default cma]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
- '--plot': This flag takes no values. If present it displays the plotted figure and freezes execution until the figure is closed.
- '--fit': This flag takes no values. If present it performs the fit for the selected method. By default, this flag is always set.
- '--no-fit': This flag takes no values. If present no fit is performed for the selected method. This flag should be used when it is only necesary to plot the results.
- '-u' or '--units': String that identifies the time units that will be used. Available values are seconds and milliseconds. [default seconds]
- '-n': Integer that specifies the belief space discretization for the DecisionPolicy instance. Must be an uneven number, if an even number is supplied it will be recast to closest, larger uneven integer (e.g. if n=100 then it will be casted to n=101) [Default 101]
- '-T': Float that specifies the maximum time for the DecisionPolicy instance. [Default 10 seconds]
- '-dt': Float that specifies the time step for the DecisionPolicy instance. [Default 0.04 seconds]
- '-iti': Float that specifies the inter trial time for the DecisionPolicy instance. [Default 1 seconds]
- '-tp': Float that specifies the penalty time for the DecisionPolicy instance. [Default 0 seconds]
- '-r' or '--reward': Float that specifies the reward for the DecisionPolicy instance. [Default 10 seconds]
- '-p' or '--penalty': Float that specifies the penalty for the DecisionPolicy instance. [Default 10 seconds]
+ '--plot': This flag takes no values. If present it displays the plotted figure
+           and freezes execution until the figure is closed.
+ '--fit': This flag takes no values. If present it performs the fit for the selected
+          method. By default, this flag is always set.
+ '--no-fit': This flag takes no values. If present no fit is performed for the selected
+             method. This flag should be used when it is only necesary to plot the results.
+ '-u' or '--units': String that identifies the time units that will be used.
+                    Available values are seconds and milliseconds. [Default seconds]
  '-sf' or '--suffix': A string suffix to paste to the filenames. [Default '']
+ '--rt_cutoff': A Float that specifies the maximum RT in seconds to accept when
+                loading subject data. [Default 14 seconds]
+ '--merge': Can be None, 'all', 'all_sessions' or 'all_subjects'. This parameter
+            controls if and how the subject-session data should be merged before
+            performing the fits. If merge is set to 'all', all the data is merged
+            into a single "subjectSession". If merge is 'all_sessions', the
+            data across all sessions for the same subject is merged together.
+            If merge is 'all_subjects', the data across all subjects for a
+            single session is merged. For all the above, the experiments are
+            always treated separately. If merge is None, the data of every
+            subject and session is treated separately. [Default None]
+ 
+ The following argument values must be supplied as JSON encoded strings.
+ JSON dictionaries are written as '{"key":val,"key2":val2}'
+ JSON arrays (converted to python lists) are written as '[val1,val2,val3]'
+ 
+ '--fixed_parameters': A dictionary of fixed parameters. The dictionary must be written as
+                       '{"fixed_parameter_name":fixed_parameter_value,...}'. For example,
+                       '{"cost":0.2,"dead_time":0.5}'. [Default depends on experiment.
+                       For Luminance experiment '{"internal_var":0}'. For the other
+                       experiments '{}'.]
+ 
+ '--start_point': A dictionary of starting points for the fitting procedure.
+                  The dictionary must be written as '{"parameter_name":start_point_value,etc}'.
+                  If a parameter is omitted, its default starting value is used. You only need to specify
+                  the starting points for the parameters that you wish not to start at the default
+                  start point. Default start points are:
+                  '{"cost":0.2 Hz,"dead_time":0.1 seconds,"dead_time_sigma":0.5 seconds,
+                    "phase_out_prob":0.1,"internal_var":self._internal_var,
+                    "high_confidence_threshold":0.5,"confidence_map_slope":1e9}'
+                   The internal variance depends on the fitted experiment.
+ 
+ '--bounds': A dictionary of lower and upper bounds in parameter space.
+             The dictionary must be written as '{"parameter_name":[low_bound_value,up_bound_value],etc}'
+             As for the --start_point option, if a parameter is omitted, its default bound is used.
+             Default bounds are:
+             '{"cost":[0.,10],"dead_time":[0.,0.4],"dead_time_sigma":[0.,3.],
+               "phase_out_prob":[0.,1.],"internal_var":[self._internal_var*1e-6,self._internal_var*1e3],
+               "high_confidence_threshold":[0.,3.],"confidence_map_slope":[0.,1e12]}'
+ 
+ '--dpKwargs': A dictionary of optional keyword args used to construct a DecisionPolicy instance.
+               Refer to DecisionPolicy in cost_time.py for posible key-value pairs. [Default '{}']
+ 
+ '--optimizer_kwargs': A dictionary of options passed to the optimizer with a few additions.
+                       If the optimizer is cma, refer to fmin in cma.py for the list of
+                       posible cma options. The additional option in this case is only
+                       'restarts':INTEGER that sets the number of restarts used in the cmaes fmin
+                       function.
+                       If a scipy optimizer is selected, refer to scipy minimize for
+                       posible fmin options. The additional option in this case is
+                       the 'repetitions':INTEGER that sets the number of independent
+                       repetitions used by repeat_minize to find the minimum.
+                       [Default depends on the optimizer. If 'cma', '{"restarts":1}'.
+                       If not 'cma', '{"disp": False, "maxiter": 1000, "maxfev": 10000, "repetitions": 10}'
  
  Example:
- python moving_bounds_fits.py -T 10 -dt 0.001 --save"""
-	options =  {'task':1,'ntasks':1,'method':'full','optimizer':'cma','save':False,'plot':False,'fit':True,'time_units':'seconds',
-				'T':None,'iti':None,'tp':None,'dt':None,'reward':1,'penalty':0,'n':101,'suffix':''}
-	
+ python moving_bounds_fits.py -t 1 -n 1 --save"""
+	options =  {'task':1,'ntasks':1,'task_base':1,'method':'full','optimizer':'cma','save':False,
+				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':14.,
+				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
+				'optimizer_kwargs':{}}
 	expecting_key = True
+	json_encoded_key = False
 	key = None
 	for i,arg in enumerate(sys.argv[1:]):
 		if expecting_key:
@@ -875,6 +854,9 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-nt' or arg=='--ntasks':
 				key = 'ntasks'
+				expecting_key = False
+			elif arg=='-tb' or arg=='--task_base':
+				key = 'task_base'
 				expecting_key = False
 			elif arg=='-m' or arg=='--method':
 				key = 'method'
@@ -893,30 +875,32 @@ def parse_input():
 			elif arg=='-u' or arg=='--units':
 				key = 'time_units'
 				expecting_key = False
-			elif arg=='-n':
-				key = 'n'
-				expecting_key = False
-			elif arg=='-T':
-				key = 'T'
-				expecting_key = False
-			elif arg=='-dt':
-				key = 'dt'
-				expecting_key = False
-			elif arg=='-iti':
-				key = 'iti'
-				expecting_key = False
-			elif arg=='-tp':
-				key = 'tp'
-				expecting_key = False
-			elif arg=='-r' or arg=='--reward':
-				key = 'reward'
-				expecting_key = False
-			elif arg=='-p' or arg=='--penalty':
-				key = 'penalty'
-				expecting_key = False
 			elif arg=='-sf' or arg=='--suffix':
 				key = 'suffix'
 				expecting_key = False
+			elif arg=='--rt_cutoff':
+				key = 'rt_cutoff'
+				expecting_key = True
+			elif arg=='--fixed_parameters':
+				key = 'fixed_parameters'
+				expecting_key = True
+				json_encoded_key = True
+			elif arg=='--start_point':
+				key = 'start_point'
+				expecting_key = True
+				json_encoded_key = True
+			elif arg=='--bounds':
+				key = 'bounds'
+				expecting_key = True
+				json_encoded_key = True
+			elif arg=='--dpKwargs':
+				key = 'dpKwargs'
+				expecting_key = True
+				json_encoded_key = True
+			elif arg=='--optimizer_kwargs':
+				key = 'optimizer_kwargs'
+				expecting_key = True
+				json_encoded_key = True
 			elif arg=='-h' or arg=='--help':
 				print script_help
 				sys.exit()
@@ -924,14 +908,17 @@ def parse_input():
 				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format(opt=arg,pos=i+1))
 		else:
 			expecting_key = True
-			if key in ['n','task','ntasks']:
+			if key in ['task','ntasks','task_base']:
 				options[key] = int(arg)
-			elif key in ['T','dt','iti','tp','reward','penalty']:
-				options[key] = float(arg)
+			elif json_encoded_key:
+				option[key] = json.loads(arg)
+				json_encoded_key = False
 			else:
 				options[key] = arg
-	# Shift task from 1 base to 0 based
-	options['task']-=1
+	if options['task_base'] not in [0,1]:
+		raise ValueError('task_base must be either 0 or 1')
+	# Shift task from 1 base to 0 based if necessary
+	options['task']-=options['task_base']
 	if options['time_units'] not in ['seconds','milliseconds']:
 		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format(units=options['time_units']))
 	if options['method'] not in ['full','confidence_only','full_confidence']:
@@ -940,51 +927,58 @@ def parse_input():
 
 if __name__=="__main__":
 	options = parse_input()
-	method = options['method']
 	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
 	if save:
 		if task==0 and ntasks==1:
-			fname = "inference_fit_{method}{suffix}".format(method=method,suffix=options['suffix'])
+			fname = "fit_{method}{suffix}".format(method=method,suffix=options['suffix'])
 		else:
-			fname = "inference_fit_{method}_{task}_{ntasks}{suffix}".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
+			fname = "fit_{method}_{task}_{ntasks}{suffix}".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
 		if os.path.isdir("../../figs"):
 			fname = "../../figs/"+fname
 		if loc==Location.cluster:
 			fname+='.png'
-			save_object = fname
+			savers = {'Luminancia':'Luminancia_'+fname,'Auditivo':'Auditivo_'+fname,'2AFC':'2AFC_'+fname}
 		else:
 			fname+='.pdf'
-			save_object = PdfPages(fname)
+			savers = {'Luminancia':PdfPages('Luminancia_'+fname),'Auditivo':PdfPages('Auditivo_'+fname),'2AFC':PdfPages('2AFC_'+fname)}
 	else:
-		save_object = None
+		savers = {'Luminancia':None,'Auditivo':None,'2AFC':None}
 	
-	set_time_units(options['time_units'])
-	subjects = io.unique_subjects(data_dir)
-	subjects.append(io.merge_subjects(subjects))
+	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
 			if options['fit']:
-				if method!='confidence_only':
-					fit_output = fit(s,method=method,time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],optimizer=options['optimizer'])
-					f = open("fits/inference_fit_{method}_subject_{id}{suffix}.pkl".format(method=method,id=s.id,suffix=options['suffix']),'w')
-					pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-					f.close()
-					if method=='full' or method=='two_step':
-						fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=fit_output[0],optimizer=options['optimizer'])
-						f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
-						pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-						f.close()
-				else:
-					f = open("fits/inference_fit_full_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'r')
-					out = pickle.load(f)
-					f.close()
-					fit_output = fit(s,method='confidence_only',time_units=options['time_units'],n=options['n'],T=options['T'],dt=options['dt'],iti=options['iti'],tp=options['tp'],reward=options['reward'],penalty=options['penalty'],suffix=options['suffix'],fixed_parameters=out['fit_output'][0],optimizer=options['optimizer'])
-					f = open("fits/inference_fit_confidence_only_subject_{id}{suffix}.pkl".format(id=s.id,suffix=options['suffix']),'w')
-					pickle.dump({'fit_output':fit_output,'options':options},f,pickle.HIGHEST_PROTOCOL)
-					f.close()
+				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],\
+					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
+					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'])
+				fit_output = fitter.fit(fixed_parameters=options['fixed_parameters'],\
+										start_point=options['start_point'],\
+										bounds=options['bounds'],\
+										optimizer_kwargs=options['optimizer_kwargs'])
+				fitter.save_fit_output()
+				if options['method']=='full':
+					parameters = fitter.get_parameters_dict_from_fit_output(fit_output)
+					del parameters['high_confidence_threshold']
+					del parameters['confidence_map_slope']
+					fitter.method = 'confidence_only'
+					fit_output = fitter.fit(fixed_parameters=parameters,\
+											optimizer_kwargs=options['optimizer_kwargs'])
+					fitter.save_fit_output()
 			if options['plot'] or save:
-				plot_fit(s,method=method,save=save_object,display=options['plot'],suffix=options['suffix'])
-	if save and not isinstance(save,str):
-		save_object.close()
+				fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{suffix}.pkl'
+				if s._single_session:
+					ses = str(s.session)
+				else:
+					ses = '-'.join([str(ses) for ses in s.session])
+				method = options['method']
+				if method=='full':
+					method = 'confidence_only'
+				fname.format(experiment=s.experiment,method=method,name=self.s.name,session=ses,suffix=options['suffix'])
+				fitter = load_Fitter_from_file(formated_fname)
+				fitter.plot_fit(saver=savers[s.experiment],display=options['plot'])
+	if save:
+		for key in savers.keys():
+			if not isinstance(savers[key],str):
+				savers[key].close()
