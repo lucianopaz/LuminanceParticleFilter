@@ -1,6 +1,6 @@
 from __future__ import division
 
-import enum, os, sys, math, scipy, pickle, warnings, json
+import enum, os, sys, math, scipy, pickle, warnings, json, logging
 import numpy as np
 from utils import normpdf
 
@@ -134,76 +134,55 @@ class Fitter:
 	# Initer
 	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=14.):
+		logging.info('Creating Fitter instance')
+		self.raw_data_dir = raw_data_dir
 		self.set_experiment(subjectSession.experiment)
 		self.rt_cutoff = float(rt_cutoff)
+		logging.debug('Setted Fitter rt_cutoff = %f',self.rt_cutoff)
 		self.set_time_units(str(time_units))
 		self.set_subjectSession_data(subjectSession)
 		self.method = str(method)
+		logging.debug('Setted Fitter method = %s',self.method)
 		self.optimizer = str(optimizer)
+		logging.debug('Setted Fitter optimizer = %s',self.optimizer)
 		self.suffix = str(suffix)
-		if decisionPolicyArgs or decisionPolicyKwArgs:
-			if 'dt' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['dt'] = self._ISI
-			if 'model_var' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['model_var'] = self._model_var
-			if 'internal_var' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['internal_var'] = self._internal_var
-			if 'T' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['T'] = self._T
-			if 'iti' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['iti'] = self._iti
-			if 'tp' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['tp'] = self._tp
-			if 'stim_duration' not in decisionPolicyKwArgs:
-				decisionPolicyKwArgs['stim_duration'] = self._stim_duration
-		self._decisionPolicyKwArgs = decisionPolicyKwArgs
-		self.dp = ct.decisionPolicy(**decisionPolicyKwArgs)
+		logging.debug('Setted Fitter suffix = %s',self.suffix)
+		self.set_decisionPolicyKwArgs(decisionPolicyKwArgs)
+		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
 	
 	# Setters
 	def set_experiment(self,experiment):
 		self.experiment = str(experiment)
-		if self.experiment not in ['Luminancia']:#,'Auditivo','2AFC']:
+		if self.experiment=='Luminancia':
+			self._distractor = 50.
+		elif self.experiment=='Auditivo':
+			self._distractor = 0.
+		elif self.experiment=='2AFC':
+			self._distractor = 0.
+		else:
 			raise ValueError('Fitter class does not support the experiment "{0}"'.format(experiment))
-	
-	def set_subjectSession_data(self,subjectSession):
-		self._subjectSession_state = subjectSession.__getstate__()
-		dat = subjectSession.load_data()
-		
-		self.rt = dat[:,1]
-		if self.time_units=='milliseconds':
-			self.rt*=1e3
-		valid_trials = self.rt<self.rt_cutoff
-		self.rt = self.rt[valid_trials]
-		self.max_RT = np.max(self.rt)
-		dat = dat[valid_trials]
-		
-		if self.experiment=='Luminance':
-			self.contrast = dat[:,0]-50.
-		else:
-			self.contrast = dat[:,0]
-		self.performance = dat[:,2]
-		self.confidence = dat[:,3]
-		self.mu,self.mu_indeces,count = np.unique(self.contrast/self._ISI,return_inverse=True,return_counts=True)
-		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
-		if self.mu[0]==0:
-			mus = np.concatenate((-self.mu[-1:0:-1],self.mu))
-			p = np.concatenate((self.mu_prob[-1:0:-1],self.mu_prob))
-			p[mus!=0]*=0.5
-		else:
-			mus = np.concatenate((-self.mu[::-1],self.mu))
-			p = np.concatenate((self.mu_prob[::-1],self.mu_prob))*0.5
-		
-		self._prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
+		logging.debug('Setted Fitter experiment = %s',self.experiment)
 	
 	def set_time_units(self,time_units='seconds'):
 		if time_units not in ('seconds','milliseconds'):
 			raise ValueError("Invalid time units '{0}'. Available units are seconds and milliseconds".format(units))
 		self.time_units = time_units
+		logging.debug('Setted Fitter instance time_units = %s',self.time_units)
 		if self.time_units=='milliseconds':
 			self.rt_cutoff*= 1e3
+		
+		#####################################
+		# Test block. Must remove in production code
 		self._tp = 0.
-		if self.experiment=='Luminance':
-			self._stim_duration = np.inf
+		if time_units=='seconds':
+			self._ISI = 0.04
+		else:
+			self._ISI = 40.
+		self._internal_var = 0.
+		#####################################
+		logging.debug('Setted Fitter instance _tp = %f',self._tp)
+		if self.experiment=='Luminancia':
+			logging.debug('Luminancia experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.05
 				self._T = 10.
@@ -214,21 +193,75 @@ class Fitter:
 				self._iti = 1500.
 			self._model_var = 50./self._ISI
 			self._internal_var = 0.
+			self._fixed_stim_duration = 0.
+			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
+	
+	def set_subjectSession_data(self,subjectSession):
+		self._subjectSession_state = subjectSession.__getstate__()
+		logging.debug('Setted Fitter _subjectSession_state')
+		logging.debug('experiment:%(experiment)s, name:%(name)s, session:%(session)s, data_dir:%(data_dir)s',self._subjectSession_state)
+		dat = subjectSession.load_data(override_raw_data_dir={'original':self.raw_data_dir,'replacement':raw_data_dir})
+		logging.debug('Loading subjectSession data')
+		self.rt = dat[:,1]
+		if self.time_units=='milliseconds':
+			self.rt*=1e3
+		valid_trials = self.rt<self.rt_cutoff
+		self.rt = self.rt[valid_trials]
+		self.max_RT = np.max(self.rt)
+		dat = dat[valid_trials]
+		
+		trials = len(self.rt)
+		print trials
+		if trials==0:
+			raise RuntimeError('No trials can be fitted')
+		
+		self.contrast = dat[:,0]-self._distractor
+		self.performance = dat[:,2]
+		self.confidence = dat[:,3]
+		logging.debug('Trials loaded = %d',len(self.performance))
+		self.mu,self.mu_indeces,count = np.unique(self.contrast/self._ISI,return_inverse=True,return_counts=True)
+		logging.debug('Number of different drifts = %d',len(self.mu))
+		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
+		if self.mu[0]==0:
+			mus = np.concatenate((-self.mu[-1:0:-1],self.mu))
+			p = np.concatenate((self.mu_prob[-1:0:-1],self.mu_prob))
+			p[mus!=0]*=0.5
+		else:
+			mus = np.concatenate((-self.mu[::-1],self.mu))
+			p = np.concatenate((self.mu_prob[::-1],self.mu_prob))*0.5
+		
+		self._prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
+		logging.debug('Setted Fitter _prior_mu_var = %f',self._prior_mu_var)
+	
+	def set_decisionPolicyKwArgs(self,decisionPolicyKwArgs):
+		defaults = self.default_decisionPolicyKwArgs()
+		defaults.update(decisionPolicyKwArgs)
+		self.decisionPolicyKwArgs = defaults
+		logging.debug('Setted Fitter decisionPolicyKwArgs = %s',self.decisionPolicyKwArgs)
 	
 	def __setstate__(self,state):
 		self.set_experiment(state['experiment'])
-		self.set_time_units = state['time_units']
 		self.rt_cutoff = state['rt_cutoff']
-		self.set_subjectSession_data(SubjectSession(name=state['subjectSession_state']['name'],
-													session=state['subjectSession_state']['session'],
-													experiment=self.experiment,
-													data_dir=state['subjectSession_state']['data_dir']))
+		self.set_time_units(state['time_units'])
+		self.set_subjectSession_data(io.SubjectSession(name=state['subjectSession_state']['name'],
+													   session=state['subjectSession_state']['session'],
+													   experiment=self.experiment,
+													   data_dir=state['subjectSession_state']['data_dir']))
 		self.method = state['method']
 		self.optimizer = state['optimizer']
 		self.suffix = state['suffix']
-		self._decisionPolicyKwArgs = state['decisionPolicyKwArgs']
-		self.dp = ct.decisionPolicy(**decisionPolicyKwArgs)
-		
+		self.set_decisionPolicyKwArgs(state['decisionPolicyKwArgs'])
+		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
+		self.raw_data_dir = state['raw_data_dir']
+		if '_start_point' in state.keys():
+			self._start_point = state['_start_point']
+		if '_bounds' in state.keys():
+			self._bounds = state['_bounds']
+		if '_fitted_parameters' in state.keys():
+			self._fitted_parameters = state['_fitted_parameters']
+		if '_fixed_parameters' in state.keys():
+			self._fixed_parameters = state['_fixed_parameters']
 		if 'fit_arguments' in state.keys():
 			self.fixed_parameters = state['fit_arguments']['fixed_parameters']
 			self.fitted_parameters = state['fit_arguments']['fitted_parameters']
@@ -236,10 +269,40 @@ class Fitter:
 		if 'fit_output' in state.keys():
 			self._fit_output = state['fit_output']
 	
+	def set_fixed_parameters(self,fixed_parameters):
+		defaults = self.default_fixed_parameters()
+		defaults.update(fixed_parameters)
+		fittable_parameters = self.get_fittable_parameters()
+		self._fixed_parameters = fixed_parameters.copy()
+		self._fitted_parameters = []
+		for par in fittable_parameters:
+			if par not in self._fixed_parameters.keys():
+				self._fitted_parameters.append(par)
+		logging.debug('Setted Fitter fixed_parameters = %s',self._fixed_parameters)
+		logging.debug('Setted Fitter fitted_parameters = %s',self._fitted_parameters)
+	
+	def set_start_point(self,start_point):
+		defaults = self.default_start_point()
+		defaults.update(start_point)
+		self._start_point = defaults
+		logging.debug('Setted Fitter start_point = %s',self._start_point)
+	
+	def set_bounds(self,bounds):
+		defaults = self.default_bounds()
+		defaults.update(bounds)
+		self._bounds = defaults
+		logging.debug('Setted Fitter bounds = %s',self._bounds)
+	
+	def set_optimizer_kwargs(self,optimizer_kwargs):
+		defaults = self.default_optimizer_kwargs()
+		defaults.update(optimizer_kwargs)
+		self.optimizer_kwargs = defaults
+		logging.debug('Setted Fitter optimizer_kwargs = %s',self.optimizer_kwargs)
+	
 	# Getters
 	def get_parameters_dict(self,x):
 		parameters = self.fixed_parameters.copy()
-		for index,key in self.fitted_parameters:
+		for index,key in enumerate(self.fitted_parameters):
 			parameters[key] = x[index]
 		return parameters
 	
@@ -258,13 +321,76 @@ class Fitter:
 				 'method':self.method,
 				 'optimizer':self.optimizer,
 				 'suffix':self.suffix,
-				 'decisionPolicyKwArgs':self._decisionPolicyKwArgs}
+				 'decisionPolicyKwArgs':self.decisionPolicyKwArgs,
+				 'raw_data_dir':self.raw_data_dir}
+		if hasattr(self,'_start_point'):
+			state['_start_point'] = self._start_point
+		if hasattr(self,'_bounds'):
+			state['_bounds'] = self._bounds
+		if hasattr(self,'_fitted_parameters'):
+			state['_fitted_parameters'] = self._fitted_parameters
+		if hasattr(self,'_fixed_parameters'):
+			state['_fixed_parameters'] = self._fixed_parameters
 		if hasattr(self,'_fit_arguments'):
 			state['fit_arguments'] = self._fit_arguments
 		if hasattr(self,'_fit_output'):
 			state['fit_output'] = self._fit_output
+		return state
+	
+	def get_fittable_parameters(self):
+		return self.get_decision_parameters()+self.get_confidence_parameters()
+	
+	def get_decision_parameters(self):
+		return ['cost','dead_time','dead_time_sigma','phase_out_prob','internal_var']
+	
+	def get_confidence_parameters(self):
+		return ['high_confidence_threshold','confidence_map_slope']
 	
 	# Defaults
+	def default_decisionPolicyKwArgs(self):
+		defaults = {'n':101,'prior_mu_var':self._prior_mu_var,'reward':1,'penalty':0}
+		if hasattr(self,'_dt'):
+			defaults['dt'] = self._dt
+		else:
+			if hasattr(self,'_ISI'):
+				defaults['dt'] = self._ISI
+			else:
+				defaults['dt'] = 0.04
+		if hasattr(self,'_T'):
+			defaults['T'] = self._T
+		else:
+			if self.time_units=='seconds':
+				defaults['T'] = 10.
+			else:
+				defaults['T'] = 10000.
+		if hasattr(self,'_iti'):
+			defaults['iti'] = self._iti
+		else:
+			if self.time_units=='seconds':
+				defaults['iti'] = 1.5
+			else:
+				defaults['iti'] = 1500.
+		if hasattr(self,'_tp'):
+			defaults['tp'] = self._tp
+		else:
+			defaults['tp'] = 0.
+		if hasattr(self,'_model_var'):
+			defaults['model_var'] = self._model_var
+		else:
+			if hasattr(self,'_ISI'):
+				defaults['model_var'] = 50./self._ISI
+			else:
+				defaults['model_var'] = 1250.
+		if hasattr(self,'_internal_var'):
+			defaults['internal_var'] = self._internal_var
+		else:
+			defaults['internal_var'] = 0.
+		if hasattr(self,'_fixed_stim_duration'):
+			defaults['fixed_stim_duration'] = self._fixed_stim_duration
+		else:
+			defaults['fixed_stim_duration'] = 0.
+		return defaults
+	
 	def default_fixed_parameters(self):
 		if self.experiment=='Luminance':
 			return {'internal_var':0.}
@@ -298,34 +424,26 @@ class Fitter:
 			return {'disp': False, 'maxiter': 1000, 'maxfev': 10000, 'repetitions': 10}
 	
 	# Main fit method
-	def fit(self,fixed_parameters=None,start_point=None,bounds=None,optimizer_kwargs=None,fit_arguments=None):
+	def fit(self,fixed_parameters={},start_point={},bounds={},optimizer_kwargs={},fit_arguments=None):
 		if fit_arguments is None:
-			if fixed_parameters is None:
-				fixed_parameters = self.default_fixed_parameters()
-			default_start_point = self.default_start_point()
-			if not start_point is None:
-				self.default_start_point.update(start_point)
-			default_bounds = self.default_bounds()
-			if not bounds is None:
-				default_bounds.update(bounds)
-			start_point,bounds = self.sanitize_x0_bounds(fixed_parameters,start_point,bounds)
+			self.set_fixed_parameters(fixed_parameters)
+			self.set_start_point(start_point)
+			self.set_bounds(bounds)
+			self.fixed_parameters,self.fitted_parameters,start_point,bounds = self.sanitize_parameters_x0_bounds()
 			
-			default_optimizer_kwargs = self.default_optimizer_kwargs()
-			if optimizer_kwargs:
-				for key in optimizer_kwargs.keys():
-					default_optimizer_kwargs[key] = optimizer_kwargs[key]
-			optimizer_kwargs = default_optimizer_kwargs
+			self.set_optimizer_kwargs(optimizer_kwargs)
 			self._fit_arguments = {'fixed_parameters':self.fixed_parameters,'fitted_parameters':self.fitted_parameters,\
-								   'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs}
+								   'start_point':start_point,'bounds':bounds,'optimizer_kwargs':self.optimizer_kwargs}
 		else:
 			start_point = fit_arguments['start_point']
 			bounds = fit_arguments['bounds']
-			optimizer_kwargs = fit_arguments['optimizer_kwargs']
+			self.optimizer_kwargs = fit_arguments['optimizer_kwargs']
 			self.fitted_parameters = fit_arguments['fitted_parameters']
+			self.fixed_parameters = fit_arguments['fixed_parameters']
 			self._fit_arguments = fit_arguments
 		
-		minimizer = self.init_minimizer(start_point,bounds,optimizer_kwargs)
-		if self.experiment=='Luminance':
+		minimizer = self.init_minimizer(start_point,bounds,self.optimizer_kwargs)
+		if self.experiment=='Luminancia':
 			if self.method=='full':
 				merit_function = self.lum_full_merit
 			elif self.method=='confidence_only':
@@ -358,71 +476,65 @@ class Fitter:
 		return self._fit_output
 	
 	# Savers
-	def save_fit_output(self,fit_output):
-		state = self.__getstate__()
-		if 'fit_output' not in state:
+	def save(self):
+		logging.debug('Fitter state that will be saved = "%s"',self.__getstate__())
+		if not hasattr(self,'_fit_output'):
 			raise ValueError('The Fitter instance has not performed any fit and still has no _fit_output attribute set')
 		session = self._subjectSession_state['session']
 		if isinstance(session,int):
 			session = str(session)
 		else:
 			session = '-'.join([str(s) for s in session])
-		fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{suffix}.pkl'.format(
+		fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
 				experiment=self.experiment,method=self.method,name=self._subjectSession_state['name'],
-				session=session,suffix=self.suffix)
+				session=session,optimizer=self.optimizer,suffix=self.suffix)
+		logging.info('Saving Fitter state to file "%s"',fname)
 		f = open(fname,'w')
-		pickle.dump(f,state,pickle.HIGHEST_PROTOCOL)
+		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
 	
 	# Sanitizers
-	def sanitize_x0_bounds(self,fixed_parameters,start_point,bounds):
-		fittable_parameters = ['cost','dead_time','dead_time_sigma','phase_out_prob','internal_var','high_confidence_threshold','confidence_map_slope']
-		confidence_parameters = ['high_confidence_threshold','confidence_map_slope']
-		self.fixed_parameters = fixed_parameters
-		fitted_parameters = []
-		temp_x0 = []
-		temp_b = [[],[]]
-		for par in fittable_parameters:
-			if par not in fixed_parameters.keys():
-				fitted_parameters.append(par)
-				temp_x0.append(start_point[par])
-				temp_b[0].append(bounds[par][0])
-				temp_b[1].append(bounds[par][1])
-		method_fitted_parameters = {'full_confidence':fitted_parameters,'full':[],'confidence_only':[]}
-		method_fixed_parameters = {'full_confidence':fixed_parameters.copy(),'full':fixed_parameters.copy(),'confidence_only':fixed_parameters.copy()}
-		method_sp = {'full_confidence':np.array(temp_x0[:]),'full':[],'confidence_only':[]}
-		method_b = {'full_confidence':np.array([np.array(temp_b[0]),np.array(temp_b[1])]),'full':[[],[]],'confidence_only':[[],[]]}
-		for index,par in fitted_parameters:
+	def sanitize_parameters_x0_bounds(self):
+		fittable_parameters = self.get_fittable_parameters()
+		confidence_parameters = self.get_confidence_parameters()
+		method_fitted_parameters = {'full_confidence':self._fitted_parameters[:],'full':[],'confidence_only':[]}
+		method_fixed_parameters = {'full_confidence':self._fixed_parameters.copy(),'full':self._fixed_parameters.copy(),'confidence_only':self._fixed_parameters.copy()}
+		method_sp = {'full_confidence':[],'full':[],'confidence_only':[]}
+		method_b = {'full_confidence':[],'full':[],'confidence_only':[]}
+		for par in self._fitted_parameters:
 			if par not in confidence_parameters:
 				method_fitted_parameters['full'].append(par)
-				method_fixed_parameters['confidence_only'][par] = temp_x0[index]
-				method_sp['full'].append(temp_x0[index])
-				method_b['full'][0].append(temp_b[0][index])
-				method_b['full'][1].append(temp_b[1][index])
+				method_sp['full'].append(self._start_point[par])
+				method_b['full'].append(self._bounds[par])
+				if par not in method_fixed_parameters['confidence_only'].keys():
+					method_fixed_parameters['confidence_only'][par] = self._start_point[par]
 			else:
 				method_fitted_parameters['confidence_only'].append(par)
-				method_fixed_parameters['full'][par] = temp_x0[index]
-				method_sp['confidence_only'].append(temp_x0[index])
-				method_b['confidence_only'][0].append(temp_b[0][index])
-				method_b['confidence_only'][1].append(temp_b[1][index])
-		method_sp['full'] = np.array(method_sp['full'])
-		method_b['full'] = np.array(method_sp['full'])
-		method_sp['confidence_only'] = np.array(method_b['confidence_only'])
-		method_b['confidence_only'] = np.array(method_b['confidence_only'])
+				method_sp['confidence_only'].append(self._start_point[par])
+				method_b['confidence_only'].append(self._bounds[par])
+				if par not in method_fixed_parameters['full'].keys():
+					method_fixed_parameters['full'][par] = self._start_point[par]
+			method_sp['full_confidence'].append(self._start_point[par])
+			method_b['full_confidence'].append(self._bounds[par])
 		
-		sanitized_start_point = method_sp[self.method]
-		sanitized_bounds = method_b[self.method]
-		self.fitted_parameters = method_fitted_parameters[self.method]
-		self.fixed_parameters = method_fixed_parameters[self.method]
+		sanitized_start_point = np.array(method_sp[self.method])
+		sanitized_bounds = np.array(method_b[self.method]).T
+		fitted_parameters = method_fitted_parameters[self.method]
+		fixed_parameters = method_fixed_parameters[self.method]
 		if len(fitted_parameters)==1 and self.optimizer=='cma':
 			warnings.warn('CMA is unsuited for optimization of single dimensional parameter spaces. Optimizer was changed to Nelder-Mead')
 			self.optimizer = 'Nelder-Mead'
 		
 		if self.optimizer!='cma':
 			sanitized_bounds = [(lb,ub) for lb,ub in zip(sanitized_bounds[0],sanitized_bounds[1])]
-		return (sanitized_start_point,sanitized_bounds)
+		logging.debug('Sanitized fixed parameters = %s',fixed_parameters)
+		logging.debug('Sanitized fitted parameters = %s',fitted_parameters)
+		logging.debug('Sanitized start_point = %s',sanitized_start_point)
+		logging.debug('Sanitized bounds = %s',sanitized_bounds)
+		return (fixed_parameters,fitted_parameters,sanitized_start_point,sanitized_bounds)
 	
 	def sanitize_fmin_output(self,output,package='cma'):
+		logging.info('Sanitizing minizer output')
 		if package=='cma':
 			fitted_x = {}
 			for index,par in enumerate(self.fitted_parameters):
@@ -438,21 +550,26 @@ class Fitter:
 	
 	# Minimizer related methods
 	def init_minimizer(self,start_point,bounds,optimizer_kwargs):
+		logging.info('Initing minimizer')
+		logging.debug('init_minimizer args: start_point=%(start_point)s, bounds=%(bounds)s, optimizer_kwargs=%(optimizer_kwargs)s',{'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs})
 		if self.optimizer=='cma':
 			scaling_factor = bounds[1]-bounds[0]
+			logging.debug('scaling_factor = %s',scaling_factor)
 			options = {'bounds':bounds,'CMA_stds':scaling_factor}
 			options.update(optimizer_kwargs)
+			restarts = options['restarts']
+			del options['restarts']
 			options = cma.CMAOptions(options)
-			if 'restarts' in optimizer_kwargs.keys():
-				restarts = optimizer_kwargs['restarts']
-			else:
-				restarts = 1
 			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts),package='cma')
 			minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
 		else:
 			repetitions = optimizer_kwargs['repetitions']
 			_start_points = [start_point]
-			_start_points.append(np.random.rand(repetitions-1,len(start_point))*(bounds[1]-bounds[0])+bounds[0])
+			for rsp in np.random.rand(repetitions-1,len(start_point)):
+				temp = []
+				for val,(lb,ub) in zip(rsp,bounds):
+					temp.append(val*(ub-lb)+lb)
+				_start_points.append(np.array(temp))
 			start_point_generator = iter(_start_points)
 			minimizer = lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='scipy')
 			minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
@@ -603,7 +720,7 @@ class Fitter:
 	
 	# Theoretical predictions
 	def theoretical_rt_distribution(self,fit_output=None,return_confidence=True,include_t0=True):
-		parameters = self.get_parameters_dict(fit_output)
+		parameters = self.get_parameters_dict_from_fit_output(fit_output)
 		rt,dec_gs = self.decision_rt_distribution(parameters,return_gs=True,include_t0=include_t0)
 		if return_confidence:
 			dec_conf = self.confidence_rt_distribution(parameters,dec_gs,include_t0=include_t0)
@@ -657,13 +774,14 @@ class Fitter:
 			else:
 				rt = {'full':{'high':np.zeros((2,self.dp.t.shape[0]-1)),'low':np.zeros((2,self.dp.t.shape[0]-1))}}
 				phased_out_rt = np.zeros_like(self.dp.t)[1:]
-			self.dp.set_cost(cost)
-			_max_RT = self.dp.t[np.ceil(max_RT/self.dp.dt)]
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			_max_RT = self.dp.t[np.ceil(self.max_RT/self.dp.dt)]
 			
 			phigh,plow = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 			phased_out_rt[self.dp.t<_max_RT] = 1./(_max_RT)
 			
-			for index,drift in enumerate(mu):
+			for index,drift in enumerate(self.mu):
 				g = dec_gs[drift]['all']
 				if include_t0:
 					gh=phigh*g
@@ -679,8 +797,8 @@ class Fitter:
 				rt[drift] = {}
 				rt[drift]['high'] = np.array([g1h,g2h])
 				rt[drift]['low'] = np.array([g1l,g2l])
-				rt['full']['high']+= rt[drift]['high']*mu_prob[index]
-				rt['full']['low']+= rt[drift]['low']*mu_prob[index]
+				rt['full']['high']+= rt[drift]['high']*self.mu_prob[index]
+				rt['full']['low']+= rt[drift]['low']*self.mu_prob[index]
 		else:
 			raise ValueError('Confidence RT distribution not implemented for experiment "{0}"'.format(self.experiment))
 		return rt
@@ -717,13 +835,13 @@ class Fitter:
 		low_hit_rt/=normalization
 		low_miss_rt/=normalization
 		
-		mxlim = np.ceil(max_RT)
+		mxlim = np.ceil(self.max_RT)
 		plt.figure(figsize=(11,8))
 		ax1 = plt.subplot(121)
-		plt.step(xh,hit_rt,label='Subject '+str(subject.id)+' hit rt',where='post',color='b')
-		plt.step(xh,-miss_rt,label='Subject '+str(subject.id)+' miss rt',where='post',color='r')
-		plt.plot(self.dp.t,sim_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
-		plt.plot(self.dp.t,-sim_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
+		plt.step(xh,hit_rt,label='Subject '+str(self._subjectSession_state['name'])+' hit rt',where='post',color='b')
+		plt.step(xh,-miss_rt,label='Subject '+str(self._subjectSession_state['name'])+' miss rt',where='post',color='r')
+		plt.plot(self.dp.t,theo_rt['full']['all'][0],label='Theoretical hit rt',linewidth=2,color='b')
+		plt.plot(self.dp.t,-theo_rt['full']['all'][1],label='Theoretical miss rt',linewidth=2,color='r')
 		plt.xlim([0,mxlim])
 		if self.time_units=='seconds':
 			plt.xlabel('T [s]')
@@ -732,12 +850,12 @@ class Fitter:
 		plt.ylabel('Prob density')
 		plt.legend()
 		plt.subplot(122,sharey=ax1)
-		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(subject.id)+' high',where='post',color='forestgreen')
-		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(subject.id)+' low',where='post',color='mediumpurple')
-		plt.plot(self.dp.t,np.sum(sim_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
-		plt.plot(self.dp.t,-np.sum(sim_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='mediumpurple')
+		plt.step(xh,high_hit_rt+high_miss_rt,label='Subject '+str(self._subjectSession_state['name'])+' high',where='post',color='forestgreen')
+		plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subject '+str(self._subjectSession_state['name'])+' low',where='post',color='mediumpurple')
+		plt.plot(self.dp.t,np.sum(theo_rt['full']['high'],axis=0),label='Theoretical high',linewidth=2,color='forestgreen')
+		plt.plot(self.dp.t,-np.sum(theo_rt['full']['low'],axis=0),label='Theoretical low',linewidth=2,color='mediumpurple')
 		plt.xlim([0,mxlim])
-		if time_units=='seconds':
+		if self.time_units=='seconds':
 			plt.xlabel('T [s]')
 		else:
 			plt.xlabel('T [ms]')
@@ -794,6 +912,10 @@ def parse_input():
             single session is merged. For all the above, the experiments are
             always treated separately. If merge is None, the data of every
             subject and session is treated separately. [Default None]
+ '-e' or '--experiment': Can be 'all', 'luminancia', '2afc' or 'auditivo'.
+                         Indicates the experiment that you wish to fit. If set to
+                         'all', all experiment data will be fitted. [Default 'all']
+                         WARNING: is case insensitive.
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -843,7 +965,7 @@ def parse_input():
 	options =  {'task':1,'ntasks':1,'task_base':1,'method':'full','optimizer':'cma','save':False,
 				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':14.,
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
-				'optimizer_kwargs':{}}
+				'optimizer_kwargs':{},'experiment':'all'}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -880,26 +1002,29 @@ def parse_input():
 				expecting_key = False
 			elif arg=='--rt_cutoff':
 				key = 'rt_cutoff'
-				expecting_key = True
+				expecting_key = False
+			elif arg=='-e' or arg=='--experiment':
+				key = 'experiment'
+				expecting_key = False
 			elif arg=='--fixed_parameters':
 				key = 'fixed_parameters'
-				expecting_key = True
+				expecting_key = False
 				json_encoded_key = True
 			elif arg=='--start_point':
 				key = 'start_point'
-				expecting_key = True
+				expecting_key = False
 				json_encoded_key = True
 			elif arg=='--bounds':
 				key = 'bounds'
-				expecting_key = True
+				expecting_key = False
 				json_encoded_key = True
 			elif arg=='--dpKwargs':
 				key = 'dpKwargs'
-				expecting_key = True
+				expecting_key = False
 				json_encoded_key = True
 			elif arg=='--optimizer_kwargs':
 				key = 'optimizer_kwargs'
-				expecting_key = True
+				expecting_key = False
 				json_encoded_key = True
 			elif arg=='-h' or arg=='--help':
 				print script_help
@@ -923,9 +1048,16 @@ def parse_input():
 		raise ValueError("Unknown supplied units: '{units}'. Available values are seconds and milliseconds".format(units=options['time_units']))
 	if options['method'] not in ['full','confidence_only','full_confidence']:
 		raise ValueError("Unknown supplied method: '{method}'. Available values are full, confidence_only and full_confidence".format(method=options['method']))
+	options['experiment'] = options['experiment'].lower()
+	if options['experiment'] not in ['all','luminancia','2afc','auditivo']:
+		raise ValueError("Unknown experiment supplied: '{0}'. Available values are 'all', 'luminancia', '2afc' and 'auditivo'".format(options['experiment']))
+	else:
+		# Switching case to the data_io_cognition case sensitive definition of each experiment
+		options['experiment'] = {'all':'all','luminancia':'Luminancia','2afc':'2AFC','auditivo':'Auditivo'}[options['experiment']]
 	return options
 
 if __name__=="__main__":
+	logging.basicConfig(level=logging.INFO)
 	options = parse_input()
 	save = options['save']
 	task = options['task']
@@ -947,6 +1079,8 @@ if __name__=="__main__":
 		savers = {'Luminancia':None,'Auditivo':None,'2AFC':None}
 	
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
+	if options['experiment']!='all':
+		subjects = io.filter_subjects_list(subjects,'experiment_'+options['experiment'])
 	for i,s in enumerate(subjects):
 		if (i-task)%ntasks==0:
 			if options['fit']:
@@ -957,7 +1091,7 @@ if __name__=="__main__":
 										start_point=options['start_point'],\
 										bounds=options['bounds'],\
 										optimizer_kwargs=options['optimizer_kwargs'])
-				fitter.save_fit_output()
+				fitter.save()
 				if options['method']=='full':
 					parameters = fitter.get_parameters_dict_from_fit_output(fit_output)
 					del parameters['high_confidence_threshold']
@@ -965,9 +1099,9 @@ if __name__=="__main__":
 					fitter.method = 'confidence_only'
 					fit_output = fitter.fit(fixed_parameters=parameters,\
 											optimizer_kwargs=options['optimizer_kwargs'])
-					fitter.save_fit_output()
+					fitter.save()
 			if options['plot'] or save:
-				fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{suffix}.pkl'
+				fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
 				if s._single_session:
 					ses = str(s.session)
 				else:
@@ -975,7 +1109,8 @@ if __name__=="__main__":
 				method = options['method']
 				if method=='full':
 					method = 'confidence_only'
-				fname.format(experiment=s.experiment,method=method,name=self.s.name,session=ses,suffix=options['suffix'])
+				formated_fname = fname.format(experiment=s.experiment,method=method,name=s.name,session=ses,
+							 optimizer=options['optimizer'],suffix=options['suffix'])
 				fitter = load_Fitter_from_file(formated_fname)
 				fitter.plot_fit(saver=savers[s.experiment],display=options['plot'])
 	if save:

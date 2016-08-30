@@ -24,21 +24,27 @@ class SubjectSession:
 			self.data_dir = str(data_dir)
 			self._single_data_dir = True
 	
-	def list_data_files(self):
+	def list_data_files(self,override_raw_data_dir=None):
 		if self._single_data_dir:
-			return [os.path.join(self.data_dir,f) for f in os.listdir(self.data_dir) if os.path.isfile(os.path.join(self.data_dir,f))]
+			if override_raw_data_dir:
+				data_dir = self.data_dir.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
+			else:
+				data_dir = self.data_dir
+			return [os.path.join(data_dir,f) for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir,f))]
 		else:
 			listdirs = []
 			for dd in self.data_dir:
+				if override_raw_data_dir:
+					dd = dd.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
 				listdirs.extend([os.path.join(dd,f) for f in os.listdir(dd) if os.path.isfile(os.path.join(dd,f))])
 			return list(set(listdirs))
 	
-	def iter_data(self):
+	def iter_data(self,override_raw_data_dir=None):
 		if self.experiment=='Luminancia':
 			if self._single_session:
-				data_files = [f for f in self.list_data_files() if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1)==self.session and f.endswith('.mat')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1)==self.session and f.endswith('.mat')]
 			else:
-				data_files = [f for f in self.list_data_files() if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) in self.session and f.endswith('.mat')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) in self.session and f.endswith('.mat')]
 			sessions = [((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1) for f in data_files]
 			for f,session in zip(data_files,sessions):
 				aux = io.loadmat(f)
@@ -59,9 +65,9 @@ class SubjectSession:
 				yield data_matrix
 		elif self.experiment=='2AFC':
 			if self._single_session:
-				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and f.endswith('.txt')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and f.endswith('.txt')]
 			else:
-				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and f.endswith('.txt')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and f.endswith('.txt')]
 			sessions = [int(re.search('(?<=sesion)[0-9]+',f).group()) for f in data_files]
 			for f,session in zip(data_files,sessions):
 				selected_side, performance, rt, contraste, confidence, phase, orientation = np.loadtxt(f, delimiter=' ', unpack=True)
@@ -74,9 +80,9 @@ class SubjectSession:
 				yield data_matrix
 		elif self.experiment=='Auditivo':
 			if self._single_session:
-				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group())==self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
 			else:
-				data_files = [f for f in self.list_data_files() if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
+				data_files = [f for f in self.list_data_files(override_raw_data_dir) if int(re.search('(?<=sesion)[0-9]+',f).group()) in self.session and not f.endswith('quest.mat') and f.endswith('.mat')]
 			sessions = [int(re.search('(?<=sesion)[0-9]+',f).group()) for f in data_files]
 			for f,session in zip(data_files,sessions):
 				aux = io.loadmat(f)
@@ -97,9 +103,9 @@ class SubjectSession:
 										confidence_rt,target_location,session*np.ones_like(rt)]).squeeze().T
 				yield data_matrix
 	
-	def load_data(self):
+	def load_data(self,override_raw_data_dir=None):
 		first_element = True
-		for data_matrix in self.iter_data():
+		for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir):
 			if first_element:
 				all_data = data_matrix
 				first_element = False
@@ -189,8 +195,6 @@ def anonimize_subjects(subjectSessions):
 	return subjectSessions
 
 def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_details=None):
-	if criteria not in ['all_experiments','all_sessions_by_experiment']:
-		raise ValueError('The specified criteria: "{0}" is not implemented'.format(criteria))
 	output = []
 	if criteria=='all_experiments':
 		names = [s.name for s in subjectSessions]
@@ -215,6 +219,11 @@ def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_detai
 					break
 			if satifies_filter:
 				output.extend([s for s in subjectSessions if s.name==name])
+	elif criteria.startswith('experiment'):
+		experiment = criteria.split('_')[1]
+		output = [s for s in subjectSessions if s.experiment==experiment]
+	else:
+		raise ValueError('The specified criteria: "{0}" is not implemented'.format(criteria))
 	return output
 
 def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by_session=None,return_column_headers=False):

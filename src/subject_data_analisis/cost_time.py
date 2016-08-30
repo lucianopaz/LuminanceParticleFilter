@@ -20,7 +20,8 @@ class DecisionPolicy():
 	reward rate and computes the optimal decision bounds
 	"""
 	def __init__(self,model_var,prior_mu_mean=0.,prior_mu_var=1.,n=500,dt=1e-2,T=10.,\
-				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True,discrete_prior=None):
+				 reward=1.,penalty=0.,iti=1.,tp=0.,cost=0.05,store_p=True,discrete_prior=None,\
+				 internal_var=0., fixed_stim_duration=0.):
 		"""
 		Constructor input:
 		model_var = True variance of the process that generates samples per unit time. This value is then multiplied by dt.
@@ -63,6 +64,8 @@ class DecisionPolicy():
 		self.T = float(T)
 		self.nT = int(T/dt)+1
 		self.t = np.arange(0.,self.nT,dtype=np.float64)*self.dt
+		self.internal_var = internal_var
+		self.fixed_stim_duration = fixed_stim_duration
 		self.set_cost(cost)
 		self.store_p = store_p
 		self.reward = reward
@@ -137,6 +140,9 @@ class DecisionPolicy():
 			pass
 		return out
 	
+	def set_internal_var(self,internal_var):
+		self.internal_var = internal_var
+	
 	def set_cost(self,cost):
 		"""
 		This function constructs a DecisionPolicy's cost array of shape
@@ -179,6 +185,7 @@ class DecisionPolicy():
 		"""
 		self.cost = float(cost)*np.ones(self.nT-1)
 		self._cost_details = {'type':0,'details':cost}
+		self.shift_cost()
 	
 	def set_polynomial_cost(self,coefs):
 		"""
@@ -189,8 +196,9 @@ class DecisionPolicy():
 		"""
 		self.cost = np.polyval(coefs,self.t[:-1])
 		self._cost_details = {'type':1,'details':coefs[:]}
+		self.shift_cost()
 	
-	def set_array_cost(self,cost):
+	def set_array_cost(self,cost,shift_cost=False):
 		"""
 		self.set_array_cost(cost)
 		
@@ -199,6 +207,18 @@ class DecisionPolicy():
 		"""
 		self.cost = cost[:]
 		self._cost_details = {'type':2,'details':None}
+		if shift_cost:
+			self.shift_cost()
+	
+	def shift_cost(self):
+		"""
+		self.shift_cost()
+		
+		Shift cost array rigidly until after the fixed_stim_duration
+		"""
+		index = (self.t>=self.fixed_stim_duration).nonzero()[0][0]
+		self.cost[index:] = self.cost[:(self.nT-index)]
+		self.cost[:index] = 0.
 	
 	def post_mu_var(self,t):
 		"""
