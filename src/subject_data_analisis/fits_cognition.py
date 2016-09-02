@@ -26,7 +26,7 @@ if loc==Location.facu:
 elif loc==Location.home:
 	raw_data_dir='/Users/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.cluster:
-	raw_data_dir='/homedtic/lpaz/cognition/raw_data'
+	raw_data_dir='/homedtic/lpaz/inference/raw_data/raw_data'
 elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
 
@@ -124,6 +124,59 @@ def add_dead_time(gs,dt,dead_time,dead_time_sigma,mode='full'):
 	normalization = np.sum(output)*dt
 	return tuple(output/normalization)
 
+def rt_confidence_likelihood(confidence_matrix_time,confidence_matrix,RT,confidence):
+	if RT>confidence_matrix_time[-1] or RT<confidence_matrix_time[0]:
+		return 0.
+	if confidence>1 or confidence<0:
+		return 0.
+	nC,nT = confidence_matrix.shape
+	confidence_array = np.linspace(0,1,nC)
+	t_ind = np.interp(RT,confidence_matrix_time,np.arange(0,nT,dtype=np.float))
+	c_ind = np.interp(confidence,confidence_array,np.arange(0,nC,dtype=np.float))
+	
+	floor_t_ind = np.floor(t_ind)
+	ceil_t_ind = np.ceil(t_ind)
+	t_weight = 1.-t_ind%1.
+	if floor_t_ind==nT-1:
+		ceil_t_ind = floor_t_ind
+		t_weight = np.array([1.])
+	else:
+		t_weight = np.array([1.-t_ind%1.,t_ind%1.])
+	
+	floor_c_ind = np.floor(c_ind)
+	ceil_c_ind = np.ceil(c_ind)
+	if floor_c_ind==nC-1:
+		ceil_c_ind = floor_c_ind
+		c_weight = np.array([1.])
+	else:
+		c_weight = np.array([1.-c_ind%1.,c_ind%1.])
+	weight = np.ones((len(c_weight),len(t_weight)))
+	for index,cw in enumerate(c_weight):
+		weight[index,:]*= cw
+	for index,tw in enumerate(t_weight):
+		weight[:,index]*= tw
+	
+	prob = np.sum(confidence_matrix[floor_c_ind:ceil_c_ind+1,floor_t_ind:ceil_t_ind+1]*weight)
+	return prob
+
+def rt_likelihood(t,decision_pdf,RT):
+	if RT>t[-1] or RT<t[0]:
+		return 0.
+	nT = decision_pdf.shape[0]
+	t_ind = np.interp(RT,t,np.arange(0,nT,dtype=np.float))
+	
+	floor_t_ind = np.floor(t_ind)
+	ceil_t_ind = np.ceil(t_ind)
+	t_weight = 1.-t_ind%1.
+	if floor_t_ind==nT-1:
+		ceil_t_ind = floor_t_ind
+		weight = np.array([1.])
+	else:
+		weight = np.array([1.-t_ind%1.,t_ind%1.])
+	
+	prob = np.sum(decision_pdf[floor_t_ind:ceil_t_ind+1]*weight)
+	return prob
+
 def load_Fitter_from_file(fname):
 	f = open(fname,'r')
 	fitter = pickle.load(f)
@@ -149,6 +202,7 @@ class Fitter:
 		logging.debug('Setted Fitter suffix = %s',self.suffix)
 		self.set_decisionPolicyKwArgs(decisionPolicyKwArgs)
 		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
+		self.__fit_internals__ = None
 	
 	# Setters
 	def set_experiment(self,experiment):
@@ -171,15 +225,7 @@ class Fitter:
 		if self.time_units=='milliseconds':
 			self.rt_cutoff*= 1e3
 		
-		#####################################
-		# Test block. Must remove in production code
 		self._tp = 0.
-		if time_units=='seconds':
-			self._ISI = 0.04
-		else:
-			self._ISI = 40.
-		self._internal_var = 0.
-		#####################################
 		logging.debug('Setted Fitter instance _tp = %f',self._tp)
 		if self.experiment=='Luminancia':
 			logging.debug('Luminancia experiment condition')
@@ -196,6 +242,36 @@ class Fitter:
 			self._fixed_stim_duration = 0.
 			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
+		elif self.experiment=='Auditivo':
+			logging.debug('Auditivo experiment condition')
+			if time_units=='seconds':
+				self._ISI = 0.5
+				self._T = 0.3
+				self._iti = 2.
+			else:
+				self._ISI = 500.
+				self._T = 300.
+				self._iti = 2000.
+			self._model_var = 0.
+			self._internal_var = 0.
+			self._fixed_stim_duration = 0.3
+			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
+		elif self.experiment=='2AFC':
+			logging.debug('Auditivo experiment condition')
+			if time_units=='seconds':
+				self._ISI = 0.3
+				self._T = 0.3
+				self._iti = 1.5
+			else:
+				self._ISI = 300.
+				self._T = 300.
+				self._iti = 1500.
+			self._model_var = 0.
+			self._internal_var = 0.
+			self._fixed_stim_duration = 0.3
+			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
 	
 	def set_subjectSession_data(self,subjectSession):
 		self._subjectSession_state = subjectSession.__getstate__()
@@ -209,10 +285,10 @@ class Fitter:
 		valid_trials = self.rt<self.rt_cutoff
 		self.rt = self.rt[valid_trials]
 		self.max_RT = np.max(self.rt)
+		self.min_RT = np.min(self.rt)
 		dat = dat[valid_trials]
 		
 		trials = len(self.rt)
-		print trials
 		if trials==0:
 			raise RuntimeError('No trials can be fitted')
 		
@@ -269,7 +345,7 @@ class Fitter:
 		if 'fit_output' in state.keys():
 			self._fit_output = state['fit_output']
 	
-	def set_fixed_parameters(self,fixed_parameters):
+	def set_fixed_parameters(self,fixed_parameters={}):
 		defaults = self.default_fixed_parameters()
 		defaults.update(fixed_parameters)
 		fittable_parameters = self.get_fittable_parameters()
@@ -281,19 +357,19 @@ class Fitter:
 		logging.debug('Setted Fitter fixed_parameters = %s',self._fixed_parameters)
 		logging.debug('Setted Fitter fitted_parameters = %s',self._fitted_parameters)
 	
-	def set_start_point(self,start_point):
+	def set_start_point(self,start_point={}):
 		defaults = self.default_start_point()
 		defaults.update(start_point)
 		self._start_point = defaults
 		logging.debug('Setted Fitter start_point = %s',self._start_point)
 	
-	def set_bounds(self,bounds):
+	def set_bounds(self,bounds={}):
 		defaults = self.default_bounds()
 		defaults.update(bounds)
 		self._bounds = defaults
 		logging.debug('Setted Fitter bounds = %s',self._bounds)
 	
-	def set_optimizer_kwargs(self,optimizer_kwargs):
+	def set_optimizer_kwargs(self,optimizer_kwargs={}):
 		defaults = self.default_optimizer_kwargs()
 		defaults.update(optimizer_kwargs)
 		self.optimizer_kwargs = defaults
@@ -346,16 +422,54 @@ class Fitter:
 	def get_confidence_parameters(self):
 		return ['high_confidence_threshold','confidence_map_slope']
 	
+	def get_dead_time_convolver(self,parameters):
+		must_downsample = True
+		if self.time_units=='seconds' and self.dp.dt>1e-3:
+			_dt = 1e-3
+		elif self.time_units=='milliseconds' and self.dp.dt>1.:
+			_dt = 1.
+		else:
+			must_downsample = False
+			_dt = self.dp.dt
+		
+		_T = parameters['dead_time']+6*parameters['dead_time_sigma']
+		_nT = int(_T/_dt)+1
+		nT = int(_T/self.dp.dt)+1
+		dense_conv_x = np.arange(0,_nT)*_dt
+		dense_conv_val = normpdf(dense_conv_x,parameters['dead_time'],parameters['dead_time_sigma'])
+		dense_conv_val[dense_conv_x<parameters['dead_time']] = 0.
+		
+		conv_x = np.arange(0,nT)*self.dp.dt
+		if must_downsample:
+			ratio = np.ceil(_nT/nT)
+			tail = _nT%nT
+			if tail!=0:
+				padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(nT-tail,dtype=np.float)),axis=0)
+			else:
+				padded_cv = dense_conv_val
+			padded_cv = np.reshape(padded_cv,(-1,ratio))
+			conv_val = np.nanmean(padded_cv,axis=1)
+		else:
+			conv_val = dense_conv_val
+		conv_val/=np.sum(conv_val)
+		return conv_val,conv_x
+	
 	# Defaults
 	def default_decisionPolicyKwArgs(self):
 		defaults = {'n':101,'prior_mu_var':self._prior_mu_var,'reward':1,'penalty':0}
 		if hasattr(self,'_dt'):
 			defaults['dt'] = self._dt
 		else:
-			if hasattr(self,'_ISI'):
-				defaults['dt'] = self._ISI
+			if self.experiment=='Luminancia':
+				if hasattr(self,'_ISI'):
+					defaults['dt'] = self._ISI
+				else:
+					defaults['dt'] = 0.04
 			else:
-				defaults['dt'] = 0.04
+				if self.time_units=='seconds':
+					defaults['dt'] = 0.001
+				else:
+					defaults['dt'] = 1.
 		if hasattr(self,'_T'):
 			defaults['T'] = self._T
 		else:
@@ -392,7 +506,7 @@ class Fitter:
 		return defaults
 	
 	def default_fixed_parameters(self):
-		if self.experiment=='Luminance':
+		if self.experiment=='Luminancia':
 			return {'internal_var':0.}
 		else:
 			return {}
@@ -400,21 +514,21 @@ class Fitter:
 	def default_start_point(self):
 		if self.time_units=='seconds':
 			return {'cost':0.2,'dead_time':0.1,'dead_time_sigma':0.5,
-					'phase_out_prob':0.1,'internal_var':self._internal_var,
+					'phase_out_prob':0.1,'internal_var':1250.,
 					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
 		else:
 			return {'cost':0.0002,'dead_time':100.,'dead_time_sigma':500.,
-					'phase_out_prob':0.1,'internal_var':self._internal_var,
+					'phase_out_prob':0.1,'internal_var':1250.,
 					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
 	
 	def default_bounds(self):
 		if self.time_units=='seconds':
 			return {'cost':[0.,10],'dead_time':[0.,0.4],'dead_time_sigma':[0.,3.],
-					'phase_out_prob':[0.,1.],'internal_var':[self._internal_var*1e-6,self._internal_var*1e3],
+					'phase_out_prob':[0.,1.],'internal_var':[0.,1e5],
 					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
 		else:
 			return {'cost':[0.,0.01],'dead_time':[0.,400.],'dead_time_sigma':[0.,3000.],
-					'phase_out_prob':[0.,1.],'internal_var':[self._internal_var*1e-6,self._internal_var*1e3],
+					'phase_out_prob':[0.,1.],'internal_var':[0.,1e2],
 					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
 	
 	def default_optimizer_kwargs(self):
@@ -473,6 +587,7 @@ class Fitter:
 		else:
 			raise ValueError('Unknown experiment "{0}"'.format(self.experiment))
 		self._fit_output = minimizer(merit_function)
+		self.__fit_internals__ = None
 		return self._fit_output
 	
 	# Savers
@@ -485,7 +600,7 @@ class Fitter:
 			session = str(session)
 		else:
 			session = '-'.join([str(s) for s in session])
-		fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
+		fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
 				experiment=self.experiment,method=self.method,name=self._subjectSession_state['name'],
 				session=session,optimizer=self.optimizer,suffix=self.suffix)
 		logging.info('Saving Fitter state to file "%s"',fname)
@@ -518,7 +633,7 @@ class Fitter:
 			method_b['full_confidence'].append(self._bounds[par])
 		
 		sanitized_start_point = np.array(method_sp[self.method])
-		sanitized_bounds = np.array(method_b[self.method]).T
+		sanitized_bounds = list(np.array(method_b[self.method]).T)
 		fitted_parameters = method_fitted_parameters[self.method]
 		fixed_parameters = method_fixed_parameters[self.method]
 		if len(fitted_parameters)==1 and self.optimizer=='cma':
@@ -561,7 +676,7 @@ class Fitter:
 			del options['restarts']
 			options = cma.CMAOptions(options)
 			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts),package='cma')
-			minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
+			#~ minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
 		else:
 			repetitions = optimizer_kwargs['repetitions']
 			_start_points = [start_point]
@@ -572,7 +687,7 @@ class Fitter:
 				_start_points.append(np.array(temp))
 			start_point_generator = iter(_start_points)
 			minimizer = lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='scipy')
-			minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
+			#~ minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
 		
 		return minimizer
 	
@@ -580,10 +695,11 @@ class Fitter:
 		output = {'xs':[],'funs':[],'nfev':0,'nit':0,'xbest':None,'funbest':None,'xmean':None,'xstd':None,'funmean':None,'funstd':None}
 		repetitions = 0
 		for start_point in start_point_generator:
-			print bounds,start_point
 			repetitions+=1
+			logging.info('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
 			res = scipy.optimize.minimize(merit,start_point, method=optimizer,bounds=bounds,options=optimizer_kwargs)
-			print 'round {0} ended. Result: '.format(repetitions),res.fun,res.x
+			logging.info('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
+			logging.info('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
 			output['xs'].append(res.x)
 			output['funs'].append(res.fun)
 			output['nfev']+=res.nfev
@@ -591,7 +707,7 @@ class Fitter:
 			if output['funbest'] is None or res.fun<output['funbest']:
 				output['funbest'] = res.fun
 				output['xbest'] = res.x
-			print 'Best so far: ',output['funbest'],output['xbest']
+			logging.info('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
 		arr_xs = np.array(output['xs'])
 		arr_funs = np.array(output['funs'])
 		output['xmean'] = np.mean(arr_xs)
@@ -617,6 +733,7 @@ class Fitter:
 		else:
 			_nT = self.dp.nT
 			log_odds = self.dp.log_odds()
+			_dt = self.dp.dt
 		# Likely to raise warnings with exp overflows or invalid values in multiply
 		# if confidence_map_slope is inf or log_odds==high_confidence_threshold
 		# These issues are resolved naturally in the two line statements
@@ -632,91 +749,292 @@ class Fitter:
 				padded_phigh = phigh
 			padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
 			phigh = np.nanmean(padded_phigh,axis=2)
-		return phigh,1.-phigh
+		return phigh
+	
+	def confidence_mapping_pdf_matrix(self,first_passage_pdfs,parameters,mapped_confidences=None,confidence_partition=100,return_unconvoluted_matrix=False):
+		indeces = np.arange(0,confidence_partition,dtype=np.float)
+		confidence_array = np.linspace(0,1,confidence_partition)
+		nT = self.dp.nT
+		confidence_matrix = np.zeros((2,confidence_partition,nT))
+		if mapped_confidences is None:
+			mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		conv_val,conv_x = self.get_dead_time_convolver(parameters)
+		_nT = len(conv_x)
+		conv_confidence_matrix = np.zeros((2,confidence_partition,nT+_nT))
+		for performance,(first_passage_pdf,mapped_confidence) in enumerate(zip(first_passage_pdfs,mapped_confidences)):
+			cv_inds = np.interp(mapped_confidence,confidence_array,indeces)
+			for index,(cv_ind,floor_cv_ind,ceil_cv_ind,fppdf) in enumerate(zip(cv_inds,np.floor(cv_inds),np.ceil(cv_inds),first_passage_pdf)):
+				norm = 0.
+				if index==0:
+					weight = 1.-np.mod(cv_ind,1)
+					confidence_matrix[performance,floor_cv_ind,index] = fppdf*weight
+					confidence_matrix[performance,ceil_cv_ind,index] = fppdf*(1.-weight)
+					prev_norm = fppdf
+				else:
+					if np.abs(cv_ind-prior_cv_ind)<=1.5:
+						weight = 1.-np.mod(cv_ind,1)
+						confidence_matrix[performance,floor_cv_ind,index] = fppdf*weight
+						confidence_matrix[performance,ceil_cv_ind,index] = fppdf*(1.-weight)
+						norm = fppdf
+					else:
+						if prior_cv_ind<cv_ind:
+							prev_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[prior_fppdf,0.],1)
+							curr_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[0.,fppdf],1)
+							
+							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1))
+							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1))
+							prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
+							curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
+							
+							prev_norm+= np.sum(prev_temp_fppdf)
+							norm = np.sum(curr_temp_fppdf)
+							confidence_matrix[performance,prior_ceil_cv_ind+1:ceil_cv_ind+1,index-1]+= prev_temp_fppdf
+							confidence_matrix[performance,prior_ceil_cv_ind+1:ceil_cv_ind+1,index] = curr_temp_fppdf
+						else:
+							prev_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[prior_fppdf,0.],1)
+							curr_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[0.,fppdf],1)
+							
+							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1))
+							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1))
+							prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
+							curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
+							
+							prev_norm+= np.sum(prev_temp_fppdf)
+							norm = np.sum(curr_temp_fppdf)
+							confidence_matrix[performance,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index-1]+= prev_temp_fppdf
+							confidence_matrix[performance,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index] = curr_temp_fppdf
+					if prev_norm>0:
+						confidence_matrix[performance,:,index-1]*=prior_fppdf/prev_norm
+					if index<len(cv_inds)-1:
+						end_index = np.min([_nT+index-1,nT])
+						cv_end_index = end_index-index+1
+						conv_confidence_matrix[performance,:,index-1:end_index]+= np.reshape(confidence_matrix[performance,:,index-1],(-1,1))*conv_val[:cv_end_index]
+					else:
+						if norm>0:
+							confidence_matrix[performance,:,index]*=fppdf/norm
+						end_index = np.min([_nT+index,nT])
+						cv_end_index = end_index-index
+						conv_confidence_matrix[performance,:,index:end_index]+= np.reshape(confidence_matrix[performance,:,index],(-1,1))*conv_val[:cv_end_index]
+					prev_norm = norm
+				prior_fppdf = fppdf
+				prior_cv_ind = cv_ind
+				prior_floor_cv_ind = floor_cv_ind
+				prior_ceil_cv_ind = ceil_cv_ind
+		if return_unconvoluted_matrix:
+			output = (conv_confidence_matrix,confidence_matrix)
+		else:
+			output = conv_confidence_matrix
+		return output
+	
+	def decision_pdf(self,first_passage_pdfs,parameters):
+		conv_val,conv_x = self.get_dead_time_convolver(parameters)
+		_nT = len(conv_x)
+		decision_pdfs = np.zeros((2,self.dp.nT+_nT))
+		for performance,first_passage_pdf in enumerate(first_passage_pdfs):
+			for index in range(self.dp.nT-1,-1,-1):
+				decision_pdfs[performance,index:index+_nT]+= first_passage_pdf[index]*conv_val
+		return decision_pdfs
+	
+	def mapped_confidence_probability(self,confidence_mapping_pdf_matrix):
+		return np.sum(confidence_mapping_pdf_matrix,axis=confidence_mapping_pdf_matrix.ndim)*self.dp.dt
 	
 	# Experiment dependant merits
 	# Luminancia experiment
 	def lum_full_merit(self,x):
 		parameters = self.get_parameters_dict(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters.cost)
+		self.dp.set_cost(parameters['cost'])
 		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.max_RT
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
 		for index,drift in enumerate(self.mu):
-			g1,g2 = add_dead_time(self.dp.rt(drift,bounds=(xub,xlb)),self.dp.dt,parameters['dead_time'],parameters['dead_time_sigma'])
+			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
-				if perf==1:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g1,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				else:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g2,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
+				#~ temp = np.log(temp1)
+				#~ if np.isnan(temp) or np.isnan(temp1):
+					#~ print parameters,temp,temp1
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def lum_confidence_only_merit(self,x):
 		parameters = self.get_parameters_dict(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters.cost)
-		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.max_RT
-		phigh,plow = self.high_confidence_mapping(parameters['high_confidence_threshold'])
+		if self.__fit_internals__ is None:
+			self.dp.set_cost(parameters['cost'])
+			xub,xlb = self.dp.xbounds()
+			must_compute_first_passage_time = True
+			self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+		else:
+			must_compute_first_passage_time = False
+			first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
-			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_rt = np.concatenate((phigh*gs,plow*gs))
-			g1h,g2h,g1l,g2l = add_dead_time(confidence_rt,self.dp.dt,parameters['dead_time'],parameters['dead_time_sigma'])
-			gh = g1h+g2h
-			gl = g1l+g2l
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				if conf==2:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(gh,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				else:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(gl,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def lum_full_confidence_merit(self,x):
 		parameters = self.get_parameters_dict(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters.cost)
+		self.dp.set_cost(parameters['cost'])
 		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.25*parameters['phase_out_prob']/self.max_RT
-		phigh,plow = self.high_confidence_mapping(parameters['high_confidence_threshold'])
+		random_rt_likelihood = 0.25*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_rt = np.concatenate((phigh*gs,plow*gs))
-			g1h,g2h,g1l,g2l = add_dead_time(confidence_rt,self.dp.dt,parameters['dead_time'],parameters['dead_time_sigma'])
+			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				if perf==1 and conf==1:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g1h,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				elif perf==0 and conf==1:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g2h,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				elif perf==1 and conf==0:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g1l,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				else:
-					nlog_likelihood-=np.log(np.exp(-self.dp.rt_nlog_like(g2l,rt))*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# 2AFC experiment
-	def afc_full_merit(self,parameters):
-		return np.nan
+	def afc_full_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		for index,drift in enumerate(self.mu):
+			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			t = np.arange(0,gs.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
+				#~ temp = np.log(temp1)
+				#~ if np.isnan(temp) or np.isnan(temp1):
+					#~ print parameters,temp,temp1
+				#~ nlog_likelihood-= temp
+		return nlog_likelihood
 	
-	def afc_confidence_only_merit(self,parameters):
-		return np.nan
+	def afc_confidence_only_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		if self.__fit_internals__ is None:
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			xub,xlb = self.dp.xbounds()
+			must_compute_first_passage_time = True
+			self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+		else:
+			must_compute_first_passage_time = False
+			first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
 	
-	def afc_full_confidence_merit(self,parameters):
-		return np.nan
+	def afc_full_confidence_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.25*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
 	
 	# Auditivo experiment
-	def aud_full_merit(self,parameters):
-		return np.nan
+	def aud_full_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		for index,drift in enumerate(self.mu):
+			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			t = np.arange(0,gs.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
+				#~ temp = np.log(temp1)
+				#~ if np.isnan(temp) or np.isnan(temp1):
+					#~ print parameters,temp,temp1,gs[int(perf)]
+				#~ nlog_likelihood-= temp
+		return nlog_likelihood
 	
-	def aud_confidence_only_merit(self,parameters):
-		return np.nan
+	def aud_confidence_only_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		if self.__fit_internals__ is None:
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			xub,xlb = self.dp.xbounds()
+			must_compute_first_passage_time = True
+			self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+		else:
+			must_compute_first_passage_time = False
+			first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
 	
-	def aud_full_confidence_merit(self,parameters):
-		return np.nan
+	def aud_full_confidence_merit(self,x):
+		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.25*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
 	
 	# Theoretical predictions
 	def theoretical_rt_distribution(self,fit_output=None,return_confidence=True,include_t0=True):
@@ -741,10 +1059,11 @@ class Fitter:
 			self.dp.internal_var = parameters['internal_var']
 			self.dp.set_cost(parameters['cost'])
 			_max_RT = self.dp.t[np.ceil(self.max_RT/self.dp.dt)]
+			_min_RT = self.dp.t[np.ceil(self.min_RT/self.dp.dt)]
 			if include_t0:
-				phased_out_rt[self.dp.t<_max_RT] = 1./(_max_RT)
+				phased_out_rt[np.logical_and(self.dp.t<=_max_RT,self.dp.t>=_max_RT)] = 1./(_max_RT-_min_RT)
 			else:
-				phased_out_rt[self.dp.t[1:]<_max_RT] = 1./(_max_RT)
+				phased_out_rt[np.logical_and(self.dp.t[1:]<=_max_RT,self.dp.t[1:]>=_max_RT)] = 1./(_max_RT-_min_RT)
 			xub,xlb = self.dp.xbounds()
 			for index,drift in enumerate(self.mu):
 				g = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
@@ -777,9 +1096,13 @@ class Fitter:
 			self.dp.set_cost(parameters['cost'])
 			self.dp.set_internal_var(parameters['internal_var'])
 			_max_RT = self.dp.t[np.ceil(self.max_RT/self.dp.dt)]
+			_min_RT = self.dp.t[np.ceil(self.min_RT/self.dp.dt)]
+			if include_t0:
+				phased_out_rt[np.logical_and(self.dp.t<=_max_RT,self.dp.t>=_max_RT)] = 1./(_max_RT-_min_RT)
+			else:
+				phased_out_rt[np.logical_and(self.dp.t[1:]<=_max_RT,self.dp.t[1:]>=_max_RT)] = 1./(_max_RT-_min_RT)
 			
 			phigh,plow = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-			phased_out_rt[self.dp.t<_max_RT] = 1./(_max_RT)
 			
 			for index,drift in enumerate(self.mu):
 				g = dec_gs[drift]['all']
@@ -916,6 +1239,7 @@ def parse_input():
                          Indicates the experiment that you wish to fit. If set to
                          'all', all experiment data will be fitted. [Default 'all']
                          WARNING: is case insensitive.
+ '-g' or '--debug': Activates the debug messages
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -965,7 +1289,7 @@ def parse_input():
 	options =  {'task':1,'ntasks':1,'task_base':1,'method':'full','optimizer':'cma','save':False,
 				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':14.,
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
-				'optimizer_kwargs':{},'experiment':'all'}
+				'optimizer_kwargs':{},'experiment':'all','debug':False}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -990,6 +1314,8 @@ def parse_input():
 				options['save'] = True
 			elif arg=='--plot':
 				options['plot'] = True
+			elif arg=='-g' or arg=='--debug':
+				options['debug'] = True
 			elif arg=='--fit':
 				options['fit'] = True
 			elif arg=='--no-fit':
@@ -1057,8 +1383,11 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
-	logging.basicConfig(level=logging.INFO)
 	options = parse_input()
+	if options['debug']:
+		logging.basicConfig(level=logging.DEBUG)
+	else:
+		logging.basicConfig(level=logging.INFO)
 	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
@@ -1101,7 +1430,7 @@ if __name__=="__main__":
 											optimizer_kwargs=options['optimizer_kwargs'])
 					fitter.save()
 			if options['plot'] or save:
-				fname = 'testing/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
+				fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
 				if s._single_session:
 					ses = str(s.session)
 				else:

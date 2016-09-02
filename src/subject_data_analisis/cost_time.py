@@ -142,6 +142,8 @@ class DecisionPolicy():
 	
 	def set_internal_var(self,internal_var):
 		self.internal_var = internal_var
+		self.model_var = internal_var
+		self._model_var = internal_var
 	
 	def set_cost(self,cost):
 		"""
@@ -185,7 +187,7 @@ class DecisionPolicy():
 		"""
 		self.cost = float(cost)*np.ones(self.nT-1)
 		self._cost_details = {'type':0,'details':cost}
-		self.shift_cost()
+		#~ self.shift_cost()
 	
 	def set_polynomial_cost(self,coefs):
 		"""
@@ -196,7 +198,7 @@ class DecisionPolicy():
 		"""
 		self.cost = np.polyval(coefs,self.t[:-1])
 		self._cost_details = {'type':1,'details':coefs[:]}
-		self.shift_cost()
+		#~ self.shift_cost()
 	
 	def set_array_cost(self,cost,shift_cost=False):
 		"""
@@ -207,8 +209,8 @@ class DecisionPolicy():
 		"""
 		self.cost = cost[:]
 		self._cost_details = {'type':2,'details':None}
-		if shift_cost:
-			self.shift_cost()
+		#~ if shift_cost:
+			#~ self.shift_cost()
 	
 	def shift_cost(self):
 		"""

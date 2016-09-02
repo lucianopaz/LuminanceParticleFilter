@@ -5,7 +5,7 @@
 from __future__ import division
 import numpy as np
 from scipy import io as io
-import os, itertools, sys, random, re
+import os, itertools, sys, random, re, scipy.integrate
 
 class SubjectSession:
 	def __init__(self,name,session,experiment,data_dir):
@@ -347,6 +347,26 @@ def increase_histogram_count(d,n):
 	randperm_indexes = np.random.permutation(n)
 	return out[randperm_indexes], indexes[randperm_indexes]
 
+def compute_roc(performance,confidence,partition=101):
+	edges = np.linspace(0,1,int(partition))
+	roc = np.zeros((int(partition),2),dtype=np.float)
+	hit = performance==1
+	miss = np.logical_not(hit)
+	nhits = np.sum(hit.astype(np.float))
+	nmisses = np.sum(miss.astype(np.float))
+	for i,ue in enumerate(edges):
+		if i<int(partition)-1:
+			p1 = np.sum(np.logical_and(confidence<ue,hit).astype(np.float))/nhits
+			p2 = np.sum(np.logical_and(confidence<ue,miss).astype(np.float))/nmisses
+		else:
+			p1 = np.sum(np.logical_and(confidence<=ue,hit).astype(np.float))/nhits
+			p2 = np.sum(np.logical_and(confidence<=ue,miss).astype(np.float))/nmisses
+		roc[i,:] = np.array([p1,p2])
+	return roc
+
+def compute_auc(roc):
+	return scipy.integrate.simps(roc[:,1],roc[:,0])
+
 def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'):
 	try:
 		from matplotlib import pyplot as plt
@@ -417,6 +437,14 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 			plt.hist(data[inds,3],100,normed=True)
 			plt.xlabel(headers[key][3])
 			plt.suptitle(key)
+			
+			roc = compute_roc(data[inds,2],data[inds,3])
+			auc = compute_auc(roc)
+			plt.figure()
+			plt.plot(roc[:,0],roc[:,1])
+			plt.xlabel(r'$P(conf<x|hit)$')
+			plt.ylabel(r'$P(conf<x|miss)$')
+			plt.title(key+' (AUC = {0})'.format(auc))
 	plt.show(True)
 
 if __name__=="__main__":
