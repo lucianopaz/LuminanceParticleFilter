@@ -9,23 +9,52 @@ from utils import normpdf
 import scipy.signal
 
 subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+#~ subjects = io.filter_subjects_list(subjects,'experiment_2AFC')
+#~ subjects = io.filter_subjects_list(subjects,'experiment_Auditivo')
 subjects = io.filter_subjects_list(subjects,'experiment_Luminancia')
 s = subjects[0]
 fitter = fits.Fitter(s)
 fitter.set_fixed_parameters({'high_confidence_threshold':1.08,'confidence_map_slope':8.})
-fitter.set_start_point()
+fitter.set_start_point({'internal_var':0.001})
 fitter.set_bounds()
 fitter.fixed_parameters,fitter.fitted_parameters,start_point,bounds = fitter.sanitize_parameters_x0_bounds()
 parameters = fitter.get_parameters_dict(start_point)
 #~ print parameters
 m = fitter.dp
 m.set_cost(parameters['cost'])
-xub,xlb = m.xbounds()
-first_passage_pdf = list(m.rt(0.,bounds=(xub,xlb)))
+if not fitter.experiment is 'Luminancia':
+	m.set_internal_var(parameters['internal_var'])
+xub,xlb,v,v_explore,v1,v2 = m.xbounds(return_values=True)
+first_passage_pdf = np.array(m.rt(0.,bounds=(xub,xlb)))
+
+#~ print m.prior_mu_var
+#~ print np.array(1.)/np.array(0.)
+#~ plt.figure()
+#~ plt.subplot(121)
+#~ plt.plot(m.t,m.bounds.T)
+#~ plt.subplot(122)
+#~ plt.plot(m.t,np.array([xub,xlb]).T)
+#~ print xub,xlb
+#~ 
+#~ plt.figure()
+#~ plt.subplot(221)
+#~ plt.imshow(v.T,aspect="auto",interpolation='none',extent=[m.t[0],m.t[-1],0,1],origin='lower')
+#~ plt.colorbar()
+#~ plt.subplot(223)
+#~ plt.imshow(v.T,aspect="auto",interpolation='none',extent=[m.t[0],m.t[-1],0,1],origin='lower')
+#~ plt.colorbar()
+#~ plt.subplot(122)
+#~ plt.plot(v1)
+#~ plt.plot(v2)
+#~ plt.show(True)
+
 
 confidence_value = fitter.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-#~ plt.figure()
-#~ plt.plot(m.t,confidence_value.T)
+plt.figure()
+plt.subplot(121)
+plt.plot(m.t,confidence_value.T)
+plt.subplot(122)
+plt.plot(m.t,first_passage_pdf.T)
 
 conv_confidence_matrix,confidence_matrix = fitter.confidence_mapping_pdf_matrix(first_passage_pdf,parameters,return_unconvoluted_matrix=True)
 conv_t = np.arange(0,conv_confidence_matrix.shape[2],dtype=np.float)*m.dt

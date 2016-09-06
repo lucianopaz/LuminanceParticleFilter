@@ -597,8 +597,8 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 		#endif
 		setted_ub = false;
 		bound_ind = bound_strides*i;
-		ub[bound_ind] = 1.;
-		lb[bound_ind] = 0.;
+		ub[bound_ind] = g[n-1];
+		lb[bound_ind] = g[0];
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];
@@ -791,8 +791,8 @@ double DecisionPolicyConjPrior::backpropagate_value(double rho, bool compute_bou
 		#endif
 		setted_ub = false;
 		bound_ind = bound_strides*i;
-		ub[bound_ind] = 1.;
-		lb[bound_ind] = 0.;
+		ub[bound_ind] = g[n-1];
+		lb[bound_ind] = g[0];
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];
@@ -1219,8 +1219,8 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 		#endif
 		setted_ub = false;
 		bound_ind = bound_strides*i;
-		ub[bound_ind] = 1.;
-		lb[bound_ind] = 0.;
+		ub[bound_ind] = g[n-1];
+		lb[bound_ind] = g[0];
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];
@@ -1426,8 +1426,8 @@ double DecisionPolicyDiscretePrior::backpropagate_value(double rho, bool compute
 		#endif
 		setted_ub = false;
 		bound_ind = bound_strides*i;
-		ub[bound_ind] = 1.;
-		lb[bound_ind] = 0.;
+		ub[bound_ind] = g[n-1];
+		lb[bound_ind] = g[0];
 		
 		//Speed increase by reducing array access
 		const double t_i = t[i];

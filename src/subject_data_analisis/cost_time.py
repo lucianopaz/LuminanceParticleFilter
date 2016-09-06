@@ -74,6 +74,54 @@ class DecisionPolicy():
 		self.tp = tp
 		self.rho = 0.
 	
+	def __str__(self):
+		if hasattr(self,'_cost_details'):
+			_cost_details = self._cost_details
+			if _cost_details['type']<2:
+				cost = self._cost_details['details']
+			else:
+				cost = self.cost
+		else:
+			_cost_details = {'type':None,'details':None}
+			cost = self.cost
+		if hasattr(self,'bounds'):
+			bounds = self.bounds
+		else:
+			bounds = None
+		string = """
+<{class_module}.{class_name} object at {address}>
+model_var = {model_var}, _model_var = {_model_var}, internal_var = {internal_var},
+prior_mu_mean = {prior_mu_mean}, prior_mu_var = {prior_mu_var}, prior_type = {prior_type},
+dg = {dg}, n = {n}, dt = {dt}, nT = {nT}, T = {T},
+reward = {reward}, penalty = {penalty}, iti = {iti}, tp = {tp}, rho = {rho},
+cost_type = {cost_type}, cost = {cost},
+use_cpp_extension = {use_cpp_extension},
+bounds = {bounds}
+		""".format(class_module=self.__class__.__module__,
+					class_name=self.__class__.__name__,
+					address=hex(id(self)),
+					model_var=self.model_var,
+					_model_var=self._model_var,
+					internal_var=self.internal_var,
+					prior_mu_mean=self.prior_mu_mean,
+					prior_mu_var=self.prior_mu_var,
+					prior_type=self.prior_type,
+					dg=self.dg,
+					n=self.n,
+					dt=self.dt,
+					nT=self.nT,
+					T=self.T,
+					reward=self.reward,
+					penalty=self.penalty,
+					iti=self.iti,
+					tp=self.tp,
+					rho=self.rho,
+					cost_type=_cost_details['type'],
+					cost=cost,
+					use_cpp_extension=use_cpp_extension,
+					bounds=bounds)
+		return string
+	
 	def set_n(self,n):
 		self.n = n
 		if self.n%2==0:
@@ -167,7 +215,7 @@ class DecisionPolicy():
 		Related functions:
 		set_constant_cost, set_polynomial_cost, set_array_cost
 		"""
-		if isinstance(cost,np.ndarray):
+		if isinstance(cost,np.ndarray) and not np.isscalar(cost):
 			s = cost.shape
 			if len(s)>1:
 				raise ValueError("Cost must be a scalar or a one dimensional numpy ndarray")
