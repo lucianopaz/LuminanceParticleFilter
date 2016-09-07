@@ -13,9 +13,9 @@ subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir)
 #~ subjects = io.filter_subjects_list(subjects,'experiment_Auditivo')
 subjects = io.filter_subjects_list(subjects,'experiment_Luminancia')
 s = subjects[0]
-fitter = fits.Fitter(s)
-fitter.set_fixed_parameters({'high_confidence_threshold':1.08,'confidence_map_slope':8.})
-fitter.set_start_point({'internal_var':0.001})
+fitter = fits.Fitter(s,decisionPolicyKwArgs={'n':201})
+fitter.set_fixed_parameters({'high_confidence_threshold':2.8,'confidence_map_slope':2.})
+fitter.set_start_point({'cost':0.,'internal_var':1000.})
 fitter.set_bounds()
 fitter.fixed_parameters,fitter.fitted_parameters,start_point,bounds = fitter.sanitize_parameters_x0_bounds()
 parameters = fitter.get_parameters_dict(start_point)
@@ -27,13 +27,19 @@ if not fitter.experiment is 'Luminancia':
 xub,xlb,v,v_explore,v1,v2 = m.xbounds(return_values=True)
 first_passage_pdf = np.array(m.rt(0.,bounds=(xub,xlb)))
 
+plt.figure()
+log_odds = m.log_odds()
+plt.plot(log_odds.T)
+
 #~ print m.prior_mu_var
 #~ print np.array(1.)/np.array(0.)
-#~ plt.figure()
-#~ plt.subplot(121)
-#~ plt.plot(m.t,m.bounds.T)
-#~ plt.subplot(122)
-#~ plt.plot(m.t,np.array([xub,xlb]).T)
+plt.figure()
+plt.subplot(121)
+plt.plot(m.t,m.bounds.T)
+plt.subplot(222)
+plt.plot(m.t,np.array([xub,xlb]).T)
+plt.subplot(224)
+plt.plot(m.t[:-1],np.diff(np.array([xub,xlb]).T,axis=0))
 #~ print xub,xlb
 #~ 
 #~ plt.figure()

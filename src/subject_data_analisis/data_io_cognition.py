@@ -24,6 +24,14 @@ class SubjectSession:
 			self.data_dir = str(data_dir)
 			self._single_data_dir = True
 	
+	def get_key(self):
+		if self._single_session:
+			session = str(self.session)
+		else:
+			session = '['+', '.join([str(s) for s in self.session])+']'
+		key = '{experiment} name={name} session={session}'.format(experiment=self.experiment,name=self.name,session=session)
+		return key
+	
 	def list_data_files(self,override_raw_data_dir=None):
 		if self._single_data_dir:
 			if override_raw_data_dir:
@@ -254,9 +262,9 @@ def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by
 		output[experiment] = merged_data
 	return output
 
-def merge_subjectSessions(subjectSessions,criteria='all'):
-	criteria = criteria.lower()
-	if criteria=='all':
+def merge_subjectSessions(subjectSessions,merge='all'):
+	merge = merge.lower()
+	if merge=='all':
 		data_dirs = {}
 		sessions = {}
 		for ss in subjectSessions:
@@ -274,7 +282,7 @@ def merge_subjectSessions(subjectSessions,criteria='all'):
 			else:
 				sessions[exp].extend(ss.session)
 		output = [SubjectSession('all',sessions[exp],exp,data_dirs[exp]) for exp in data_dirs.keys()]
-	elif criteria=='all_sessions':
+	elif merge=='sessions':
 		sessions = {}
 		for ss in subjectSessions:
 			exp = str(ss.experiment)
@@ -288,7 +296,7 @@ def merge_subjectSessions(subjectSessions,criteria='all'):
 			else:
 				sessions[key]['data'].extend(ss.session)
 		output = [SubjectSession(sessions[key]['name'],sessions[key]['data'],sessions[key]['experiment'],sessions[key]['data_dir']) for key in sessions.keys()]
-	elif criteria=='all_subjects':
+	elif merge=='subjects':
 		data_dirs = {}
 		for ss in subjectSessions:
 			exp = str(ss.experiment)
@@ -303,7 +311,7 @@ def merge_subjectSessions(subjectSessions,criteria='all'):
 				data_dirs[key]['data'].extend(ss.data_dir)
 		output = [SubjectSession('all',data_dirs[key]['session'],data_dirs[key]['experiment'],data_dirs[key]['data']) for key in data_dirs.keys()]
 	else:
-		ValueError('Unknown merge criteria "{0}"'.format(criteria))
+		ValueError('Unknown merge criteria "{0}"'.format(merge))
 	return output
 
 def increase_histogram_count(d,n):
@@ -379,14 +387,14 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 	filtered_subjects = filter_subjects_list(subjects)
 	print str(len(filtered_subjects))+' filtered subjectSessions with all_experiments criteria'
 	subjects = filter_subjects_list(subjects,'all_sessions_by_experiment')
-	print str(len(subjects))+' filtered subjectSessions with all_sessions_by_experiment criteria'
+	print str(len(subjects))+' filtered subjectSessions with sessions_by_experiment criteria'
 	
-	merged_all = merge_subjectSessions(subjects,criteria='all')
-	print str(len(merged_all))+' merged subjectSessions with criteria all'
-	merged_all_sessions = merge_subjectSessions(subjects,criteria='all_sessions')
-	print str(len(merged_all_sessions))+' merged subjectSessions with criteria all_sessions'
-	merged_all_subjects = merge_subjectSessions(subjects,criteria='all_subjects')
-	print str(len(merged_all_subjects))+' merged subjectSessions with criteria all_subjects'
+	merged_all = merge_subjectSessions(subjects,merge='all')
+	print str(len(merged_all))+' merged subjectSessions with merge all'
+	merged_sessions = merge_subjectSessions(subjects,merge='sessions')
+	print str(len(merged_sessions))+' merged subjectSessions with merge sessions'
+	merged_subjects = merge_subjectSessions(subjects,merge='subjects')
+	print str(len(merged_subjects))+' merged subjectSessions with merge subjects'
 	
 	experiments_data = merge_data_by_experiment(subjects,return_column_headers=True)
 	
@@ -405,7 +413,7 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 			matches = matches and test
 		print 'Merged all matches shape? {0}'.format('Yes' if matches else 'No')
 		matches = True
-		for test_subj in [t for t in merged_all_sessions if t.experiment==key]:
+		for test_subj in [t for t in merged_sessions if t.experiment==key]:
 			testdata = test_subj.load_data()
 			test = testdata.shape[0]==data[data[:,-2]==int(test_subj.name)].shape[0]
 			if not test:
@@ -413,7 +421,7 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 			matches = matches and test
 		print 'Merged all sessions matches shape? {0}'.format('Yes' if matches else 'No')
 		matches = True
-		for test_subj in [t for t in merged_all_subjects if t.experiment==key]:
+		for test_subj in [t for t in merged_subjects if t.experiment==key]:
 			testdata = test_subj.load_data()
 			test = testdata.shape[0]==data[data[:,-1]==test_subj.session].shape[0]
 			if not test:

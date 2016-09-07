@@ -233,14 +233,16 @@ class Fitter:
 				self._ISI = 0.05
 				self._T = 1.
 				self._iti = 1.5
+				self._dt = 0.004
 			else:
 				self._ISI = 50.
 				self._T = 1000.
 				self._iti = 1500.
-			self._dt = self._ISI*0.5
+				self._dt = 4.
+			#~ self._dt = self._ISI/50.
 			self._forced_non_decision_time = 0.
-			self._model_var = 50./self._dt
-			self._internal_var = 0.
+			self._model_var = 50./self._ISI
+			self._internal_var = self._model_var
 			self._fixed_stim_duration = 0.
 			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
@@ -318,7 +320,10 @@ class Fitter:
 		self.performance = dat[:,2]
 		self.confidence = dat[:,3]
 		logging.debug('Trials loaded = %d',len(self.performance))
-		self.mu,self.mu_indeces,count = np.unique(self.contrast/self._dt,return_inverse=True,return_counts=True)
+		if self.experiment=='Luminancia':
+			self.mu,self.mu_indeces,count = np.unique(self.contrast/self._ISI,return_inverse=True,return_counts=True)
+		else:
+			self.mu,self.mu_indeces,count = np.unique(self.contrast,return_inverse=True,return_counts=True)
 		logging.debug('Number of different drifts = %d',len(self.mu))
 		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
 		if self.mu[0]==0:
@@ -415,6 +420,18 @@ class Fitter:
 		parameters.update(fit_output[0])
 		return parameters
 	
+	def get_fixed_parameters(self):
+		return self.fixed_parameters
+	
+	def get_fitted_parameters(self):
+		return self.fitted_parameters
+	
+	def get_start_point(self):
+		return self._start_point
+	
+	def get_bounds(self):
+		return self.bounds
+	
 	def __getstate__(self):
 		state = {'experiment':self.experiment,
 				 'time_units':self.time_units,
@@ -463,9 +480,12 @@ class Fitter:
 		_nT = int(_T/_dt)+1
 		nT = int(_T/self.dp.dt)+1
 		dense_conv_x = np.arange(0,_nT)*_dt
-		dense_conv_val = normpdf(dense_conv_x,parameters['dead_time'],parameters['dead_time_sigma'])
-		dense_conv_val[dense_conv_x<parameters['dead_time']] = 0.
-		
+		if parameters['dead_time_sigma']>0:
+			dense_conv_val = normpdf(dense_conv_x,parameters['dead_time'],parameters['dead_time_sigma'])
+			dense_conv_val[dense_conv_x<parameters['dead_time']] = 0.
+		else:
+			dense_conv_val = np.zeros_like(dense_conv_x)
+			dense_conv_val[np.floor(parameters['dead_time']/_dt)] = 1.
 		conv_x = np.arange(0,nT)*self.dp.dt
 		if must_downsample:
 			ratio = np.ceil(_nT/nT)
@@ -502,7 +522,7 @@ class Fitter:
 	
 	def get_fitter_plottable_dict(self,edges=None,merge=None,fit_output=None):
 		if edges is None:
-			edges = np.linspace(0,self.rt_cutoff,101)
+			edges = np.linspace(0,self.rt_cutoff,51)
 		rt_edges = edges
 		rt_centers = np.array([0.5*(e1+e0) for e1,e0 in zip(rt_edges[1:],rt_edges[:-1])])
 		c_edges = np.linspace(0,1,self.confidence_partition+1)
@@ -523,8 +543,8 @@ class Fitter:
 		model,t = self.theoretical_rt_confidence_distribution(fit_output)
 		c = np.linspace(0,1,self.confidence_partition)
 		model*=len(self.performance)
-		model_hit_histogram2d = model[1]
-		model_miss_histogram2d = model[0]
+		model_hit_histogram2d = model[0]
+		model_miss_histogram2d = model[1]
 		model_rt = np.sum(model,axis=1)
 		model_confidence = np.sum(model,axis=2)*self.dp.dt
 		
@@ -593,30 +613,27 @@ class Fitter:
 		return defaults
 	
 	def default_fixed_parameters(self):
-		if self.experiment=='Luminancia':
-			return {'internal_var':0.}
-		else:
-			return {}
+		return {}
 	
 	def default_start_point(self):
 		if self.time_units=='seconds':
-			return {'cost':0.2,'dead_time':0.1,'dead_time_sigma':0.5,
-					'phase_out_prob':0.1,'internal_var':1250.,
-					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
+			return {'cost':0.2,'dead_time':0.4,'dead_time_sigma':0.08,
+					'phase_out_prob':0.1,'internal_var':7000.,
+					'high_confidence_threshold':0.05,'confidence_map_slope':3}
 		else:
-			return {'cost':0.0002,'dead_time':100.,'dead_time_sigma':500.,
-					'phase_out_prob':0.1,'internal_var':1250.,
-					'high_confidence_threshold':0.5,'confidence_map_slope':1e9}
+			return {'cost':0.0002,'dead_time':400.,'dead_time_sigma':80.,
+					'phase_out_prob':0.1,'internal_var':7000.,
+					'high_confidence_threshold':0.05,'confidence_map_slope':3}
 	
 	def default_bounds(self):
 		if self.time_units=='seconds':
 			return {'cost':[0.,10],'dead_time':[0.,0.4],'dead_time_sigma':[0.001,3.],
 					'phase_out_prob':[0.,1.],'internal_var':[1.,1e5],
-					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
+					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		else:
 			return {'cost':[0.,0.01],'dead_time':[0.,400.],'dead_time_sigma':[1.,3000.],
 					'phase_out_prob':[0.,1.],'internal_var':[0.001,1e2],
-					'high_confidence_threshold':[0.,3.],'confidence_map_slope':[0.,1e12]}
+					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 	
 	def default_optimizer_kwargs(self):
 		if self.optimizer=='cma':
@@ -848,20 +865,20 @@ class Fitter:
 		conv_val,conv_x = self.get_dead_time_convolver(parameters)
 		_nT = len(conv_x)
 		conv_confidence_matrix = np.zeros((2,self.confidence_partition,nT+_nT))
-		for performance,(first_passage_pdf,mapped_confidence) in enumerate(zip(first_passage_pdfs,mapped_confidences)):
+		for decision_ind,(first_passage_pdf,mapped_confidence) in enumerate(zip(first_passage_pdfs,mapped_confidences)):
 			cv_inds = np.interp(mapped_confidence,confidence_array,indeces)
 			for index,(cv_ind,floor_cv_ind,ceil_cv_ind,fppdf) in enumerate(zip(cv_inds,np.floor(cv_inds),np.ceil(cv_inds),first_passage_pdf)):
 				norm = 0.
 				if index==0:
 					weight = 1.-np.mod(cv_ind,1)
-					confidence_matrix[performance,floor_cv_ind,index] = fppdf*weight
-					confidence_matrix[performance,ceil_cv_ind,index]+= fppdf*(1.-weight)
+					confidence_matrix[decision_ind,floor_cv_ind,index] = fppdf*weight
+					confidence_matrix[decision_ind,ceil_cv_ind,index]+= fppdf*(1.-weight)
 					prev_norm = fppdf
 				else:
 					if np.abs(cv_ind-prior_cv_ind)<=1.5:
 						weight = 1.-np.mod(cv_ind,1)
-						confidence_matrix[performance,floor_cv_ind,index] = fppdf*weight
-						confidence_matrix[performance,ceil_cv_ind,index]+= fppdf*(1.-weight)
+						confidence_matrix[decision_ind,floor_cv_ind,index] = fppdf*weight
+						confidence_matrix[decision_ind,ceil_cv_ind,index]+= fppdf*(1.-weight)
 						norm = fppdf
 					else:
 						if prior_cv_ind<cv_ind:
@@ -875,8 +892,8 @@ class Fitter:
 							
 							prev_norm+= np.sum(prev_temp_fppdf)
 							norm = np.sum(curr_temp_fppdf)
-							confidence_matrix[performance,prior_ceil_cv_ind+1:ceil_cv_ind+1,index-1]+= prev_temp_fppdf
-							confidence_matrix[performance,prior_ceil_cv_ind+1:ceil_cv_ind+1,index] = curr_temp_fppdf
+							confidence_matrix[decision_ind,prior_ceil_cv_ind+1:ceil_cv_ind+1,index-1]+= prev_temp_fppdf
+							confidence_matrix[decision_ind,prior_ceil_cv_ind+1:ceil_cv_ind+1,index] = curr_temp_fppdf
 						else:
 							prev_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[prior_fppdf,0.],1)
 							curr_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[0.,fppdf],1)
@@ -889,23 +906,23 @@ class Fitter:
 							prev_norm+= np.sum(prev_temp_fppdf)
 							norm = np.sum(curr_temp_fppdf)
 							if floor_cv_ind>0:
-								confidence_matrix[performance,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index-1]+= prev_temp_fppdf
-								confidence_matrix[performance,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index] = curr_temp_fppdf
+								confidence_matrix[decision_ind,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index-1]+= prev_temp_fppdf
+								confidence_matrix[decision_ind,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index] = curr_temp_fppdf
 							else:
-								confidence_matrix[performance,prior_floor_cv_ind-1::-1,index-1]+= prev_temp_fppdf
-								confidence_matrix[performance,prior_floor_cv_ind-1::-1,index] = curr_temp_fppdf
+								confidence_matrix[decision_ind,prior_floor_cv_ind-1::-1,index-1]+= prev_temp_fppdf
+								confidence_matrix[decision_ind,prior_floor_cv_ind-1::-1,index] = curr_temp_fppdf
 					if prev_norm>0:
-						confidence_matrix[performance,:,index-1]*=prior_fppdf/prev_norm
+						confidence_matrix[decision_ind,:,index-1]*=prior_fppdf/prev_norm
 					if index<len(cv_inds)-1:
 						end_index = _nT+index-1#np.min([_nT+index-1,nT])
 						cv_end_index = end_index-index+1
-						conv_confidence_matrix[performance,:,index-1:end_index]+= np.reshape(confidence_matrix[performance,:,index-1],(-1,1))*conv_val[:cv_end_index]
+						conv_confidence_matrix[decision_ind,:,index-1:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index-1],(-1,1))*conv_val[:cv_end_index]
 					else:
 						if norm>0:
-							confidence_matrix[performance,:,index]*=fppdf/norm
+							confidence_matrix[decision_ind,:,index]*=fppdf/norm
 						end_index = _nT+index#np.min([_nT+index,nT])
 						cv_end_index = end_index-index
-						conv_confidence_matrix[performance,:,index:end_index]+= np.reshape(confidence_matrix[performance,:,index],(-1,1))*conv_val[:cv_end_index]
+						conv_confidence_matrix[decision_ind,:,index:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index],(-1,1))*conv_val[:cv_end_index]
 					prev_norm = norm
 				prior_fppdf = fppdf
 				prior_cv_ind = cv_ind
@@ -921,13 +938,13 @@ class Fitter:
 		conv_val,conv_x = self.get_dead_time_convolver(parameters)
 		_nT = len(conv_x)
 		decision_pdfs = np.zeros((2,self.dp.nT+_nT))
-		for performance,first_passage_pdf in enumerate(first_passage_pdfs):
+		for decision_ind,first_passage_pdf in enumerate(first_passage_pdfs):
 			for index in range(self.dp.nT-1,-1,-1):
-				decision_pdfs[performance,index:index+_nT]+= first_passage_pdf[index]*conv_val
+				decision_pdfs[decision_ind,index:index+_nT]+= first_passage_pdf[index]*conv_val
 		return decision_pdfs
 	
 	def mapped_confidence_probability(self,confidence_mapping_pdf_matrix):
-		return np.sum(confidence_mapping_pdf_matrix,axis=confidence_mapping_pdf_matrix.ndim)*self.dp.dt
+		return np.sum(confidence_mapping_pdf_matrix,axis=2)*self.dp.dt
 	
 	# Experiment dependant merits
 	# Luminancia experiment
@@ -935,6 +952,7 @@ class Fitter:
 		parameters = self.get_parameters_dict(x)
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
 		for index,drift in enumerate(self.mu):
@@ -946,7 +964,7 @@ class Fitter:
 				#~ temp = np.log(temp1)
 				#~ if np.isnan(temp) or np.isnan(temp1):
 					#~ print parameters,temp,temp1
-				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def lum_confidence_only_merit(self,x):
@@ -954,6 +972,7 @@ class Fitter:
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
 			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
 			xub,xlb = self.dp.xbounds()
 			must_compute_first_passage_time = True
 			self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
@@ -980,6 +999,7 @@ class Fitter:
 		parameters = self.get_parameters_dict(x)
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
@@ -990,7 +1010,7 @@ class Fitter:
 			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# 2AFC experiment
@@ -1006,8 +1026,8 @@ class Fitter:
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
-				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				#~ temp1 = rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
 				#~ temp = np.log(temp1)
 				#~ if np.isnan(temp) or np.isnan(temp1):
 					#~ print parameters,temp,temp1
@@ -1057,7 +1077,7 @@ class Fitter:
 			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# Auditivo experiment
@@ -1073,11 +1093,11 @@ class Fitter:
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
-				nlog_likelihood-= np.log(rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				#~ temp1 = rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
 				#~ temp = np.log(temp1)
 				#~ if np.isnan(temp) or np.isnan(temp1):
-					#~ print parameters,temp,temp1,gs[int(perf)]
+					#~ print parameters,temp,temp1,gs[1-int(perf)]
 				#~ nlog_likelihood-= temp
 		return nlog_likelihood
 	
@@ -1124,7 +1144,7 @@ class Fitter:
 			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# Theoretical predictions
@@ -1148,7 +1168,11 @@ class Fitter:
 				output = confidence_likelihood*self.mu_prob[index]
 			else:
 				output+= confidence_likelihood*self.mu_prob[index]
-		return output/self.dp.dt+random_rt_likelihood, np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
+		output/=(np.sum(output)*self.dp.dt)
+		t = np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition*np.ones_like(t)
+		random_rt_likelihood[np.logical_or(t<self.min_RT,t>self.max_RT)] = 0.
+		return output*(1.-parameters['phase_out_prob'])+random_rt_likelihood, np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
 	
 	# Plotter
 	def plot_fit(self,fit_output=None,saver=None,display=True):
@@ -1185,6 +1209,9 @@ class Fitter_plottable_dict():
 	
 	def __getitem__(self,key):
 		return self.dictionary[key]
+	
+	def __setitem__(self,key,value):
+		self.dictionary[key] = value
 	
 	def __iadd__(self,other):
 		for other_key in other.keys():
@@ -1231,6 +1258,7 @@ class Fitter_plottable_dict():
 						for required_data_entry in self.required_data_entries[required_data]:
 							self[other_key][category][required_data][required_data_entry] = \
 								copy.deepcopy(other[other_key][category][required_data][required_data_entry])
+		return self
 	
 	def __add__(self,other):
 		output = Fitter_plottable_dict(self)
@@ -1254,7 +1282,7 @@ class Fitter_plottable_dict():
 					else:
 						self[key][category][required_data]['y']/=np.sum(self[key][category][required_data]['y'])
 	
-	def plot(self,saver=None,display=True):
+	def plot(self,saver=None,display=True,xlim_rt_cutoff=True):
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to produce any plot')
 		self.normalize()
@@ -1263,23 +1291,27 @@ class Fitter_plottable_dict():
 			subj = self.dictionary[key]['experimental']
 			model = self.dictionary[key]['theoretical']
 			
-			plt.figure(figsize=(10,12))
+			rt_cutoff = subj['rt']['x'][-1]+0.5*(subj['rt']['x'][-1]-subj['rt']['x'][-2])
+			
+			fig = plt.figure(figsize=(10,12))
 			gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, wspace=0.1, top=0.95,bottom=0.70)
 			gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
 			gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
 			axrt = plt.subplot(gs1[0])
-			plt.step(subj['rt']['x'],subj['rt']['y'][1],'b',label='Subject hit')
-			plt.step(subj['rt']['x'],-subj['rt']['y'][0],'r',label='Subject miss')
-			plt.step(model['rt']['x'],model['rt']['y'][1],'b',label='Model hit',linewidth=3)
-			plt.step(model['rt']['x'],-model['rt']['y'][0],'r',label='Model miss',linewidth=3)
+			plt.step(subj['rt']['x'],subj['rt']['y'][0],'b',label='Subject hit')
+			plt.step(subj['rt']['x'],-subj['rt']['y'][1],'r',label='Subject miss')
+			plt.plot(model['rt']['x'],model['rt']['y'][0],'b',label='Model hit',linewidth=3)
+			plt.plot(model['rt']['x'],-model['rt']['y'][1],'r',label='Model miss',linewidth=3)
+			if xlim_rt_cutoff:
+				axrt.set_xlim([0,rt_cutoff])
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Prob density')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 			axconf = plt.subplot(gs1[1])
-			plt.step(subj['confidence']['x'],subj['confidence']['y'][1],'b',label='Subject hit')
-			plt.step(subj['confidence']['x'],-subj['confidence']['y'][0],'r',label='Subject miss')
-			plt.step(model['confidence']['x'],model['confidence']['y'][1],'b',label='Model hit',linewidth=3)
-			plt.step(model['confidence']['x'],-model['confidence']['y'][0],'r',label='Model miss',linewidth=3)
+			plt.step(subj['confidence']['x'],subj['confidence']['y'][0],'b',label='Subject hit')
+			plt.step(subj['confidence']['x'],-subj['confidence']['y'][1],'r',label='Subject miss')
+			plt.plot(model['confidence']['x'],model['confidence']['y'][0],'b',label='Model hit',linewidth=3)
+			plt.plot(model['confidence']['x'],-model['confidence']['y'][1],'r',label='Model miss',linewidth=3)
 			plt.xlabel('Confidence')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 			
@@ -1287,8 +1319,6 @@ class Fitter_plottable_dict():
 						   np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
 			vmax = np.max([np.max([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
 						   np.max([model['hit_histogram']['z'],model['miss_histogram']['z']])])
-			
-			print model['hit_histogram']['z']
 			
 			ax00 = plt.subplot(gs2[0,0])
 			plt.imshow(subj['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
@@ -1309,6 +1339,8 @@ class Fitter_plottable_dict():
 			im = plt.imshow(model['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 						extent=[model['miss_histogram']['x'][0],model['miss_histogram']['x'][-1],0,1])
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+			if xlim_rt_cutoff:
+				ax00.set_xlim([0,rt_cutoff])
 			
 			ax00.tick_params(labelleft=True, labelbottom=False)
 			ax01.tick_params(labelleft=False, labelbottom=False)
@@ -1320,13 +1352,15 @@ class Fitter_plottable_dict():
 			plt.ylabel('Prob density')
 			
 			plt.suptitle(key)
-		if saver:
-			if isinstance(saver,str):
-				plt.savefig(saver,bbox_inches='tight')
-			else:
-				saver.savefig()
-		if display:
-			plt.show(True)
+			if saver:
+				if isinstance(saver,str):
+					plt.savefig(saver,bbox_inches='tight')
+				else:
+					saver.savefig(fig)
+				if not display:
+					plt.close(fig)
+			if display:
+				plt.show(True)
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help
@@ -1555,9 +1589,9 @@ if __name__=="__main__":
 	ntasks = options['ntasks']
 	if save:
 		if task==0 and ntasks==1:
-			fname = "fit_{method}{suffix}".format(method=method,suffix=options['suffix'])
+			fname = "fits_cognition_{method}{suffix}".format(method=options['method'],suffix=options['suffix'])
 		else:
-			fname = "fit_{method}_{task}_{ntasks}{suffix}".format(method=method,task=task,ntasks=ntasks,suffix=options['suffix'])
+			fname = "fits_cognition_{method}_{task}_{ntasks}{suffix}".format(method=options['method'],task=task,ntasks=ntasks,suffix=options['suffix'])
 		if os.path.isdir("../../figs"):
 			fname = "../../figs/"+fname
 		if loc==Location.cluster:
