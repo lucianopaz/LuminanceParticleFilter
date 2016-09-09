@@ -233,12 +233,12 @@ class Fitter:
 				self._ISI = 0.05
 				self._T = 1.
 				self._iti = 1.5
-				self._dt = 0.004
+				self._dt = 0.008
 			else:
 				self._ISI = 50.
 				self._T = 1000.
 				self._iti = 1500.
-				self._dt = 4.
+				self._dt = 8.
 			#~ self._dt = self._ISI/50.
 			self._forced_non_decision_time = 0.
 			self._model_var = 50./self._ISI
@@ -250,13 +250,13 @@ class Fitter:
 			logging.debug('Auditivo experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.5
-				self._dt = 0.001
+				self._dt = 0.005
 				self._T = 0.3
 				self._iti = 2.
 				self._forced_non_decision_time = 0.3
 			else:
 				self._ISI = 500.
-				self._dt = 1.
+				self._dt = 5.
 				self._T = 300.
 				self._iti = 2000.
 				self._forced_non_decision_time = 300.
@@ -269,12 +269,12 @@ class Fitter:
 			logging.debug('2AFC experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.3
-				self._dt = 0.001
+				self._dt = 0.005
 				self._T = 0.3
 				self._iti = 1.5
 			else:
 				self._ISI = 300.
-				self._dt = 1.
+				self._dt = 5.
 				self._T = 300.
 				self._iti = 1500.
 			self._forced_non_decision_time = 0.
@@ -520,7 +520,7 @@ class Fitter:
 			key = "{experiment}".format(experiment=experiment)
 		return key
 	
-	def get_fitter_plottable_dict(self,edges=None,merge=None,fit_output=None):
+	def get_fitter_plot_handler(self,edges=None,merge=None,fit_output=None):
 		if edges is None:
 			edges = np.linspace(0,self.rt_cutoff,51)
 		rt_edges = edges
@@ -557,7 +557,7 @@ class Fitter:
 									   'miss_histogram':{'x':t,'y':c,'z':model_miss_histogram2d},
 									   'rt':{'x':t,'y':model_rt},
 									   'confidence':{'x':c,'y':model_confidence}}}}
-		return Fitter_plottable_dict(output,self.time_units)
+		return Fitter_plot_handler(output,self.time_units)
 	
 	# Defaults
 	def default_decisionPolicyKwArgs(self):
@@ -616,24 +616,76 @@ class Fitter:
 		return {}
 	
 	def default_start_point(self):
-		if self.time_units=='seconds':
-			return {'cost':0.2,'dead_time':0.4,'dead_time_sigma':0.08,
-					'phase_out_prob':0.1,'internal_var':7000.,
-					'high_confidence_threshold':0.05,'confidence_map_slope':3}
-		else:
-			return {'cost':0.0002,'dead_time':400.,'dead_time_sigma':80.,
-					'phase_out_prob':0.1,'internal_var':7000.,
-					'high_confidence_threshold':0.05,'confidence_map_slope':3}
+		try:
+			return self.__default_start_point__
+		except:
+			if hasattr(self,'fixed_parameters'):
+				self.__default_start_point__ = self.fixed_parameters.copy()
+			elif hasattr(self,'_fixed_parameters'):
+				self.__default_start_point__ = self._fixed_parameters.copy()
+			else:
+				self.__default_start_point__ = {}
+			if not 'cost' in self.__default_start_point__.keys():
+				self.__default_start_point__['cost'] = 0.02 if self.time_units=='seconds' else 0.00002
+			if not 'internal_var' in self.__default_start_point__.keys():
+				self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
+			if not 'phase_out_prob' in self.__default_start_point__.keys():
+				self.__default_start_point__['phase_out_prob'] = 0.05
+			if not 'dead_time' in self.__default_start_point__.keys():
+				dead_time = sorted(self.rt)[int(0.025*len(self.rt))]
+				self.__default_start_point__['dead_time'] = dead_time
+			if not 'confidence_map_slope' in self.__default_start_point__.keys():
+				self.__default_start_point__['confidence_map_slope'] = 17.2
+			
+			must_make_expensive_guess = ((not 'dead_time_sigma' in self.__default_start_point__.keys()) or\
+										((not 'high_confidence_threshold' in self.__default_start_point__.keys()) and self.method!='full'))
+			if must_make_expensive_guess:
+				self.dp.set_cost(self.__default_start_point__['cost'])
+				self.dp.set_internal_var(self.__default_start_point__['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				first_passage_pdf = None
+				for drift,drift_prob in zip(self.mu,self.mu_prob):
+					gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+					if first_passage_pdf is None:
+						first_passage_pdf = gs*drift_prob
+					else:
+						first_passage_pdf+= gs*drift_prob
+				first_passage_pdf/=(np.sum(first_passage_pdf)*self.dp.dt)
+				
+				if not 'dead_time_sigma' in self.__default_start_point__.keys():
+					mean_pdf = np.sum(first_passage_pdf*self.dp.t)*self.dp.dt
+					var_pdf = np.sum(first_passage_pdf*(self.dp.t-mean_pdf)**2)*self.dp.dt
+					var_rt = np.var(self.rt)
+					min_dead_time_sigma_sp = 0.01 if self.time_units=='seconds' else 10.
+					if var_rt-var_pdf>0:
+						self.__default_start_point__['dead_time_sigma'] = np.max([np.sqrt(var_rt-var_pdf),min_dead_time_sigma_sp])
+					else:
+						self.__default_start_point__['dead_time_sigma'] = min_dead_time_sigma_sp
+				
+				rt_mode_ind = np.argmax(first_passage_pdf[0])
+				rt_mode_ind+= 4 if self.dp.nT-rt_mode_ind>4 else 0
+				log_odds = self.dp.log_odds()
+				if not 'high_confidence_threshold' in self.__default_start_point__.keys():
+					self.__default_start_point__['high_confidence_threshold'] = log_odds[0][rt_mode_ind]
+			else:
+				if not 'high_confidence_threshold' in self.__default_start_point__.keys():
+					self.__default_start_point__['high_confidence_threshold'] = 0.3
+			
+			return self.__default_start_point__
 	
 	def default_bounds(self):
 		if self.time_units=='seconds':
-			return {'cost':[0.,10],'dead_time':[0.,0.4],'dead_time_sigma':[0.001,3.],
+			defaults = {'cost':[0.,10],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
 					'phase_out_prob':[0.,1.],'internal_var':[1.,1e5],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		else:
-			return {'cost':[0.,0.01],'dead_time':[0.,400.],'dead_time_sigma':[1.,3000.],
+			defaults = {'cost':[0.,0.01],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
 					'phase_out_prob':[0.,1.],'internal_var':[0.001,1e2],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
+		default_sp = self.default_start_point()
+		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
+			defaults['high_confidence_threshold'][1] = 2*default_sp['high_confidence_threshold']
+		return defaults
 	
 	def default_optimizer_kwargs(self):
 		if self.optimizer=='cma':
@@ -841,7 +893,9 @@ class Fitter:
 		# Likely to raise warnings with exp overflows or invalid values in multiply
 		# if confidence_map_slope is inf or log_odds==high_confidence_threshold
 		# These issues are resolved naturally in the two line statements
-		phigh = 1./(1.+np.exp(confidence_map_slope*(high_confidence_threshold-log_odds)))
+		with warnings.catch_warnings():
+			warnings.simplefilter("ignore")
+			phigh = 1./(1.+np.exp(confidence_map_slope*(high_confidence_threshold-log_odds)))
 		phigh[high_confidence_threshold==log_odds] = 0.5
 		
 		if _dt:
@@ -914,13 +968,13 @@ class Fitter:
 					if prev_norm>0:
 						confidence_matrix[decision_ind,:,index-1]*=prior_fppdf/prev_norm
 					if index<len(cv_inds)-1:
-						end_index = _nT+index-1#np.min([_nT+index-1,nT])
+						end_index = _nT+index-1
 						cv_end_index = end_index-index+1
 						conv_confidence_matrix[decision_ind,:,index-1:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index-1],(-1,1))*conv_val[:cv_end_index]
 					else:
 						if norm>0:
 							confidence_matrix[decision_ind,:,index]*=fppdf/norm
-						end_index = _nT+index#np.min([_nT+index,nT])
+						end_index = _nT+index
 						cv_end_index = end_index-index
 						conv_confidence_matrix[decision_ind,:,index:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index],(-1,1))*conv_val[:cv_end_index]
 					prev_norm = norm
@@ -928,7 +982,9 @@ class Fitter:
 				prior_cv_ind = cv_ind
 				prior_floor_cv_ind = floor_cv_ind
 				prior_ceil_cv_ind = ceil_cv_ind
+		conv_confidence_matrix/=(np.sum(conv_confidence_matrix)*self.dp.dt)
 		if return_unconvoluted_matrix:
+			confidence_matrix/=(np.sum(confidence_matrix)*self.dp.dt)
 			output = (conv_confidence_matrix,confidence_matrix)
 		else:
 			output = conv_confidence_matrix
@@ -960,10 +1016,6 @@ class Fitter:
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
-				#~ temp1 = rt_likelihood(t,gs[int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
-				#~ temp = np.log(temp1)
-				#~ if np.isnan(temp) or np.isnan(temp1):
-					#~ print parameters,temp,temp1
 				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
@@ -979,7 +1031,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1027,11 +1079,6 @@ class Fitter:
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
 				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				#~ temp1 = rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
-				#~ temp = np.log(temp1)
-				#~ if np.isnan(temp) or np.isnan(temp1):
-					#~ print parameters,temp,temp1
-				#~ nlog_likelihood-= temp
 		return nlog_likelihood
 	
 	def afc_confidence_only_merit(self,x):
@@ -1046,7 +1093,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1094,11 +1141,6 @@ class Fitter:
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
 				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-				#~ temp1 = rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood
-				#~ temp = np.log(temp1)
-				#~ if np.isnan(temp) or np.isnan(temp1):
-					#~ print parameters,temp,temp1,gs[1-int(perf)]
-				#~ nlog_likelihood-= temp
 		return nlog_likelihood
 	
 	def aud_confidence_only_merit(self,x):
@@ -1113,7 +1155,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1179,9 +1221,9 @@ class Fitter:
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to plot fit')
 		
-		self.get_fitter_plottable_dict(fit_output=fit_output).plot(saver=saver,display=display)
+		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,display=display)
 
-class Fitter_plottable_dict():
+class Fitter_plot_handler():
 	def __init__(self,obj,time_units):
 		self._time_units = time_units
 		self.required_data = ['hit_histogram','miss_histogram','rt','confidence']
@@ -1199,7 +1241,7 @@ class Fitter_plottable_dict():
 							self.dictionary[key][category][required_data][required_data_entry] = \
 								copy.deepcopy(obj[key][category][required_data][required_data_entry])
 		except:
-			raise RuntimeError('Invalid object used to init Fitter_plottable_dict')
+			raise RuntimeError('Invalid object used to init Fitter_plot_handler')
 	
 	def time_units(self):
 		return {'seconds':'s','milliseconds':'ms'}[self._time_units]
@@ -1261,7 +1303,7 @@ class Fitter_plottable_dict():
 		return self
 	
 	def __add__(self,other):
-		output = Fitter_plottable_dict(self)
+		output = Fitter_plot_handler(self)
 		output+=other
 		return output
 	
@@ -1361,6 +1403,19 @@ class Fitter_plottable_dict():
 					plt.close(fig)
 			if display:
 				plt.show(True)
+	
+	def save(self,fname):
+		logging.debug('Fitter_plot_handler state that will be saved = "%s"',self.__getstate__())
+		logging.info('Saving Fitter_plot_handler state to file "%s"',fname)
+		f = open(fname,'w')
+		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
+		f.close()
+	
+	def __setstate__(self,state):
+		self.__init__(state['dictionary'],state['time_units'])
+	
+	def __getstate__(self):
+		return {'dictionary':self.dictionary,'time_units':self._time_units}
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help
@@ -1384,6 +1439,8 @@ def parse_input():
                         parameter spaces. If the optimization is performed on a single
                         dimension, the optimizer is changed to 'Nelder-Mead'. [Default cma]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
+ '--save_plot_handler': This flag takes no value. If present, the plot_handler is saved.
+ '--load_plot_handler': This flag takes no value. If present, the plot_handler is loaded from the disk.
  '--plot': This flag takes no values. If present it displays the plotted figure
            and freezes execution until the figure is closed.
  '--fit': This flag takes no values. If present it performs the fit for the selected
@@ -1425,6 +1482,8 @@ def parse_input():
                          'all', all experiment data will be fitted. [Default 'all']
                          WARNING: is case insensitive.
  '-g' or '--debug': Activates the debug messages
+ '-v' or '--verbose': Activates info messages (by default only warnings and errors
+                      are printed).
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -1475,7 +1534,7 @@ def parse_input():
 				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':None,
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
-				'plot_merge':None}
+				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -1498,10 +1557,16 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-s' or arg=='--save':
 				options['save'] = True
+			elif arg=='--save_plot_handler':
+				options['save_plot_handler'] = True
+			elif arg=='--load_plot_handler':
+				options['load_plot_handler'] = True
 			elif arg=='--plot':
 				options['plot'] = True
 			elif arg=='-g' or arg=='--debug':
 				options['debug'] = True
+			elif arg=='-v' or arg=='--verbose':
+				options['verbose'] = True
 			elif arg=='--fit':
 				options['fit'] = True
 			elif arg=='--no-fit':
@@ -1582,8 +1647,10 @@ if __name__=="__main__":
 	options = parse_input()
 	if options['debug']:
 		logging.basicConfig(level=logging.DEBUG)
-	else:
+	elif options['verbose']:
 		logging.basicConfig(level=logging.INFO)
+	else:
+		logging.basicConfig(level=logging.WARNING)
 	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
@@ -1604,9 +1671,16 @@ if __name__=="__main__":
 		saver = None
 	
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
+	#~ problem_2afc = io.filter_subjects_list(subjects,'experiment_2AFC')[51:54:2]
+	#~ problem_aud = io.filter_subjects_list(subjects,'experiment_Auditivo')[51:54:2]
+	#~ problem_lum = io.filter_subjects_list(subjects,'experiment_Luminancia')[7:10:2]
+	#~ print '2AFC: ',[s.get_key() for s in problem_2afc]
+	#~ print 'Aud: ',[s.get_key() for s in problem_aud]
+	#~ print 'Lum: ',[s.get_key() for s in problem_lum]
+	#~ raise RuntimeError('Testing')
 	if options['experiment']!='all':
 		subjects = io.filter_subjects_list(subjects,'experiment_'+options['experiment'])
-	fitter_plottable_dict = None
+	fitter_plot_handler = None
 	for i,s in enumerate(subjects):
 		logging.debug('Enumerated {0} subject {1}'.format(i,s))
 		if (i-task)%ntasks==0:
@@ -1631,8 +1705,8 @@ if __name__=="__main__":
 					fit_output = fitter.fit(fixed_parameters=parameters,\
 											optimizer_kwargs=options['optimizer_kwargs'])
 					fitter.save()
-			if options['plot'] or save:
-				logging.debug('Plot or save flags were True.')
+			if options['plot'] or save or options['save_plot_handler'] or options['load_plot_handler']:
+				logging.debug('Plot, save save_plot_fitter or load_plot_fitter flags were True.')
 				fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
 				if s._single_session:
 					ses = str(s.session)
@@ -1657,19 +1731,32 @@ if __name__=="__main__":
 									 optimizer=options['optimizer'],suffix=options['suffix'])
 						logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
 						fitter = load_Fitter_from_file(formated_fname)
-					logging.debug('Getting fitter_plottable_dict with merge_plot={0}.'.format(options['plot_merge']))
-					if fitter_plottable_dict is None:
-						fitter_plottable_dict = fitter.get_fitter_plottable_dict(merge=options['plot_merge'])
-					else:
-						fitter_plottable_dict+= fitter.get_fitter_plottable_dict(merge=options['plot_merge'])
 				except:
-					logging.debug('Failed to load fitter from file. Will continue to next subject.')
+					logging.warning('Failed to load fitter from file. Will continue to next subject.')
 					if options['debug']:
 						raise
 					else:
 						continue
+				logging.debug('Getting fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
+				if not options['load_plot_handler']:
+					logging.debug('Will not load Fitter_plot_handler from disk')
+					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'])
+					if options['save_plot_handler']:
+						logging.debug('Saving Fitter_plot_handler to file={0}.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
+						temp.save(formated_fname.replace('.pkl','_plot_handler.pkl'))
+				else:
+					logging.debug('Loading Fitter_plot_handler from file={0}'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
+					f = open(formated_fname.replace('.pkl','_plot_handler.pkl'),'r')
+					temp = pickle.load(f)
+					f.close()
+				logging.debug('Adding Fitter_plot_handlers')
+				if fitter_plot_handler is None:
+					fitter_plot_handler = temp
+				else:
+					fitter_plot_handler+= temp
 	if options['plot'] or save:
-		logging.debug('Plotting results from fitter_plottable_dict.')
-		fitter_plottable_dict.plot(saver=saver,display=options['plot'])
+		logging.debug('Plotting results from fitter_plot_handler.')
+		fitter_plot_handler.plot(saver=saver,display=options['plot'])
 		if save:
+			logging.debug('Closing saver.')
 			saver.close()

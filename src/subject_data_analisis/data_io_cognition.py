@@ -28,8 +28,8 @@ class SubjectSession:
 		if self._single_session:
 			session = str(self.session)
 		else:
-			session = '['+', '.join([str(s) for s in self.session])+']'
-		key = '{experiment} name={name} session={session}'.format(experiment=self.experiment,name=self.name,session=session)
+			session = '['+','.join([str(s) for s in self.session])+']'
+		key = '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.name,session=session)
 		return key
 	
 	def list_data_files(self,override_raw_data_dir=None):
@@ -383,6 +383,14 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 		loaded_plot_libs = False
 	
 	subjects = unique_subject_sessions(raw_data_dir)
+	
+	bla = {'2AFC':0.,'Auditivo':0.,'Luminancia':0.}
+	for s in subjects:
+		rt = np.sort(s.load_data()[:,1])
+		key = s.experiment
+		bla[key] = np.max([bla[key],np.std(rt)])
+	print bla
+	
 	print str(len(subjects))+' subjectSessions can be constructed found'
 	filtered_subjects = filter_subjects_list(subjects)
 	print str(len(filtered_subjects))+' filtered subjectSessions with all_experiments criteria'
