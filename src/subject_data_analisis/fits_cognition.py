@@ -676,11 +676,11 @@ class Fitter:
 	def default_bounds(self):
 		if self.time_units=='seconds':
 			defaults = {'cost':[0.,10],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
-					'phase_out_prob':[0.,1.],'internal_var':[1.,1e5],
+					'phase_out_prob':[0.,0.2],'internal_var':[1.,1e5],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		else:
 			defaults = {'cost':[0.,0.01],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
-					'phase_out_prob':[0.,1.],'internal_var':[0.001,1e2],
+					'phase_out_prob':[0.,0.2],'internal_var':[0.001,1e2],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		default_sp = self.default_start_point()
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
@@ -1671,15 +1671,10 @@ if __name__=="__main__":
 		saver = None
 	
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
-	#~ problem_2afc = io.filter_subjects_list(subjects,'experiment_2AFC')[51:54:2]
-	#~ problem_aud = io.filter_subjects_list(subjects,'experiment_Auditivo')[51:54:2]
-	#~ problem_lum = io.filter_subjects_list(subjects,'experiment_Luminancia')[7:10:2]
-	#~ print '2AFC: ',[s.get_key() for s in problem_2afc]
-	#~ print 'Aud: ',[s.get_key() for s in problem_aud]
-	#~ print 'Lum: ',[s.get_key() for s in problem_lum]
-	#~ raise RuntimeError('Testing')
 	if options['experiment']!='all':
 		subjects = io.filter_subjects_list(subjects,'experiment_'+options['experiment'])
+	logging.debug('Total number of subjectSessions listed = {0}'.format(len(subjects)))
+	logging.debug('Total number of subjectSessions that will be fitted = {0}'.format(len(range(task,len(subjects),ntasks))))
 	fitter_plot_handler = None
 	for i,s in enumerate(subjects):
 		logging.debug('Enumerated {0} subject {1}'.format(i,s))
