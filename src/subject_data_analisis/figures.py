@@ -612,6 +612,45 @@ def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
+def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=1.):
+	fname+=suffix
+	mo.set_time_units('seconds')
+	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
+	model_vars = np.linspace(minvar,maxvar,n)
+	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
+	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
+	
+	plt.figure(figsize=(8,4))
+	gs1 = gridspec.GridSpec(2, 1)
+	gs1.update(left=0.1, right=0.80)
+	gs2 = gridspec.GridSpec(1, 1)
+	gs2.update(left=0.85, right=0.9)
+	ax1 = plt.subplot(gs1[0])
+	ax2 = plt.subplot(gs1[1])
+	for v,c1,c2 in zip(model_vars,s1_colors,s2_colors):
+		m.set_internal_var(v)
+		xub,xlb = m.xbounds()
+		ax1.plot(m.t,xub,color=c1)
+		ax1.plot(m.t,xlb,color=c2)
+		ax2.plot(m.t,m.bounds[0],color=c1)
+		ax2.plot(m.t,m.bounds[1],color=c2)
+	ax1.set_ylabel('$x(t)$ Bounds',fontsize=16)
+	ax2.set_ylabel('$g$ Bounds',fontsize=16)
+	ax2.set_xlabel('T [s]',fontsize=16)
+	
+	cbar_ax = plt.subplot(gs2[0])
+	cbar = np.array([[plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,100)],
+					 [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,100)]])
+	cbar = np.swapaxes(cbar,0,1)
+	plt.sca(cbar_ax)
+	cbar_ax.yaxis.set_label_position("right")
+	cbar_ax.tick_params(reset=True,which='major',axis='y',direction='in',left=True, right=True,bottom=False,top=False,labelleft=False, labelright=True)
+	plt.imshow(cbar,aspect='auto',cmap=None,interpolation='none',origin='lower',extent=[0,1,minvar,maxvar])
+	cbar_ax.xaxis.set_ticks([])
+	
+	plt.ylabel('$\sigma^{2}$ [Hz]',fontsize=16)
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -628,13 +667,15 @@ def parse_input():
  '--decision_rt_sketch': Plot decision rt consolidation sketch
  '--bounds_vs_T_n_dt_sketch': Plot bounds as a function of dt and T sketch
  '--vexplore_drop_sketch': Plot variance of p(g+dg|g) as a function of time and also plot the drop in mean v_explore
+ '--bounds_vs_var': Plot decision bounds as a function of model_var
  
  '--show': Show the matplotlib figures after all have been created
  '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
  """
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
-				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg'}
+				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
+				'bounds_vs_var':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -675,6 +716,8 @@ if __name__=="__main__":
 		prior_sketch(suffix=opts['suffix'])
 	if opts['vexplore_drop_sketch']:
 		vexplore_drop_sketch(suffix=opts['suffix'])
+	if opts['bounds_vs_var']:
+		bounds_vs_var(suffix=opts['suffix'])
 	
 	if opts['show']:
 		plt.show(True)

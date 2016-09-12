@@ -1741,9 +1741,13 @@ if __name__=="__main__":
 						temp.save(formated_fname.replace('.pkl','_plot_handler.pkl'))
 				else:
 					logging.debug('Loading Fitter_plot_handler from file={0}'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
-					f = open(formated_fname.replace('.pkl','_plot_handler.pkl'),'r')
-					temp = pickle.load(f)
-					f.close()
+					try:
+						f = open(formated_fname.replace('.pkl','_plot_handler.pkl'),'r')
+						temp = pickle.load(f)
+						f.close()
+					except:
+						logging.debug('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
+						continue
 				logging.debug('Adding Fitter_plot_handlers')
 				if fitter_plot_handler is None:
 					fitter_plot_handler = temp
