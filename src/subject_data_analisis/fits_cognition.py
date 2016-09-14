@@ -1,6 +1,6 @@
 from __future__ import division
 
-import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy
+import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy, re
 import numpy as np
 from utils import normpdf
 
@@ -317,13 +317,16 @@ class Fitter:
 			raise RuntimeError('No trials can be fitted')
 		
 		self.contrast = dat[:,0]-self._distractor
+		if self.experiment=='Luminancia':
+			self._contrast = self.contrast/self._ISI
+		elif self.experiment=='2AFC':
+			self._contrast = self.contrast/self._ISI
+		else:
+			self._contrast = self.contrast/self._forced_non_decision_time
 		self.performance = dat[:,2]
 		self.confidence = dat[:,3]
 		logging.debug('Trials loaded = %d',len(self.performance))
-		if self.experiment=='Luminancia':
-			self.mu,self.mu_indeces,count = np.unique(self.contrast/self._ISI,return_inverse=True,return_counts=True)
-		else:
-			self.mu,self.mu_indeces,count = np.unique(self.contrast,return_inverse=True,return_counts=True)
+		self.mu,self.mu_indeces,count = np.unique(self._contrast,return_inverse=True,return_counts=True)
 		logging.debug('Number of different drifts = %d',len(self.mu))
 		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
 		if self.mu[0]==0:
@@ -628,7 +631,14 @@ class Fitter:
 			if not 'cost' in self.__default_start_point__.keys():
 				self.__default_start_point__['cost'] = 0.02 if self.time_units=='seconds' else 0.00002
 			if not 'internal_var' in self.__default_start_point__.keys():
-				self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
+				try:
+					from scipy.optimize import minimize
+					fun = lambda a: (np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/a))))**2
+					res = minimize(fun,1000.,method='Nelder-Mead')
+					self.__default_start_point__['internal_var'] = res.x[0]**2
+				except Exception, e:
+					logging.warning('Could not fit internal_var from data')
+					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
 			if not 'phase_out_prob' in self.__default_start_point__.keys():
 				self.__default_start_point__['phase_out_prob'] = 0.05
 			if not 'dead_time' in self.__default_start_point__.keys():
@@ -1255,52 +1265,55 @@ class Fitter_plot_handler():
 	def __setitem__(self,key,value):
 		self.dictionary[key] = value
 	
-	def __iadd__(self,other):
+	def __aliased_iadd__(self,other,key_aliaser=lambda key:key):
 		for other_key in other.keys():
-			if other_key in self.keys():
+			if key_aliaser(other_key) in self.keys():
 				for category in self.categories:
 					for required_data in self.required_data:
 						if required_data in ['hit_histogram','miss_histogram']:
-							xorig = self[other_key][category][required_data]['x']
+							xorig = self[key_aliaser(other_key)][category][required_data]['x']
 							xadded = other[other_key][category][required_data]['x']
-							orig = self[other_key][category][required_data]['z']
+							orig = self[key_aliaser(other_key)][category][required_data]['z']
 							added = other[other_key][category][required_data]['z']
 							if len(xorig)<len(xadded):
-								self[other_key][category][required_data]['x'] = copy.copy(xadded)
+								self[key_aliaser(other_key)][category][required_data]['x'] = copy.copy(xadded)
 								summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
-								self[other_key][category][required_data]['z'] = summed
+								self[key_aliaser(other_key)][category][required_data]['z'] = summed
 							elif len(xorig)>len(xadded):
 								summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
-								self[other_key][category][required_data]['z'] = summed
+								self[key_aliaser(other_key)][category][required_data]['z'] = summed
 							else:
-								self[other_key][category][required_data]['z']+= added
+								self[key_aliaser(other_key)][category][required_data]['z']+= added
 						elif required_data in ['rt']:
-							xorig = self[other_key][category][required_data]['x']
+							xorig = self[key_aliaser(other_key)][category][required_data]['x']
 							xadded = other[other_key][category][required_data]['x']
-							orig = self[other_key][category][required_data]['y']
+							orig = self[key_aliaser(other_key)][category][required_data]['y']
 							added = other[other_key][category][required_data]['y']
 							if len(xorig)<len(xadded):
-								self[other_key][category][required_data]['x'] = copy.copy(xadded)
+								self[key_aliaser(other_key)][category][required_data]['x'] = copy.copy(xadded)
 								summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
-								self[other_key][category][required_data]['y'] = summed
+								self[key_aliaser(other_key)][category][required_data]['y'] = summed
 							elif len(xorig)>len(xadded):
 								summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
-								self[other_key][category][required_data]['y'] = summed
+								self[key_aliaser(other_key)][category][required_data]['y'] = summed
 							else:
-								self[other_key][category][required_data]['y']+= added
+								self[key_aliaser(other_key)][category][required_data]['y']+= added
 						else:
-							self[other_key][category][required_data]['y']+= \
+							self[key_aliaser(other_key)][category][required_data]['y']+= \
 								other[other_key][category][required_data]['y']
 			else:
-				self[other_key] = {}
+				self[key_aliaser(other_key)] = {}
 				for category in self.categories:
-					self[other_key][category] = {}
+					self[key_aliaser(other_key)][category] = {}
 					for required_data in self.required_data:
-						self[other_key][category][required_data] = {}
+						self[key_aliaser(other_key)][category][required_data] = {}
 						for required_data_entry in self.required_data_entries[required_data]:
-							self[other_key][category][required_data][required_data_entry] = \
+							self[key_aliaser(other_key)][category][required_data][required_data_entry] = \
 								copy.deepcopy(other[other_key][category][required_data][required_data_entry])
 		return self
+	
+	def __iadd__(self,other):
+		return self.__aliased_iadd__(other)
 	
 	def __add__(self,other):
 		output = Fitter_plot_handler(self)
@@ -1416,6 +1429,18 @@ class Fitter_plot_handler():
 	
 	def __getstate__(self):
 		return {'dictionary':self.dictionary,'time_units':self._time_units}
+	
+	def merge(self,merge='all'):
+		if merge=='subjects':
+			key_aliaser = lambda key: re.sub('_subject_[0-9]+','',key)
+		elif merge=='sessions':
+			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',key)
+		elif merge=='all':
+			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',re.sub('_subject_[0-9]+','',key))
+		else:
+			raise ValueError('Unknown merge option={0}'.format(merge))
+		output = Fitter_plot_handler({},self._time_units)
+		return output.__aliased_iadd__(self,key_aliaser)
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help
@@ -1468,15 +1493,20 @@ def parse_input():
             single session is merged. For all the above, the experiments are
             always treated separately. If merge is None, the data of every
             subject and session is treated separately. [Default None]
- '--plot_merge': Can be None, 'all', 'all_sessions' or 'all_subjects'. This parameter
-            controls if and how the subject-session data should be merged before
-            performing the fits. If merge is set to 'all', all the data is merged
-            into a single "subjectSession". If merge is 'all_sessions', the
-            data across all sessions for the same subject is merged together.
-            If merge is 'all_subjects', the data across all subjects for a
-            single session is merged. For all the above, the experiments are
-            always treated separately. If merge is None, the data of every
-            subject and session is treated separately. [Default None]
+ '--plot_merge': Can be None, 'all', 'sessions' or 'subjects'. This parameter
+            controls if and how the subject-session data should be merged when
+            performing the plots. If merge is set to 'all', all subjects
+            and sessions data are pooled together to plot figures that
+            correspond to each experiment. If set to 'sessions' the sessions
+            are pooled together and a separate figure is created for each
+            subject and experiment. If set to 'subject', the subjects are
+            pooled together and separate figures for each experiment and
+            session are created. WARNING! This option does not override
+            the --merge option. If the --merge option was set, the data
+            that is used to perform the fits is merged together and
+            cannot be divided again. --plot_merge allows the user to fit
+            the data for every subject, experiment and session independently
+            but to pool them together while plotting. [Default None]
  '-e' or '--experiment': Can be 'all', 'luminancia', '2afc' or 'auditivo'.
                          Indicates the experiment that you wish to fit. If set to
                          'all', all experiment data will be fitted. [Default 'all']
@@ -1755,6 +1785,8 @@ if __name__=="__main__":
 					fitter_plot_handler+= temp
 	if options['plot'] or save:
 		logging.debug('Plotting results from fitter_plot_handler.')
+		if options['plot_merge'] and options['load_plot_handler']:
+			fitter_plot_handler = fitter_plot_handler.merge(options['plot_merge'])
 		fitter_plot_handler.plot(saver=saver,display=options['plot'])
 		if save:
 			logging.debug('Closing saver.')
