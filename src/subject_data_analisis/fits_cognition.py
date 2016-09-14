@@ -686,11 +686,11 @@ class Fitter:
 	def default_bounds(self):
 		if self.time_units=='seconds':
 			defaults = {'cost':[0.,10],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
-					'phase_out_prob':[0.,0.2],'internal_var':[1.,1e5],
+					'phase_out_prob':[0.,0.2],'internal_var':[1e-6,1e5],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		else:
 			defaults = {'cost':[0.,0.01],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
-					'phase_out_prob':[0.,0.2],'internal_var':[0.001,1e2],
+					'phase_out_prob':[0.,0.2],'internal_var':[1e-9,1e2],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		default_sp = self.default_start_point()
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
