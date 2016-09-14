@@ -619,22 +619,29 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=
 	model_vars = np.linspace(minvar,maxvar,n)
 	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
 	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
+	mus = np.array([0.1,0.5,1.,2.,5.,10.,15.,25.,50.,100.])
 	
-	plt.figure(figsize=(8,4))
-	gs1 = gridspec.GridSpec(2, 1)
-	gs1.update(left=0.1, right=0.80)
-	gs2 = gridspec.GridSpec(1, 1)
-	gs2.update(left=0.85, right=0.9)
+	plt.figure(figsize=(14,7))
+	gs1 = gridspec.GridSpec(2, 1,left=0.1, right=0.5,hspace=0.08)
+	gs2 = gridspec.GridSpec(1, 1,left=0.5, right=0.52)
+	gs3 = gridspec.GridSpec(1, 1,left=0.65, right=0.95)
 	ax1 = plt.subplot(gs1[0])
 	ax2 = plt.subplot(gs1[1])
-	for v,c1,c2 in zip(model_vars,s1_colors,s2_colors):
+	performance = np.zeros((len(model_vars),len(mus)))
+	evidence = np.zeros_like(performance)
+	for i,(v,c1,c2) in enumerate(zip(model_vars,s1_colors,s2_colors)):
 		m.set_internal_var(v)
 		xub,xlb = m.xbounds()
 		ax1.plot(m.t,xub,color=c1)
 		ax1.plot(m.t,xlb,color=c2)
 		ax2.plot(m.t,m.bounds[0],color=c1)
 		ax2.plot(m.t,m.bounds[1],color=c2)
+		for j,mu in enumerate(mus):
+			rt = m.rt(mu,bounds=(xub,xlb))
+			evidence[i,j] = mu/np.sqrt(v)
+			performance[i,j] = np.sum(rt[0])*m.dt
 	ax1.set_ylabel('$x(t)$ Bounds',fontsize=16)
+	ax1.tick_params(labelbottom=False)
 	ax2.set_ylabel('$g$ Bounds',fontsize=16)
 	ax2.set_xlabel('T [s]',fontsize=16)
 	
@@ -647,8 +654,26 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=
 	cbar_ax.tick_params(reset=True,which='major',axis='y',direction='in',left=True, right=True,bottom=False,top=False,labelleft=False, labelright=True)
 	plt.imshow(cbar,aspect='auto',cmap=None,interpolation='none',origin='lower',extent=[0,1,minvar,maxvar])
 	cbar_ax.xaxis.set_ticks([])
-	
 	plt.ylabel('$\sigma^{2}$ [Hz]',fontsize=16)
+	
+	evidence = evidence.flatten()
+	performance = performance.flatten()
+	fun = lambda x,a: 1./(1.+np.exp(a*x))
+	#~ jac = lambda x,a: np.array([-a*np.exp(a*x)/(1.+np.exp(a*x))**2,-x*np.exp(a*x)/(1.+np.exp(a*x))**2])
+	from scipy.optimize import curve_fit
+	popt,pcov = curve_fit(fun, evidence, performance)
+	print 'Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0]))
+	
+	ax = plt.subplot(gs3[0])
+	plt.plot(evidence,performance,'o',label='Simulations')
+	x = np.linspace(0,np.max(evidence),1000)
+	plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt[0]))
+	plt.xlim([0,10])
+	plt.ylabel('Performance',fontsize=16)
+	plt.xlabel(r'$\mu/\sigma$',fontsize=18)
+	plt.legend()
+	
+	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():

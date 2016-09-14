@@ -992,7 +992,7 @@ inline double DecisionPolicyDiscretePrior::x2g(double t, double x){
 		exponent_num = -(0.5*mu2_prior[i]*t+mu_prior[i]*x-max_exp)/_model_var;
 		exponent_den = -(0.5*mu2_prior[i]*t-mu_prior[i]*x-max_exp)/_model_var;
 		num+= weight_prior[i]*exp(exponent_num);
-		den+= weight_prior[i]*exp(exponent_num);
+		den+= weight_prior[i]*exp(exponent_den);
 	}
 	return 1./(1.+num/den);
 }
