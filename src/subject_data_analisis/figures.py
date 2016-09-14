@@ -612,7 +612,7 @@ def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=1.):
+def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=0.001):
 	fname+=suffix
 	mo.set_time_units('seconds')
 	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)

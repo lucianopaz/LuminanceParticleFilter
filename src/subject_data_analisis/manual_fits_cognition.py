@@ -101,7 +101,7 @@ class Sweeper:
 				temp = fits.rt_likelihood(t,rt_likelihood[1-int(perf)],rt)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*self.fitter.confidence_partition
 				#~ print temp
 				full_nLL-=np.log(fits.rt_likelihood(t,rt_likelihood[1-int(perf)],rt)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*self.fitter.confidence_partition)
-				confidence_only_nLL-=np.log(fits.rt_confidence_likelihood(t,np.sum(dec_rt_confidence_likelihood,axis=0),rt,conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*2)
+				full_nLL-=np.log(fits.confidence_likelihood(np.sum(dec_rt_confidence_likelihood,axis=2)[1-int(perf)],conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*(self.fitter.max_RT-self.fitter.min_RT))
 				full_confidence_nLL-=np.log(fits.rt_confidence_likelihood(t,dec_rt_confidence_likelihood[1-int(perf)],rt,conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood)
 		random_rt_likelihood = random_rt_likelihood*np.ones_like(t)
 		random_rt_likelihood[np.logical_or(t<self.fitter.min_RT,t>self.fitter.max_RT)] = 0.

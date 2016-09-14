@@ -178,6 +178,24 @@ def rt_likelihood(t,decision_pdf,RT):
 	prob = np.sum(decision_pdf[floor_t_ind:ceil_t_ind+1]*weight)
 	return prob
 
+def confidence_likelihood(confidence_pdf,confidence):
+	if confidence>1. or confidence<0.:
+		return 0.
+	nC = confidence_pdf.shape[0]
+	confidence_array = np.linspace(0.,1.,nC)
+	c_ind = np.interp(confidence,confidence_array,np.arange(0,nC,dtype=np.float))
+	
+	floor_c_ind = np.floor(c_ind)
+	ceil_c_ind = np.ceil(c_ind)
+	if floor_c_ind==nC-1:
+		ceil_c_ind = floor_c_ind
+		weight = np.array([1.])
+	else:
+		weight = np.array([1.-c_ind%1.,c_ind%1.])
+	
+	prob = np.sum(confidence_pdf[floor_c_ind:ceil_c_ind+1]*weight)
+	return prob
+
 def load_Fitter_from_file(fname):
 	f = open(fname,'r')
 	fitter = pickle.load(f)
@@ -633,8 +651,10 @@ class Fitter:
 			if not 'internal_var' in self.__default_start_point__.keys():
 				try:
 					from scipy.optimize import minimize
-					fun = lambda a: (np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/a))))**2
-					res = minimize(fun,1000.,method='Nelder-Mead')
+					with warnings.catch_warnings():
+						warnings.simplefilter("ignore")
+						fun = lambda a: (np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/a))))**2
+						res = minimize(fun,1000.,method='Nelder-Mead')
 					self.__default_start_point__['internal_var'] = res.x[0]**2
 				except Exception, e:
 					logging.warning('Could not fit internal_var from data')
@@ -1041,7 +1061,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1050,11 +1070,11 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def lum_full_confidence_merit(self,x):
@@ -1068,11 +1088,11 @@ class Fitter:
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,rt_conf_lik_matrix[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# 2AFC experiment
@@ -1103,7 +1123,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1112,11 +1132,11 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def afc_full_confidence_merit(self,x):
@@ -1130,11 +1150,11 @@ class Fitter:
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,rt_conf_lik_matrix[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# Auditivo experiment
@@ -1165,7 +1185,7 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		for index,drift in enumerate(self.mu):
@@ -1174,11 +1194,11 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			confidence_likelihood = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=0)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood,rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def aud_full_confidence_merit(self,x):
@@ -1192,11 +1212,11 @@ class Fitter:
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
-			t = np.arange(0,confidence_likelihood.shape[-1])*self.dp.dt
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				nlog_likelihood-=np.log(rt_confidence_likelihood(t,confidence_likelihood[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,rt_conf_lik_matrix[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	# Theoretical predictions
@@ -1214,12 +1234,12 @@ class Fitter:
 		output = None
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			confidence_likelihood = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
 			
 			if output is None:
-				output = confidence_likelihood*self.mu_prob[index]
+				output = rt_conf_lik_matrix*self.mu_prob[index]
 			else:
-				output+= confidence_likelihood*self.mu_prob[index]
+				output+= rt_conf_lik_matrix*self.mu_prob[index]
 		output/=(np.sum(output)*self.dp.dt)
 		t = np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition*np.ones_like(t)
@@ -1337,38 +1357,54 @@ class Fitter_plot_handler():
 					else:
 						self[key][category][required_data]['y']/=np.sum(self[key][category][required_data]['y'])
 	
-	def plot(self,saver=None,display=True,xlim_rt_cutoff=True):
+	def plot(self,saver=None,display=True,xlim_rt_cutoff=True,fig=None):
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to produce any plot')
 		self.normalize()
 		
-		for key in self.keys():
+		for key in sorted(self.keys()):
+			logging.info('Preparing to plot key {0}'.format(key))
+			print key
 			subj = self.dictionary[key]['experimental']
 			model = self.dictionary[key]['theoretical']
 			
 			rt_cutoff = subj['rt']['x'][-1]+0.5*(subj['rt']['x'][-1]-subj['rt']['x'][-2])
 			
-			fig = plt.figure(figsize=(10,12))
+			if fig is None:
+				fig = plt.figure(figsize=(10,12))
+				logging.debug('Created figure instance {0}'.format(fig.number))
+			else:
+				logging.debug('Will use figure instance {0}'.format(fig.number))
+				fig.clf()
+				plt.figure(fig.number)
+				logging.debug('Cleared figure instance {0} and setted it as the current figure'.format(fig.number))
 			gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, wspace=0.1, top=0.95,bottom=0.70)
 			gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
 			gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
+			logging.debug('Created gridspecs')
 			axrt = plt.subplot(gs1[0])
+			logging.debug('Created rt axes')
 			plt.step(subj['rt']['x'],subj['rt']['y'][0],'b',label='Subject hit')
 			plt.step(subj['rt']['x'],-subj['rt']['y'][1],'r',label='Subject miss')
 			plt.plot(model['rt']['x'],model['rt']['y'][0],'b',label='Model hit',linewidth=3)
 			plt.plot(model['rt']['x'],-model['rt']['y'][1],'r',label='Model miss',linewidth=3)
+			logging.debug('Plotted rt axes')
 			if xlim_rt_cutoff:
 				axrt.set_xlim([0,rt_cutoff])
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Prob density')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+			logging.debug('Completed rt axes plot, legend and labels')
 			axconf = plt.subplot(gs1[1])
+			logging.debug('Created confidence axes')
 			plt.step(subj['confidence']['x'],subj['confidence']['y'][0],'b',label='Subject hit')
 			plt.step(subj['confidence']['x'],-subj['confidence']['y'][1],'r',label='Subject miss')
 			plt.plot(model['confidence']['x'],model['confidence']['y'][0],'b',label='Model hit',linewidth=3)
 			plt.plot(model['confidence']['x'],-model['confidence']['y'][1],'r',label='Model miss',linewidth=3)
+			logging.debug('Plotted confidence axes')
 			plt.xlabel('Confidence')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+			logging.debug('Completed confidence axes plot, legend and labels')
 			
 			vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
 						   np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
@@ -1376,45 +1412,57 @@ class Fitter_plot_handler():
 						   np.max([model['hit_histogram']['z'],model['miss_histogram']['z']])])
 			
 			ax00 = plt.subplot(gs2[0,0])
+			logging.debug('Created subject hit axes')
 			plt.imshow(subj['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 						extent=[subj['hit_histogram']['x'][0],subj['hit_histogram']['x'][-1],0,1])
 			plt.ylabel('Confidence')
 			plt.title('Hit')
+			logging.debug('Populated subject hit axes')
 			ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
+			logging.debug('Created model hit axes')
 			plt.imshow(model['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 						extent=[model['hit_histogram']['x'][0],model['hit_histogram']['x'][-1],0,1])
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Confidence')
+			logging.debug('Populated model hit axes')
 			
 			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
+			logging.debug('Created subject miss axes')
 			plt.imshow(subj['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 						extent=[subj['miss_histogram']['x'][0],subj['miss_histogram']['x'][-1],0,1])
 			plt.title('Miss')
+			logging.debug('Populated subject miss axes')
 			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
+			logging.debug('Created model miss axes')
 			im = plt.imshow(model['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 						extent=[model['miss_histogram']['x'][0],model['miss_histogram']['x'][-1],0,1])
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			if xlim_rt_cutoff:
 				ax00.set_xlim([0,rt_cutoff])
+			logging.debug('Populated model miss axes')
 			
 			ax00.tick_params(labelleft=True, labelbottom=False)
 			ax01.tick_params(labelleft=False, labelbottom=False)
 			ax10.tick_params(labelleft=True, labelbottom=True)
 			ax11.tick_params(labelleft=False, labelbottom=True)
+			logging.debug('Completed histogram axes')
 			
 			cbar_ax = plt.subplot(gs3[0])
+			logging.debug('Created colorbar axes')
 			plt.colorbar(im, cax=cbar_ax)
 			plt.ylabel('Prob density')
+			logging.debug('Completed colorbar axes')
 			
 			plt.suptitle(key)
+			logging.debug('Sucessfully completed figure for key {0}'.format(key))
 			if saver:
+				logging.debug('Saving figure')
 				if isinstance(saver,str):
 					plt.savefig(saver,bbox_inches='tight')
 				else:
-					saver.savefig(fig)
-				if not display:
-					plt.close(fig)
+					saver.savefig(fig,bbox_inches='tight')
 			if display:
+				logging.debug('Displaying figure')
 				plt.show(True)
 	
 	def save(self,fname):
