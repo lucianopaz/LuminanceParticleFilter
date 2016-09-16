@@ -24,13 +24,15 @@ class SubjectSession:
 			self.data_dir = str(data_dir)
 			self._single_data_dir = True
 	
-	def get_key(self):
+	def get_session(self):
 		if self._single_session:
 			session = str(self.session)
 		else:
 			session = '['+','.join([str(s) for s in self.session])+']'
-		key = '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.name,session=session)
-		return key
+		return session
+	
+	def get_key(self):
+		return '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.name,session=self.get_session())
 	
 	def list_data_files(self,override_raw_data_dir=None):
 		if self._single_data_dir:

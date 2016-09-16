@@ -6,9 +6,15 @@ import matplotlib as mt
 import matplotlib.gridspec as gridspec
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib import ticker
 import data_io as io
 import cost_time as ct
 import moving_bounds_fits as mo
+
+def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalignment='top',horizontalalignment='right',**kwargs):
+	ax.text(horizontal, vertical, label,transform=ax.transAxes,
+			verticalalignment=verticalalignment, horizontalalignment=horizontalalignment,
+			**kwargs)
 
 def value_and_bounds_sketch(fname='value_and_bounds_sketch',suffix='.svg'):
 	fname+=suffix
@@ -250,9 +256,9 @@ def rt_fit(fname='rt_fit',suffix='.svg'):
 	else:
 		plt.xlabel('T [ms]')
 	plt.ylabel('Prob density')
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	# Plot confidence data
-	plt.subplot(122,sharey=ax1)
+	ax2 = plt.subplot(122,sharey=ax1)
 	plt.step(xh,high_hit_rt+high_miss_rt,label='Subjects high',where='post',color='forestgreen')
 	plt.step(xh,-(low_hit_rt+low_miss_rt),label='Subjects low',where='post',color='mediumpurple')
 	plt.plot(m.t,all_sim_rt['high'],label='Theoretical high',linewidth=3,color='forestgreen')
@@ -263,7 +269,10 @@ def rt_fit(fname='rt_fit',suffix='.svg'):
 		plt.xlabel('T [s]')
 	else:
 		plt.xlabel('T [ms]')
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.12,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -288,7 +297,7 @@ def prior_sketch(fname='prior_sketch',suffix='.svg'):
 	plt.plot(x,stats.norm.pdf(x,0,np.sqrt(prior_mu_var)),linewidth=2,color='darkred',label='Conjugate prior')
 	plt.xlabel(r'$\mu \left[\frac{\mathrm{cd}}{\mathrm{m}^{2}\mathrm{s}}\right]$',fontsize=22)
 	plt.ylabel('Prob density',fontsize=16)
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -321,11 +330,11 @@ def confidence_sketch(fname='confidence_sketch',suffix='.svg'):
 	p2 = plt.Rectangle((0, 0), 1, 1, fc="mediumpurple")
 	plt.fill_between(_t[:ind_bound+1],log_odds[0][:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
 	plt.fill_between(_t[ind_bound:],log_odds[0][ind_bound:],interpolate=True,color='mediumpurple',alpha=0.6)
-	plt.legend([p0,p1, p2], [r'$C(t)$','High confidence zone', 'Low confidence zone'])
+	plt.legend([p0,p1, p2], [r'$C(t)$','High confidence zone', 'Low confidence zone'],loc='best', fancybox=True, framealpha=0.5)
 	plt.ylabel('Log odds')
 	ax1.tick_params(labelleft=True,labelbottom=False)
 	
-	plt.subplot(212,sharex=ax1)
+	ax2 = plt.subplot(212,sharex=ax1)
 	plt.plot(_t,xub,color='b')
 	plt.plot(_t,xlb,color='r')
 	plt.fill_between(_t[:ind_bound+1],xub[:ind_bound+1],xlb[:ind_bound+1],interpolate=True,color='forestgreen',alpha=0.6)
@@ -333,6 +342,9 @@ def confidence_sketch(fname='confidence_sketch',suffix='.svg'):
 	ax1.set_xlim([0,3])
 	plt.ylabel(r'Bound in $x(t)$ space')
 	plt.xlabel('T [s]')
+	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.09,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.09,vertical=1.09,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -425,7 +437,7 @@ def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	ax1.get_xaxis().tick_bottom()
 	ax1.get_yaxis().tick_left()
 	ax1.tick_params(labelleft=True,labelbottom=False)
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	plt.title('Diffusion first\npassage time')
 	
 	ax3 = plt.subplot(gs1[2,0],sharex=ax1)
@@ -516,9 +528,10 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	mo.set_time_units('seconds')
 	plt.figure(figsize=(10,4))
 	mt.rc('axes', color_cycle=['b','g'])
-	ax1 = plt.subplot(131)
-	ax2 = plt.subplot(132,sharey=ax1)
-	ax3 = plt.subplot(133,sharey=ax1)
+	gs = gridspec.GridSpec(1, 3,left=0.07, right=0.97,wspace=0.15)
+	ax1 = plt.subplot(gs[0])
+	ax2 = plt.subplot(gs[1],sharey=ax1)
+	ax3 = plt.subplot(gs[2],sharey=ax1)
 	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=4990.24,n=101,T=10,dt=mo.ISI,cost=0.1,reward=1,penalty=0,iti=3,tp=0.)
 	xub,xlb,value1,ve1,v11,v22 = m.xbounds(return_values=True)
 	rho1 = m.rho
@@ -544,7 +557,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	plt.plot(m.t,xb[1],linestyle='-',label="",linewidth=2)
 	plt.xlabel('T [s]')
 	plt.ylabel('Bounds')
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
 	plt.sca(ax3)
 	m.set_T(10.)
@@ -563,7 +576,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	plt.plot(m.t,xb[1],linestyle='-',label="",linewidth=2)
 	plt.xlabel('T [s]')
 	ax3.tick_params(labelleft=False)
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
 	plt.sca(ax2)
 	m.set_dt(mo.ISI)
@@ -582,7 +595,11 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	plt.plot(m.t,xb[1],linestyle='-',label="",linewidth=2)
 	plt.xlabel('T [s]')
 	ax2.tick_params(labelleft=False)
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.12,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax3,'C',horizontal=-0.05,vertical=1.02,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -600,30 +617,34 @@ def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
 	
 	plt.figure(figsize=(8,4))
 	gs = gridspec.GridSpec(1, 2, left=0.1,right=0.95, wspace=0.28)
-	plt.subplot(gs[1])
+	ax2 = plt.subplot(gs[1])
 	plt.plot(m.t[:-1],var_pg/var_pg[0],'-',color='k',alpha=0.5)
 	plt.xlabel('T [s]')
 	plt.ylabel('Normed Transition Var')
 	plt.gca().set_ylim([0,1])
-	plt.subplot(gs[0])
+	ax1 = plt.subplot(gs[0])
 	plt.plot(m.t[:-1],np.mean(v_explore,axis=1),color='k')
 	plt.xlabel('T [s]')
 	plt.ylabel('V explore')
+	place_axes_subfig_label(ax1,'A',horizontal=-0.15,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.15,vertical=1.02,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
-def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=0.001):
+def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	fname+=suffix
 	mo.set_time_units('seconds')
 	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
-	model_vars = np.linspace(minvar,maxvar,n)
-	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,n)]
-	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,n)]
+	model_vars = [1e-4,1e-3,1e-2,1e-1,1,1e2,1e3,1e4]
+	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,len(model_vars))]
+	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,len(model_vars))]
+	#~ s1_colors = [plt.get_cmap('brg')(x) for x in np.linspace(0,0.5,len(model_vars))]
+	#~ s2_colors = [plt.get_cmap('brg')(x) for x in np.linspace(1,0.5,len(model_vars))]
 	mus = np.array([0.1,0.5,1.,2.,5.,10.,15.,25.,50.,100.])
 	
 	plt.figure(figsize=(14,7))
 	gs1 = gridspec.GridSpec(2, 1,left=0.1, right=0.5,hspace=0.08)
-	gs2 = gridspec.GridSpec(1, 1,left=0.5, right=0.52)
+	gs2 = gridspec.GridSpec(1, 1,left=0.505, right=0.52)
 	gs3 = gridspec.GridSpec(1, 1,left=0.65, right=0.95)
 	ax1 = plt.subplot(gs1[0])
 	ax2 = plt.subplot(gs1[1])
@@ -638,6 +659,8 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=
 		ax2.plot(m.t,m.bounds[1],color=c2)
 		for j,mu in enumerate(mus):
 			rt = m.rt(mu,bounds=(xub,xlb))
+			#~ if mu/np.sqrt(v)>2e2:
+				#~ print rt
 			evidence[i,j] = mu/np.sqrt(v)
 			performance[i,j] = np.sum(rt[0])*m.dt
 	ax1.set_ylabel('$x(t)$ Bounds',fontsize=16)
@@ -646,33 +669,45 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg',n=20,maxvar=10000.,minvar=
 	ax2.set_xlabel('T [s]',fontsize=16)
 	
 	cbar_ax = plt.subplot(gs2[0])
-	cbar = np.array([[plt.get_cmap('YlGn')(x) for x in np.linspace(1,0,100)],
-					 [plt.get_cmap('YlOrRd')(x) for x in np.linspace(1,0,100)]])
+	cbar = np.array([[plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,100)],
+					 [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,100)]])
+	#~ cbar = np.array([[plt.get_cmap('brg')(x) for x in np.linspace(0,0.5,100)],
+					 #~ [plt.get_cmap('brg')(x) for x in np.linspace(1,0.5,100)]])
 	cbar = np.swapaxes(cbar,0,1)
 	plt.sca(cbar_ax)
+	cbar_ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(r'$10^{%1.0f}$'))
 	cbar_ax.yaxis.set_label_position("right")
 	cbar_ax.tick_params(reset=True,which='major',axis='y',direction='in',left=True, right=True,bottom=False,top=False,labelleft=False, labelright=True)
-	plt.imshow(cbar,aspect='auto',cmap=None,interpolation='none',origin='lower',extent=[0,1,minvar,maxvar])
+	plt.imshow(cbar,aspect='auto',cmap=None,interpolation='none',origin='lower',extent=[0,1,-4,4])
 	cbar_ax.xaxis.set_ticks([])
 	plt.ylabel('$\sigma^{2}$ [Hz]',fontsize=16)
 	
 	evidence = evidence.flatten()
 	performance = performance.flatten()
+	if any(np.isnan(performance)):
+		evidence = evidence[np.logical_not(np.isnan(performance))]
+		performance = performance[np.logical_not(np.isnan(performance))]
 	fun = lambda x,a: 1./(1.+np.exp(a*x))
 	#~ jac = lambda x,a: np.array([-a*np.exp(a*x)/(1.+np.exp(a*x))**2,-x*np.exp(a*x)/(1.+np.exp(a*x))**2])
 	from scipy.optimize import curve_fit
 	popt,pcov = curve_fit(fun, evidence, performance)
-	print 'Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0]))
+	try:
+		print 'Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0]))
+	except:
+		print 'Par = {0}+-{1}'.format(popt,np.sqrt(pcov))
 	
 	ax = plt.subplot(gs3[0])
 	plt.plot(evidence,performance,'o',label='Simulations')
-	x = np.linspace(0,np.max(evidence),1000)
-	plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt[0]))
+	x = np.linspace(0,100,10000)
+	plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt))
 	plt.xlim([0,10])
 	plt.ylabel('Performance',fontsize=16)
 	plt.xlabel(r'$\mu/\sigma$',fontsize=18)
-	plt.legend()
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.07,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.08,fontsize='24')
+	place_axes_subfig_label(ax,'C',horizontal=-0.1,vertical=1.02,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 

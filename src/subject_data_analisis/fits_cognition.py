@@ -203,6 +203,7 @@ def load_Fitter_from_file(fname):
 	return fitter
 
 class Fitter:
+	#~ __module__ = os.path.splitext(os.path.basename(__file__))[0]
 	# Initer
 	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100):
@@ -396,6 +397,7 @@ class Fitter:
 			self._fit_arguments = state['fit_arguments']
 		if 'fit_output' in state.keys():
 			self._fit_output = state['fit_output']
+		self.__fit_internals__ = None
 	
 	def set_fixed_parameters(self,fixed_parameters={}):
 		defaults = self.default_fixed_parameters()
@@ -883,7 +885,7 @@ class Fitter:
 		for start_point in start_point_generator:
 			repetitions+=1
 			logging.info('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
-			res = scipy.optimize.minimize(merit,start_point, method=optimizer,bounds=bounds,options=optimizer_kwargs)
+			res = scipy.optimize.minimize(merit,start_point, method=self.optimizer,bounds=bounds,options=optimizer_kwargs)
 			logging.info('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
 			logging.info('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
 			output['xs'].append(res.x)
@@ -1071,7 +1073,6 @@ class Fitter:
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
 			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
-			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
@@ -1133,7 +1134,6 @@ class Fitter:
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
 			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
-			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
@@ -1195,7 +1195,6 @@ class Fitter:
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
 			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
-			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
@@ -1203,6 +1202,54 @@ class Fitter:
 	
 	def aud_full_confidence_merit(self,x):
 		parameters = self.get_parameters_dict(x)
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(rt_confidence_likelihood(t,rt_conf_lik_matrix[1-int(perf)],rt,conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
+	
+	# Force to compute merit functions on an arbitrary parameter dict
+	def forced_compute_full_merit(self,parameters):
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		for index,drift in enumerate(self.mu):
+			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			t = np.arange(0,gs.shape[-1])*self.dp.dt
+			indeces = self.mu_indeces==index
+			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
+				nlog_likelihood-= np.log(rt_likelihood(t,gs[1-int(perf)],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
+	
+	def forced_compute_confidence_only_merit(self,parameters):
+		nlog_likelihood = 0.
+		self.dp.set_cost(parameters['cost'])
+		self.dp.set_internal_var(parameters['internal_var'])
+		xub,xlb = self.dp.xbounds()
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
+		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		
+		for index,drift in enumerate(self.mu):
+			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			indeces = self.mu_indeces==index
+			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
+				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		return nlog_likelihood
+	
+	def forced_compute_full_confidence_merit(self,parameters):
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1566,6 +1613,10 @@ def parse_input():
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
  JSON arrays (converted to python lists) are written as '[val1,val2,val3]'
+ Note that the single quotation marks surrounding the brackets, and the
+ double quotation marks surrounding the keys are mandatory. Furthermore,
+ if a key value should be a string, it must also be enclosed in double
+ quotes.
  
  '--fixed_parameters': A dictionary of fixed parameters. The dictionary must be written as
                        '{"fixed_parameter_name":fixed_parameter_value,...}'. For example,
@@ -1577,11 +1628,7 @@ def parse_input():
                   The dictionary must be written as '{"parameter_name":start_point_value,etc}'.
                   If a parameter is omitted, its default starting value is used. You only need to specify
                   the starting points for the parameters that you wish not to start at the default
-                  start point. Default start points are:
-                  '{"cost":0.2 Hz,"dead_time":0.1 seconds,"dead_time_sigma":0.5 seconds,
-                    "phase_out_prob":0.1,"internal_var":self._internal_var,
-                    "high_confidence_threshold":0.5,"confidence_map_slope":1e9}'
-                   The internal variance depends on the fitted experiment.
+                  start point. Default start points are estimated from the subjectSession data.
  
  '--bounds': A dictionary of lower and upper bounds in parameter space.
              The dictionary must be written as '{"parameter_name":[low_bound_value,up_bound_value],etc}'
@@ -1606,13 +1653,26 @@ def parse_input():
                        [Default depends on the optimizer. If 'cma', '{"restarts":1}'.
                        If not 'cma', '{"disp": False, "maxiter": 1000, "maxfev": 10000, "repetitions": 10}'
  
+ '-f' or '--start_point_from_fit_output': A flag that tells the script to set the unspecified start_points
+                       equal to the results of a previously saved fitting round. After the flag
+                       the user must pass a dictionary of the form:
+                       '{"method":"value","optimizer":"value","suffix":"value"}' where the values
+                       must be the corresponding method, optimizer and suffix used by the
+                       previous fitting round. The script will then try to load the fitted parameters
+                       from the file:
+                       fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl
+                       where the experiment, name and session are taken from the subjectSession that
+                       is currently being fitted, and the method, optimizer and suffix are the
+                       values passed in the previously mentioned dictionary.
+  
  Example:
  python moving_bounds_fits.py -t 1 -n 1 --save"""
 	options =  {'task':1,'ntasks':1,'task_base':1,'method':'full','optimizer':'cma','save':False,
 				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':None,
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
-				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False}
+				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
+				'start_point_from_fit_output':None}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -1684,6 +1744,10 @@ def parse_input():
 				key = 'optimizer_kwargs'
 				expecting_key = False
 				json_encoded_key = True
+			elif arg=='-f' or arg=='--start_point_from_fit_output':
+				key = 'start_point_from_fit_output'
+				expecting_key = False
+				json_encoded_key = True
 			elif arg=='--plot_merge':
 				key = 'plot_merge'
 				expecting_key = False
@@ -1697,10 +1761,12 @@ def parse_input():
 			if key in ['task','ntasks','task_base','confidence_partition']:
 				options[key] = int(arg)
 			elif json_encoded_key:
-				option[key] = json.loads(arg)
+				options[key] = json.loads(arg)
 				json_encoded_key = False
 			else:
 				options[key] = arg
+	if not expecting_key:
+		raise RuntimeError("Expected a value after encountering key '{0}' but no value was supplied".format(arg))
 	if options['task_base'] not in [0,1]:
 		raise ValueError('task_base must be either 0 or 1')
 	# Shift task from 1 base to 0 based if necessary
@@ -1719,7 +1785,103 @@ def parse_input():
 	if options['plot_merge'] not in [None,'subjects','sessions','all']:
 		raise ValueError("Unknown plot_merge supplied: '{0}'. Available values are None, 'subjects', 'sessions' and 'all'.".format(options['plot_merge']))
 	
+	if not options['start_point_from_fit_output'] is None:
+		keys = options['start_point_from_fit_output'].keys()
+		if (not 'method' in keys) or (not 'optimizer' in keys) or (not 'suffix' in keys):
+			raise ValueError("The supplied dictionary for 'start_point_from_fit_output' does not contain the all the required keys: 'method', 'optimizer' and 'suffix'")
+	
 	return options
+
+def prepare_fit_args(fitter,options,fname):
+	temp = load_Fitter_from_file(fname)
+	loaded_parameters = temp.get_parameters_dict_from_fit_output(temp._fit_output)
+	for k in loaded_parameters.keys():
+		if not k in temp.get_fitted_parameters():
+			del loaded_parameters[k]
+	if fitter.method=='full':
+		start_point = loaded_parameters.copy()
+		fixed_parameters = loaded_parameters.copy()
+		try:
+			del fixed_parameters['cost']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['dead_time']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['dead_time_sigma']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['internal_var']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['phase_out_prob']
+		except KeyError:
+			pass
+		try:
+			del start_point['high_confidence_threshold']
+		except KeyError:
+			pass
+		try:
+			del start_point['confidence_map_slope']
+		except KeyError:
+			pass
+	elif fitter.method=='confidence_only':
+		fixed_parameters = loaded_parameters.copy()
+		start_point = loaded_parameters.copy()
+		try:
+			del start_point['cost']
+		except KeyError:
+			pass
+		try:
+			del start_point['dead_time']
+		except KeyError:
+			pass
+		try:
+			del start_point['dead_time_sigma']
+		except KeyError:
+			pass
+		try:
+			del start_point['internal_var']
+		except KeyError:
+			pass
+		try:
+			del start_point['phase_out_prob']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['high_confidence_threshold']
+		except KeyError:
+			pass
+		try:
+			del fixed_parameters['confidence_map_slope']
+		except KeyError:
+			pass
+	else:
+		start_point = loaded_parameters.copy()
+		fixed_parameters = {}
+	
+	if temp.time_units!=fitter.time_units:
+		fittable_pars = fitter.get_fittable_parameters()
+		scaling_factor = []
+		for fp in fitter.get_fittable_parameters():
+			if fp in ['cost','internal_var']:
+				scaling_factor = 1e3 if fitter.time_units=='seconds' else 1e-3
+			elif fp in ['dead_time','dead_time_sigma']:
+				scaling_factor = 1e-3 if fitter.time_units=='seconds' else 1e3
+			else:
+				scaling_factor = 1.
+			if fp in start_point.keys():
+				start_point[fp]*=scaling_factor
+			if fp in fixed_parameters.keys():
+				fixed_parameters[fp]*=scaling_factor
+	
+	fixed_parameters.update(options['fixed_parameters'])
+	start_point.update(options['start_point'])
+	return fixed_parameters,start_point,options['bounds']
 
 if __name__=="__main__":
 	options = parse_input()
@@ -1759,14 +1921,27 @@ if __name__=="__main__":
 		if (i-task)%ntasks==0:
 			logging.debug('Task will execute for enumerated {0} subject {1}'.format(i,s))
 			if options['fit']:
-				logging.debug('Flag "fit" was True')
 				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],\
 					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
 					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
 					   confidence_partition=options['confidence_partition'])
-				fit_output = fitter.fit(fixed_parameters=options['fixed_parameters'],\
-										start_point=options['start_point'],\
-										bounds=options['bounds'],\
+				if options['start_point_from_fit_output']:
+					loaded_method = options['start_point_from_fit_output']['method']
+					loaded_optimizer = options['start_point_from_fit_output']['optimizer']
+					loaded_suffix = options['start_point_from_fit_output']['suffix']
+					fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
+					fname = fname.format(experiment=s.experiment,method=loaded_method,name=s.name,session=s.get_session(),
+								 optimizer=loaded_optimizer,suffix=loaded_suffix)
+					fixed_parameters,start_point,bounds = prepare_fit_args(fitter,options,fname)
+				else:
+					fixed_parameters=options['fixed_parameters']
+					start_point=options['start_point']
+					bounds=options['bounds']
+					
+				logging.debug('Flag "fit" was True')
+				fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
+										start_point=start_point,\
+										bounds=bounds,\
 										optimizer_kwargs=options['optimizer_kwargs'])
 				fitter.save()
 				if options['method']=='full':
@@ -1781,26 +1956,22 @@ if __name__=="__main__":
 			if options['plot'] or save or options['save_plot_handler'] or options['load_plot_handler']:
 				logging.debug('Plot, save save_plot_fitter or load_plot_fitter flags were True.')
 				fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
-				if s._single_session:
-					ses = str(s.session)
-				else:
-					ses = '-'.join([str(ses) for ses in s.session])
 				method = options['method']
 				try:
 					if method=='full':
 						try:
-							formated_fname = fname.format(experiment=s.experiment,method='confidence_only',name=s.name,session=ses,
+							formated_fname = fname.format(experiment=s.experiment,method='confidence_only',name=s.name,session=s.get_session(),
 								 optimizer=options['optimizer'],suffix=options['suffix'])
 							logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
 							fitter = load_Fitter_from_file(formated_fname)
 						except:
 							logging.debug('Failed to load fitter confidence_only output file. Will attempt to load full method output file')
-							formated_fname = fname.format(experiment=s.experiment,method='full',name=s.name,session=ses,
+							formated_fname = fname.format(experiment=s.experiment,method='full',name=s.name,session=s.get_session(),
 								 optimizer=options['optimizer'],suffix=options['suffix'])
 							logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
 							fitter = load_Fitter_from_file(formated_fname)
 					else:
-						formated_fname = fname.format(experiment=s.experiment,method=method,name=s.name,session=ses,
+						formated_fname = fname.format(experiment=s.experiment,method=method,name=s.name,session=s.get_session(),
 									 optimizer=options['optimizer'],suffix=options['suffix'])
 						logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
 						fitter = load_Fitter_from_file(formated_fname)

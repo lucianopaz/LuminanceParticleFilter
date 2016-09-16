@@ -426,6 +426,16 @@ void DecisionPolicy::rt(double mu, double* g1, double* g2, double* xub, double* 
 	// Because of numerical instabilities, we must take care that g1 and g2 are always positive
 	if (g1[1]<0.) g1[1] = 0.;
 	if (g2[1]<0.) g2[1] = 0.;
+	// If _model_var is too small, Psi will always return 0 because the exp
+	// will underflow. In these cases, the sign of mu determines choice with
+	// absolute certainty.
+	if (g1[1]==0 && g2[1]==0){
+		if (mu>0.){
+			g1[1] = 1.;
+		} else {
+			g2[1] = 1.;
+		}
+	}
 	normalization = g1[1]+g2[1];
 	for (i=2;i<tnT;++i){
 		if (bounds_touched){
