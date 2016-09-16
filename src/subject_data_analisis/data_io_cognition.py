@@ -28,7 +28,7 @@ class SubjectSession:
 		if self._single_session:
 			session = str(self.session)
 		else:
-			session = '['+','.join([str(s) for s in self.session])+']'
+			session = '['+'-'.join([str(s) for s in self.session])+']'
 		return session
 	
 	def get_key(self):

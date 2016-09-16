@@ -4,6 +4,7 @@ import numpy as np
 import data_io_cognition as io
 import cost_time as ct
 import fits_cognition as fits
+from fits_cognition import Fitter
 import matplotlib as mt
 mt.use("Qt4Agg") # This program works with Qt only
 from matplotlib import pyplot as plt
@@ -23,6 +24,8 @@ class Sweeper:
 			keys = [k.strip(' \r\n') for k in lines[::3]]
 		subjects = io.filter_subjects_list(io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment'),'experiment_Luminancia')
 		self.subjects = [s for s in io.merge_subjectSessions(subjects,merge='sessions') if not s.get_key() in keys]
+		#~ subjects = io.filter_subjects_list(io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment'),'experiment_Auditivo')
+		#~ self.subjects = [s for s in subjects if not s.get_key() in keys]
 		self.n_subjects = len(self.subjects)
 		self.current_subject = 0
 		if self.n_subjects==0:
@@ -55,9 +58,17 @@ class Sweeper:
 			self.end()
 	
 	def prepare_fitter(self):
-		self.fitter = fits.Fitter(self.subjectSession,decisionPolicyKwArgs={'n':201})
-		self.fitter.set_fixed_parameters({})
-		self.parameters = self.fitter.default_start_point()
+		try:
+			fname = 'fits_cognition/{experiment}_fit_confidence_only_subject_{name}_session_{session}_cma.pkl'.format(
+				experiment=self.subjectSession.experiment,name=self.subjectSession.name,session=self.subjectSession.get_session())
+			self.fitter = fits.load_Fitter_from_file(fname)
+			self.parameters = self.fitter.get_parameters_dict_from_fit_output(self.fitter._fit_output)
+			self.fitter.set_fixed_parameters({})
+		except:
+			self.fitter = fits.Fitter(self.subjectSession,decisionPolicyKwArgs={'n':201})
+			self.fitter.set_fixed_parameters({})
+			self.parameters = self.fitter.default_start_point()
+		#~ print self.fitter.default_start_point(True)
 		#~ self.fitter.set_start_point({'cost':0.,'internal_var':7000.,'dead_time':0.5,'dead_time_sigma':0.08,'phase_out_prob':0.05})
 		#~ self.fitter.set_bounds()
 		#~ self.fitter.fixed_parameters,self.fitter.fitted_parameters,start_point = self.fitter.sanitize_parameters_x0_bounds()[:3]
@@ -71,6 +82,15 @@ class Sweeper:
 	
 	def compute_bounds(self):
 		self.xub,self.xlb = self.fitter.dp.xbounds()
+		self.first_passage_pdf = None
+		self._gs = {}
+		for index,drift in enumerate(self.fitter.mu):
+			gs = np.array(self.fitter.dp.rt(drift,bounds=(self.xub,self.xlb)))
+			if self.first_passage_pdf is None:
+				self.first_passage_pdf = gs*self.fitter.mu_prob[index]
+			else:
+				self.first_passage_pdf+= gs*self.fitter.mu_prob[index]
+			self._gs[drift] = gs
 	
 	def compute_confidence_mapping(self):
 		self.confidence_mapping = self.fitter.high_confidence_mapping(self.parameters['high_confidence_threshold'],self.parameters['confidence_map_slope'])
@@ -78,16 +98,11 @@ class Sweeper:
 	def compute_predition(self):
 		random_rt_likelihood = 0.5*self.parameters['phase_out_prob']/(self.fitter.max_RT-self.fitter.min_RT)/self.fitter.confidence_partition
 		self.distribution = None
-		self.first_passage_pdf = None
 		full_nLL = 0.
 		confidence_only_nLL = 0.
 		full_confidence_nLL = 0.
 		for index,drift in enumerate(self.fitter.mu):
-			gs = np.array(self.fitter.dp.rt(drift,bounds=(self.xub,self.xlb)))
-			if self.first_passage_pdf is None:
-				self.first_passage_pdf = gs*self.fitter.mu_prob[index]
-			else:
-				self.first_passage_pdf+= gs*self.fitter.mu_prob[index]
+			gs = self._gs[drift]
 			dec_rt_confidence_likelihood = self.fitter.confidence_mapping_pdf_matrix(gs,self.parameters,mapped_confidences=self.confidence_mapping)
 			rt_confidence_likelihood = np.sum(dec_rt_confidence_likelihood,axis=0)
 			rt_likelihood = np.sum(dec_rt_confidence_likelihood,axis=1)
@@ -101,7 +116,7 @@ class Sweeper:
 				temp = fits.rt_likelihood(t,rt_likelihood[1-int(perf)],rt)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*self.fitter.confidence_partition
 				#~ print temp
 				full_nLL-=np.log(fits.rt_likelihood(t,rt_likelihood[1-int(perf)],rt)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*self.fitter.confidence_partition)
-				full_nLL-=np.log(fits.confidence_likelihood(np.sum(dec_rt_confidence_likelihood,axis=2)[1-int(perf)],conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*(self.fitter.max_RT-self.fitter.min_RT))
+				confidence_only_nLL-=np.log(fits.confidence_likelihood(np.sum(dec_rt_confidence_likelihood,axis=2)[1-int(perf)],conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood*(self.fitter.max_RT-self.fitter.min_RT))
 				full_confidence_nLL-=np.log(fits.rt_confidence_likelihood(t,dec_rt_confidence_likelihood[1-int(perf)],rt,conf)*(1-self.parameters['phase_out_prob'])+random_rt_likelihood)
 		random_rt_likelihood = random_rt_likelihood*np.ones_like(t)
 		random_rt_likelihood[np.logical_or(t<self.fitter.min_RT,t>self.fitter.max_RT)] = 0.

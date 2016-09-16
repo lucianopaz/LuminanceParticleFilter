@@ -2,7 +2,7 @@ from __future__ import division
 
 import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy, re
 import numpy as np
-from utils import normpdf
+from utils import normpdf,average_downsample
 
 class Location(enum.Enum):
 	facu = 0
@@ -509,16 +509,18 @@ class Fitter:
 		else:
 			dense_conv_val = np.zeros_like(dense_conv_x)
 			dense_conv_val[np.floor(parameters['dead_time']/_dt)] = 1.
+		#~ print np.sum(np.isnan(dense_conv_val).astype(np.int))
 		conv_x = np.arange(0,nT)*self.dp.dt
 		if must_downsample:
-			ratio = np.ceil(_nT/nT)
-			tail = _nT%nT
-			if tail!=0:
-				padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(nT-tail,dtype=np.float)),axis=0)
-			else:
-				padded_cv = dense_conv_val
-			padded_cv = np.reshape(padded_cv,(-1,ratio))
-			conv_val = np.nanmean(padded_cv,axis=1)
+			conv_val = average_downsample(dense_conv_val,_nT/nT)
+			#~ ratio = np.ceil(_nT/nT)
+			#~ tail = _nT%ratio
+			#~ if tail!=0:
+				#~ padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(ratio-tail,dtype=np.float)),axis=0)
+			#~ else:
+				#~ padded_cv = dense_conv_val
+			#~ padded_cv = np.reshape(padded_cv,(-1,ratio))
+			#~ conv_val = np.nanmean(padded_cv,axis=1)
 		else:
 			conv_val = dense_conv_val
 		conv_val/=np.sum(conv_val)
@@ -638,13 +640,14 @@ class Fitter:
 	def default_fixed_parameters(self):
 		return {}
 	
-	def default_start_point(self):
+	def default_start_point(self,forceCompute=False):
 		try:
+			if forceCompute:
+				logging.debug('Forcing default start point recompute')
+				raise Exception('Forcing recompute')
 			return self.__default_start_point__
 		except:
-			if hasattr(self,'fixed_parameters'):
-				self.__default_start_point__ = self.fixed_parameters.copy()
-			elif hasattr(self,'_fixed_parameters'):
+			if hasattr(self,'_fixed_parameters'):
 				self.__default_start_point__ = self._fixed_parameters.copy()
 			else:
 				self.__default_start_point__ = {}
@@ -661,6 +664,8 @@ class Fitter:
 				except Exception, e:
 					logging.warning('Could not fit internal_var from data')
 					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
+				#~ print np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/np.sqrt(self.__default_start_point__['internal_var'])))),self.__default_start_point__['internal_var']
+				#~ raise Exception('Testing')
 			if not 'phase_out_prob' in self.__default_start_point__.keys():
 				self.__default_start_point__['phase_out_prob'] = 0.05
 			if not 'dead_time' in self.__default_start_point__.keys():
@@ -707,14 +712,15 @@ class Fitter:
 	
 	def default_bounds(self):
 		if self.time_units=='seconds':
-			defaults = {'cost':[0.,10],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
+			defaults = {'cost':[0.,0.4],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
 					'phase_out_prob':[0.,0.2],'internal_var':[1e-6,1e5],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		else:
-			defaults = {'cost':[0.,0.01],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
+			defaults = {'cost':[0.,0.0004],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
 					'phase_out_prob':[0.,0.2],'internal_var':[1e-9,1e2],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		default_sp = self.default_start_point()
+		defaults['internal_var'] = [default_sp['internal_var']*5e-2,default_sp['internal_var']*5e1]
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
 			defaults['high_confidence_threshold'][1] = 2*default_sp['high_confidence_threshold']
 		return defaults
@@ -1939,11 +1945,14 @@ if __name__=="__main__":
 					bounds=options['bounds']
 					
 				logging.debug('Flag "fit" was True')
-				fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
-										start_point=start_point,\
-										bounds=bounds,\
-										optimizer_kwargs=options['optimizer_kwargs'])
-				fitter.save()
+				try:
+					fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
+											start_point=start_point,\
+											bounds=bounds,\
+											optimizer_kwargs=options['optimizer_kwargs'])
+					fitter.save()
+				except:
+					continue
 				if options['method']=='full':
 					logging.debug('Used method "full" to fit the decision parameters. Will now execute "confidence_only" method.')
 					parameters = fitter.get_parameters_dict_from_fit_output(fit_output)
