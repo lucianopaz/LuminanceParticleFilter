@@ -9,7 +9,6 @@ import os, itertools, sys, random, re, scipy.integrate
 
 class SubjectSession:
 	def __init__(self,name,session,experiment,data_dir):
-		self.name = str(name)
 		try:
 			self.session = int(session)
 			self._single_session = True
@@ -18,11 +17,20 @@ class SubjectSession:
 			self._single_session = False
 		self.experiment = str(experiment)
 		if isinstance(data_dir,list):
+			self.name = [str(n) for n in name]
 			self.data_dir = [str(d) for d in data_dir]
 			self._single_data_dir = False
 		else:
+			self.name = str(name)
 			self.data_dir = str(data_dir)
 			self._single_data_dir = True
+	
+	def get_name(self):
+		if self._single_data_dir:
+			name = str(self.name)
+		else:
+			name = '['+'-'.join([str(n) for n in self.name])+']'
+		return name
 	
 	def get_session(self):
 		if self._single_session:
@@ -32,7 +40,7 @@ class SubjectSession:
 		return session
 	
 	def get_key(self):
-		return '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.name,session=self.get_session())
+		return '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.get_name(),session=self.get_session())
 	
 	def list_data_files(self,override_raw_data_dir=None):
 		if self._single_data_dir:
@@ -196,26 +204,36 @@ def anonimize_subjects(subjectSessions):
 	 Takes a list of SubjectSession objects and converts their names into
 	 a numerical id that overrides their original names.
 	"""
-	names = sorted(list(set([ss.name for ss in subjectSessions])))
+	names = []
+	for ss in subjectSessions:
+		if ss._single_data_dir:
+			names.append(ss.name)
+		else:
+			names.extend(ss.name)
+	names = sorted(list(set(names)))
 	name_to_id = {}
 	for subject_id,name in enumerate(names):
 		name_to_id[name] = subject_id
 	for ss in subjectSessions:
-		ss.name = name_to_id[ss.name]
+		if ss._single_data_dir:
+			ss.name = name_to_id[ss.name]
+		else:
+			for index,name in ss.name:
+				ss.name[index] = name_to_id[name]
 	return subjectSessions
 
 def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_details=None):
 	output = []
 	if criteria=='all_experiments':
-		names = [s.name for s in subjectSessions]
+		names = [s.get_name() for s in subjectSessions]
 		experiments = [s.experiment for s in subjectSessions]
 		unique_names = sorted(list(set(names)))
 		n_experiments = len(set(experiments))
 		for name in unique_names:
 			if len(set([e for n,e in zip(names,experiments) if n==name]))==n_experiments:
-				output.extend([s for s in subjectSessions if s.name==name])
+				output.extend([s for s in subjectSessions if s.get_name()==name])
 	elif criteria=='all_sessions_by_experiment':
-		names = [s.name for s in subjectSessions]
+		names = [s.get_name() for s in subjectSessions]
 		experiments = [s.experiment for s in subjectSessions]
 		sessions = [s.session for s in subjectSessions]
 		unique_names = sorted(list(set(names)))
@@ -228,7 +246,7 @@ def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_detai
 					satifies_filter = False
 					break
 			if satifies_filter:
-				output.extend([s for s in subjectSessions if s.name==name])
+				output.extend([s for s in subjectSessions if s.get_name()==name])
 	elif criteria.startswith('experiment'):
 		experiment = criteria.split('_')[1]
 		output = [s for s in subjectSessions if s.experiment==experiment]
@@ -288,7 +306,7 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 		sessions = {}
 		for ss in subjectSessions:
 			exp = str(ss.experiment)
-			name = str(ss.name)
+			name = str(ss.get_name())
 			data_dir = ss.data_dir
 			key = exp+'_'+name
 			if key not in sessions.keys():
@@ -306,12 +324,14 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 			data_dir = ss.data_dir
 			key = exp+'_'+str(session)
 			if key not in data_dirs.keys():
-				data_dirs[key] = {'data':[],'session':session,'experiment':exp}
+				data_dirs[key] = {'data':[],'name':[],'session':session,'experiment':exp}
 			if ss._single_data_dir:
 				data_dirs[key]['data'].append(ss.data_dir)
+				data_dirs[key]['name'].append(ss.name)
 			else:
 				data_dirs[key]['data'].extend(ss.data_dir)
-		output = [SubjectSession('all',data_dirs[key]['session'],data_dirs[key]['experiment'],data_dirs[key]['data']) for key in data_dirs.keys()]
+				data_dirs[key]['name'].extend(ss.name)
+		output = [SubjectSession(data_dirs[key]['name'],data_dirs[key]['session'],data_dirs[key]['experiment'],data_dirs[key]['data']) for key in data_dirs.keys()]
 	else:
 		ValueError('Unknown merge criteria "{0}"'.format(merge))
 	return output
@@ -386,12 +406,11 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 	
 	subjects = unique_subject_sessions(raw_data_dir)
 	
-	bla = {'2AFC':0.,'Auditivo':0.,'Luminancia':0.}
-	for s in subjects:
-		rt = np.sort(s.load_data()[:,1])
-		key = s.experiment
-		bla[key] = np.max([bla[key],np.std(rt)])
-	print bla
+	#~ bla = {'2AFC':[],'Auditivo':[],'Luminancia':[]}
+	#~ for s in subjects:
+		#~ rt = np.sort(s.load_data()[:,1])
+		#~ key = s.experiment
+		#~ bla[key].append(np.sum((rt<8.).astype(np.float))/float(len(rt)))
 	
 	print str(len(subjects))+' subjectSessions can be constructed found'
 	filtered_subjects = filter_subjects_list(subjects)

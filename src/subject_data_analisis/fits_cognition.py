@@ -1,6 +1,7 @@
 from __future__ import division
 
 import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy, re
+import scipy.signal
 import numpy as np
 from utils import normpdf,average_downsample
 
@@ -14,7 +15,7 @@ opsys,computer_name,kern,bla,bits = os.uname()
 if opsys.lower().startswith("linux"):
 	if computer_name=="facultad":
 		loc = Location.facu
-	elif computer_name.startswith("sge"):
+	elif computer_name.startswith("sge") or computer_name.startswith("slurm"):
 		loc = Location.cluster
 elif opsys.lower().startswith("darwin"):
 	loc = Location.home
@@ -31,7 +32,9 @@ elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
 
 try:
-	import matplotlib as mt
+	with warnings.catch_warnings():
+		warnings.simplefilter("ignore")
+		import matplotlib as mt
 	if loc==Location.cluster:
 		mt.use('Agg')
 	from matplotlib import pyplot as plt
@@ -135,8 +138,8 @@ def rt_confidence_likelihood(confidence_matrix_time,confidence_matrix,RT,confide
 	t_ind = np.interp(RT,confidence_matrix_time,np.arange(0,nT,dtype=np.float))
 	c_ind = np.interp(confidence,confidence_array,np.arange(0,nC,dtype=np.float))
 	
-	floor_t_ind = np.floor(t_ind)
-	ceil_t_ind = np.ceil(t_ind)
+	floor_t_ind = int(np.floor(t_ind))
+	ceil_t_ind = int(np.ceil(t_ind))
 	t_weight = 1.-t_ind%1.
 	if floor_t_ind==nT-1:
 		ceil_t_ind = floor_t_ind
@@ -144,8 +147,8 @@ def rt_confidence_likelihood(confidence_matrix_time,confidence_matrix,RT,confide
 	else:
 		t_weight = np.array([1.-t_ind%1.,t_ind%1.])
 	
-	floor_c_ind = np.floor(c_ind)
-	ceil_c_ind = np.ceil(c_ind)
+	floor_c_ind = int(np.floor(c_ind))
+	ceil_c_ind = int(np.ceil(c_ind))
 	if floor_c_ind==nC-1:
 		ceil_c_ind = floor_c_ind
 		c_weight = np.array([1.])
@@ -166,8 +169,8 @@ def rt_likelihood(t,decision_pdf,RT):
 	nT = decision_pdf.shape[0]
 	t_ind = np.interp(RT,t,np.arange(0,nT,dtype=np.float))
 	
-	floor_t_ind = np.floor(t_ind)
-	ceil_t_ind = np.ceil(t_ind)
+	floor_t_ind = int(np.floor(t_ind))
+	ceil_t_ind = int(np.ceil(t_ind))
 	t_weight = 1.-t_ind%1.
 	if floor_t_ind==nT-1:
 		ceil_t_ind = floor_t_ind
@@ -185,8 +188,8 @@ def confidence_likelihood(confidence_pdf,confidence):
 	confidence_array = np.linspace(0.,1.,nC)
 	c_ind = np.interp(confidence,confidence_array,np.arange(0,nC,dtype=np.float))
 	
-	floor_c_ind = np.floor(c_ind)
-	ceil_c_ind = np.ceil(c_ind)
+	floor_c_ind = int(np.floor(c_ind))
+	ceil_c_ind = int(np.ceil(c_ind))
 	if floor_c_ind==nC-1:
 		ceil_c_ind = floor_c_ind
 		weight = np.array([1.])
@@ -222,7 +225,7 @@ class Fitter:
 		logging.debug('Setted Fitter suffix = %s',self.suffix)
 		self.set_decisionPolicyKwArgs(decisionPolicyKwArgs)
 		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
-		self.confidence_partition = float(int(confidence_partition))
+		self.confidence_partition = int(confidence_partition)
 		self.__fit_internals__ = None
 	
 	# Setters
@@ -316,6 +319,7 @@ class Fitter:
 		logging.debug('Setted rt_cutoff = %f',self.rt_cutoff)
 	
 	def set_subjectSession_data(self,subjectSession):
+		self.subjectSession = subjectSession
 		self._subjectSession_state = subjectSession.__getstate__()
 		logging.debug('Setted Fitter _subjectSession_state')
 		logging.debug('experiment:%(experiment)s, name:%(name)s, session:%(session)s, data_dir:%(data_dir)s',self._subjectSession_state)
@@ -371,7 +375,7 @@ class Fitter:
 		self.set_rt_cutoff(state['rt_cutoff'])
 		self.raw_data_dir = state['raw_data_dir']
 		if 'confidence_partition' in state.keys():
-			self.confidence_partition = state['confidence_partition']
+			self.confidence_partition = int(state['confidence_partition'])
 		else:
 			self.confidence_partition = 100.
 		self.method = state['method']
@@ -430,7 +434,17 @@ class Fitter:
 		logging.debug('Setted Fitter optimizer_kwargs = %s',self.optimizer_kwargs)
 	
 	# Getters
-	def get_parameters_dict(self,x):
+	def get_parameters_dict(self):
+		parameters = self.get_fixed_parameters().copy()
+		try:
+			start_point = self.get_start_point()
+		except:
+			start_point = self.default_start_point()
+		for fp in self.get_fitted_parameters():
+			parameters[fp] = start_point[fp]
+		return parameters
+	
+	def get_parameters_dict_from_array(self,x):
 		parameters = self.fixed_parameters.copy()
 		for index,key in enumerate(self.fitted_parameters):
 			parameters[key] = x[index]
@@ -444,16 +458,22 @@ class Fitter:
 		return parameters
 	
 	def get_fixed_parameters(self):
-		return self.fixed_parameters
+		try:
+			return self.fixed_parameters
+		except:
+			return self._fixed_parameters
 	
 	def get_fitted_parameters(self):
-		return self.fitted_parameters
+		try:
+			return self.fitted_parameters
+		except:
+			return self._fitted_parameters
 	
 	def get_start_point(self):
 		return self._start_point
 	
 	def get_bounds(self):
-		return self.bounds
+		return self._bounds
 	
 	def __getstate__(self):
 		state = {'experiment':self.experiment,
@@ -499,28 +519,30 @@ class Fitter:
 			must_downsample = False
 			_dt = self.dp.dt
 		
-		_T = parameters['dead_time']+6*parameters['dead_time_sigma']
-		_nT = int(_T/_dt)+1
-		nT = int(_T/self.dp.dt)+1
-		dense_conv_x = np.arange(0,_nT)*_dt
+		conv_x_T = parameters['dead_time']+6*parameters['dead_time_sigma']
+		dense_conv_x_nT = int(conv_x_T/_dt)+1
+		conv_x_nT = int(conv_x_T/self.dp.dt)+1
+		dense_conv_x = np.arange(0,dense_conv_x_nT)*_dt
 		if parameters['dead_time_sigma']>0:
 			dense_conv_val = normpdf(dense_conv_x,parameters['dead_time'],parameters['dead_time_sigma'])
 			dense_conv_val[dense_conv_x<parameters['dead_time']] = 0.
 		else:
 			dense_conv_val = np.zeros_like(dense_conv_x)
 			dense_conv_val[np.floor(parameters['dead_time']/_dt)] = 1.
-		#~ print np.sum(np.isnan(dense_conv_val).astype(np.int))
-		conv_x = np.arange(0,nT)*self.dp.dt
+		conv_x = np.arange(0,conv_x_nT)*self.dp.dt
 		if must_downsample:
-			conv_val = average_downsample(dense_conv_val,_nT/nT)
-			#~ ratio = np.ceil(_nT/nT)
-			#~ tail = _nT%ratio
-			#~ if tail!=0:
-				#~ padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(ratio-tail,dtype=np.float)),axis=0)
-			#~ else:
-				#~ padded_cv = dense_conv_val
-			#~ padded_cv = np.reshape(padded_cv,(-1,ratio))
-			#~ conv_val = np.nanmean(padded_cv,axis=1)
+			#~ conv_val = average_downsample(dense_conv_val,conv_x_nT)
+			if dense_conv_x_nT%conv_x_nT==0:
+				ratio = np.round(dense_conv_x_nT/conv_x_nT)
+			else:
+				ratio = np.ceil(dense_conv_x_nT/conv_x_nT)
+			tail = dense_conv_x_nT%ratio
+			if tail!=0:
+				padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(ratio-tail,dtype=np.float)),axis=0)
+			else:
+				padded_cv = dense_conv_val
+			padded_cv = np.reshape(padded_cv,(-1,ratio))
+			conv_val = np.nanmean(padded_cv,axis=1)
 		else:
 			conv_val = dense_conv_val
 		conv_val/=np.sum(conv_val)
@@ -528,12 +550,8 @@ class Fitter:
 	
 	def get_key(self,merge=None):
 		experiment = self.experiment
-		subject = self._subjectSession_state['name']
-		session = self._subjectSession_state['session']
-		if isinstance(session,int):
-			session = str(session)
-		else:
-			session = '-'.join([str(s) for s in session])
+		subject = self.subjectSession.get_name()
+		session = self.subjectSession.get_session()
 		if merge is None:
 			key = "{experiment}_subject_{subject}_session_{session}".format(experiment=experiment,
 					subject=subject,session=session)
@@ -583,6 +601,11 @@ class Fitter:
 									   'rt':{'x':t,'y':model_rt},
 									   'confidence':{'x':c,'y':model_confidence}}}}
 		return Fitter_plot_handler(output,self.time_units)
+	
+	def get_save_file_name(self):
+		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
+				experiment=self.experiment,method=self.method,name=self.subjectSession.get_name(),
+				session=self.subjectSession.get_session(),optimizer=self.optimizer,suffix=self.suffix)
 	
 	# Defaults
 	def default_decisionPolicyKwArgs(self):
@@ -651,9 +674,9 @@ class Fitter:
 				self.__default_start_point__ = self._fixed_parameters.copy()
 			else:
 				self.__default_start_point__ = {}
-			if not 'cost' in self.__default_start_point__.keys():
+			if not 'cost' in self.__default_start_point__.keys() or self.__default_start_point__['cost'] is None:
 				self.__default_start_point__['cost'] = 0.02 if self.time_units=='seconds' else 0.00002
-			if not 'internal_var' in self.__default_start_point__.keys():
+			if not 'internal_var' in self.__default_start_point__.keys() or self.__default_start_point__['internal_var'] is None:
 				try:
 					from scipy.optimize import minimize
 					with warnings.catch_warnings():
@@ -666,12 +689,12 @@ class Fitter:
 					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
 				#~ print np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/np.sqrt(self.__default_start_point__['internal_var'])))),self.__default_start_point__['internal_var']
 				#~ raise Exception('Testing')
-			if not 'phase_out_prob' in self.__default_start_point__.keys():
+			if not 'phase_out_prob' in self.__default_start_point__.keys() or self.__default_start_point__['phase_out_prob'] is None:
 				self.__default_start_point__['phase_out_prob'] = 0.05
-			if not 'dead_time' in self.__default_start_point__.keys():
+			if not 'dead_time' in self.__default_start_point__.keys() or self.__default_start_point__['dead_time'] is None:
 				dead_time = sorted(self.rt)[int(0.025*len(self.rt))]
 				self.__default_start_point__['dead_time'] = dead_time
-			if not 'confidence_map_slope' in self.__default_start_point__.keys():
+			if not 'confidence_map_slope' in self.__default_start_point__.keys() or self.__default_start_point__['confidence_map_slope'] is None:
 				self.__default_start_point__['confidence_map_slope'] = 17.2
 			
 			must_make_expensive_guess = ((not 'dead_time_sigma' in self.__default_start_point__.keys()) or\
@@ -689,7 +712,7 @@ class Fitter:
 						first_passage_pdf+= gs*drift_prob
 				first_passage_pdf/=(np.sum(first_passage_pdf)*self.dp.dt)
 				
-				if not 'dead_time_sigma' in self.__default_start_point__.keys():
+				if not 'dead_time_sigma' in self.__default_start_point__.keys() or self.__default_start_point__['dead_time_sigma'] is None:
 					mean_pdf = np.sum(first_passage_pdf*self.dp.t)*self.dp.dt
 					var_pdf = np.sum(first_passage_pdf*(self.dp.t-mean_pdf)**2)*self.dp.dt
 					var_rt = np.var(self.rt)
@@ -702,10 +725,10 @@ class Fitter:
 				rt_mode_ind = np.argmax(first_passage_pdf[0])
 				rt_mode_ind+= 4 if self.dp.nT-rt_mode_ind>4 else 0
 				log_odds = self.dp.log_odds()
-				if not 'high_confidence_threshold' in self.__default_start_point__.keys():
+				if not 'high_confidence_threshold' in self.__default_start_point__.keys() or self.__default_start_point__['high_confidence_threshold'] is None:
 					self.__default_start_point__['high_confidence_threshold'] = log_odds[0][rt_mode_ind]
 			else:
-				if not 'high_confidence_threshold' in self.__default_start_point__.keys():
+				if not 'high_confidence_threshold' in self.__default_start_point__.keys() or self.__default_start_point__['high_confidence_threshold'] is None:
 					self.__default_start_point__['high_confidence_threshold'] = 0.3
 			
 			return self.__default_start_point__
@@ -720,7 +743,7 @@ class Fitter:
 					'phase_out_prob':[0.,0.2],'internal_var':[1e-9,1e2],
 					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
 		default_sp = self.default_start_point()
-		defaults['internal_var'] = [default_sp['internal_var']*5e-2,default_sp['internal_var']*5e1]
+		defaults['internal_var'] = [default_sp['internal_var']*0.2,default_sp['internal_var']*1.8]
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
 			defaults['high_confidence_threshold'][1] = 2*default_sp['high_confidence_threshold']
 		return defaults
@@ -780,6 +803,7 @@ class Fitter:
 				raise ValueError('Unknown method "{0}" for experiment "{1}"'.format(self.method,self.experiment))
 		else:
 			raise ValueError('Unknown experiment "{0}"'.format(self.experiment))
+		self.__fit_internals__ = None
 		self._fit_output = minimizer(merit_function)
 		self.__fit_internals__ = None
 		return self._fit_output
@@ -789,25 +813,21 @@ class Fitter:
 		logging.debug('Fitter state that will be saved = "%s"',self.__getstate__())
 		if not hasattr(self,'_fit_output'):
 			raise ValueError('The Fitter instance has not performed any fit and still has no _fit_output attribute set')
-		session = self._subjectSession_state['session']
-		if isinstance(session,int):
-			session = str(session)
-		else:
-			session = '-'.join([str(s) for s in session])
-		fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
-				experiment=self.experiment,method=self.method,name=self._subjectSession_state['name'],
-				session=session,optimizer=self.optimizer,suffix=self.suffix)
-		logging.info('Saving Fitter state to file "%s"',fname)
-		f = open(fname,'w')
+		logging.info('Saving Fitter state to file "%s"',self.get_save_file_name())
+		f = open(self.get_save_file_name(),'w')
 		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
 	
 	# Sanitizers
 	def sanitize_parameters_x0_bounds(self):
+		_fixed_parameters = self._fixed_parameters.copy()
+		for par in _fixed_parameters.keys():
+			if _fixed_parameters[par] is None:
+				_fixed_parameters[par] = self._start_point[par]
 		fittable_parameters = self.get_fittable_parameters()
 		confidence_parameters = self.get_confidence_parameters()
 		method_fitted_parameters = {'full_confidence':self._fitted_parameters[:],'full':[],'confidence_only':[]}
-		method_fixed_parameters = {'full_confidence':self._fixed_parameters.copy(),'full':self._fixed_parameters.copy(),'confidence_only':self._fixed_parameters.copy()}
+		method_fixed_parameters = {'full_confidence':_fixed_parameters.copy(),'full':_fixed_parameters.copy(),'confidence_only':_fixed_parameters.copy()}
 		method_sp = {'full_confidence':[],'full':[],'confidence_only':[]}
 		method_b = {'full_confidence':[],'full':[],'confidence_only':[]}
 		for par in self._fitted_parameters:
@@ -947,19 +967,106 @@ class Fitter:
 			phigh = np.nanmean(padded_phigh,axis=2)
 		return phigh
 	
-	def confidence_mapping_pdf_matrix(self,first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False):
+	# Main model prediction functions
+	#~ def confidence_mapping_pdf_matrix(self,first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False,dead_time_convolver=None):
+		#~ indeces = np.arange(0,self.confidence_partition,dtype=np.float)
+		#~ confidence_array = np.linspace(0,1,self.confidence_partition)
+		#~ nT = self.dp.nT
+		#~ confidence_matrix = np.zeros((2,self.confidence_partition,nT))
+		#~ if mapped_confidences is None:
+			#~ mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		#~ try:
+			#~ conv_val,conv_x = dead_time_convolver
+		#~ except:
+			#~ conv_val,conv_x = self.get_dead_time_convolver(parameters)
+		#~ _nT = len(conv_x)
+		#~ conv_confidence_matrix = np.zeros((2,self.confidence_partition,nT+_nT))
+		#~ for decision_ind,(first_passage_pdf,mapped_confidence) in enumerate(zip(first_passage_pdfs,mapped_confidences)):
+			#~ cv_inds = np.interp(mapped_confidence,confidence_array,indeces)
+			#~ for index,(cv_ind,floor_cv_ind,ceil_cv_ind,fppdf) in enumerate(zip(cv_inds,np.floor(cv_inds).astype(np.int),np.ceil(cv_inds).astype(np.int),first_passage_pdf)):
+				#~ norm = 0.
+				#~ if index==0:
+					#~ weight = 1.-np.mod(cv_ind,1)
+					#~ confidence_matrix[decision_ind,floor_cv_ind,index] = fppdf*weight
+					#~ confidence_matrix[decision_ind,ceil_cv_ind,index]+= fppdf*(1.-weight)
+					#~ prev_norm = fppdf
+				#~ else:
+					#~ if np.abs(cv_ind-prior_cv_ind)<=1.5:
+						#~ weight = 1.-np.mod(cv_ind,1)
+						#~ confidence_matrix[decision_ind,floor_cv_ind,index] = fppdf*weight
+						#~ confidence_matrix[decision_ind,ceil_cv_ind,index]+= fppdf*(1.-weight)
+						#~ norm = fppdf
+					#~ else:
+						#~ if prior_cv_ind<cv_ind:
+							#~ prev_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[prior_fppdf,0.],1)
+							#~ curr_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[0.,fppdf],1)
+							#~ 
+							#~ prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1,dtype=np.float))
+							#~ curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1,dtype=np.float))
+							#~ prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
+							#~ curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
+							#~ 
+							#~ prev_norm+= np.sum(prev_temp_fppdf)
+							#~ norm = np.sum(curr_temp_fppdf)
+							#~ confidence_matrix[decision_ind,prior_ceil_cv_ind+1:ceil_cv_ind+1,index-1]+= prev_temp_fppdf
+							#~ confidence_matrix[decision_ind,prior_ceil_cv_ind+1:ceil_cv_ind+1,index] = curr_temp_fppdf
+						#~ else:
+							#~ prev_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[prior_fppdf,0.],1)
+							#~ curr_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[0.,fppdf],1)
+							#~ 
+							#~ prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1,dtype=np.float))
+							#~ curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1,dtype=np.float))
+							#~ prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
+							#~ curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
+							#~ 
+							#~ prev_norm+= np.sum(prev_temp_fppdf)
+							#~ norm = np.sum(curr_temp_fppdf)
+							#~ if floor_cv_ind>0:
+								#~ confidence_matrix[decision_ind,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index-1]+= prev_temp_fppdf
+								#~ confidence_matrix[decision_ind,prior_floor_cv_ind-1:floor_cv_ind-1:-1,index] = curr_temp_fppdf
+							#~ else:
+								#~ confidence_matrix[decision_ind,prior_floor_cv_ind-1::-1,index-1]+= prev_temp_fppdf
+								#~ confidence_matrix[decision_ind,prior_floor_cv_ind-1::-1,index] = curr_temp_fppdf
+					#~ if prev_norm>0:
+						#~ confidence_matrix[decision_ind,:,index-1]*=prior_fppdf/prev_norm
+					#~ if index<len(cv_inds)-1:
+						#~ end_index = _nT+index-1
+						#~ cv_end_index = end_index-index+1
+						#~ conv_confidence_matrix[decision_ind,:,index-1:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index-1],(-1,1))*conv_val[:cv_end_index]
+					#~ else:
+						#~ if norm>0:
+							#~ confidence_matrix[decision_ind,:,index]*=fppdf/norm
+						#~ end_index = _nT+index
+						#~ cv_end_index = end_index-index
+						#~ conv_confidence_matrix[decision_ind,:,index:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index],(-1,1))*conv_val[:cv_end_index]
+					#~ prev_norm = norm
+				#~ prior_fppdf = fppdf
+				#~ prior_cv_ind = cv_ind
+				#~ prior_floor_cv_ind = floor_cv_ind
+				#~ prior_ceil_cv_ind = ceil_cv_ind
+		#~ conv_confidence_matrix/=(np.sum(conv_confidence_matrix)*self.dp.dt)
+		#~ if return_unconvoluted_matrix:
+			#~ confidence_matrix/=(np.sum(confidence_matrix)*self.dp.dt)
+			#~ output = (conv_confidence_matrix,confidence_matrix)
+		#~ else:
+			#~ output = conv_confidence_matrix
+		#~ return output
+	
+	def confidence_mapping_pdf_matrix(self,first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False,dead_time_convolver=None):
 		indeces = np.arange(0,self.confidence_partition,dtype=np.float)
 		confidence_array = np.linspace(0,1,self.confidence_partition)
 		nT = self.dp.nT
 		confidence_matrix = np.zeros((2,self.confidence_partition,nT))
 		if mapped_confidences is None:
 			mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-		conv_val,conv_x = self.get_dead_time_convolver(parameters)
+		try:
+			conv_val,conv_x = dead_time_convolver
+		except:
+			conv_val,conv_x = self.get_dead_time_convolver(parameters)
 		_nT = len(conv_x)
-		conv_confidence_matrix = np.zeros((2,self.confidence_partition,nT+_nT))
 		for decision_ind,(first_passage_pdf,mapped_confidence) in enumerate(zip(first_passage_pdfs,mapped_confidences)):
 			cv_inds = np.interp(mapped_confidence,confidence_array,indeces)
-			for index,(cv_ind,floor_cv_ind,ceil_cv_ind,fppdf) in enumerate(zip(cv_inds,np.floor(cv_inds),np.ceil(cv_inds),first_passage_pdf)):
+			for index,(cv_ind,floor_cv_ind,ceil_cv_ind,fppdf) in enumerate(zip(cv_inds,np.floor(cv_inds).astype(np.int),np.ceil(cv_inds).astype(np.int),first_passage_pdf)):
 				norm = 0.
 				if index==0:
 					weight = 1.-np.mod(cv_ind,1)
@@ -977,8 +1084,8 @@ class Fitter:
 							prev_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[prior_fppdf,0.],1)
 							curr_polypars = np.polyfit([prior_ceil_cv_ind,ceil_cv_ind],[0.,fppdf],1)
 							
-							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1))
-							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1))
+							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1,dtype=np.float))
+							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_ceil_cv_ind+1,ceil_cv_ind+1,dtype=np.float))
 							prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
 							curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
 							
@@ -990,8 +1097,8 @@ class Fitter:
 							prev_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[prior_fppdf,0.],1)
 							curr_polypars = np.polyfit([prior_cv_ind,floor_cv_ind],[0.,fppdf],1)
 							
-							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1))
-							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1))
+							prev_temp_fppdf = np.polyval(prev_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1,dtype=np.float))
+							curr_temp_fppdf = np.polyval(curr_polypars,np.arange(prior_floor_cv_ind-1,floor_cv_ind-1,-1,dtype=np.float))
 							prev_temp_fppdf[prev_temp_fppdf<0.] = 0.
 							curr_temp_fppdf[curr_temp_fppdf<0.] = 0.
 							
@@ -1005,21 +1112,15 @@ class Fitter:
 								confidence_matrix[decision_ind,prior_floor_cv_ind-1::-1,index] = curr_temp_fppdf
 					if prev_norm>0:
 						confidence_matrix[decision_ind,:,index-1]*=prior_fppdf/prev_norm
-					if index<len(cv_inds)-1:
-						end_index = _nT+index-1
-						cv_end_index = end_index-index+1
-						conv_confidence_matrix[decision_ind,:,index-1:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index-1],(-1,1))*conv_val[:cv_end_index]
-					else:
-						if norm>0:
-							confidence_matrix[decision_ind,:,index]*=fppdf/norm
-						end_index = _nT+index
-						cv_end_index = end_index-index
-						conv_confidence_matrix[decision_ind,:,index:end_index]+= np.reshape(confidence_matrix[decision_ind,:,index],(-1,1))*conv_val[:cv_end_index]
+					if index==len(cv_inds)-1 and norm>0:
+						confidence_matrix[decision_ind,:,index]*=fppdf/norm
 					prev_norm = norm
 				prior_fppdf = fppdf
 				prior_cv_ind = cv_ind
 				prior_floor_cv_ind = floor_cv_ind
 				prior_ceil_cv_ind = ceil_cv_ind
+		conv_confidence_matrix = scipy.signal.fftconvolve(confidence_matrix,conv_val.reshape((1,1,-1)),mode='full')
+		conv_confidence_matrix[conv_confidence_matrix<0] = 0.
 		conv_confidence_matrix/=(np.sum(conv_confidence_matrix)*self.dp.dt)
 		if return_unconvoluted_matrix:
 			confidence_matrix/=(np.sum(confidence_matrix)*self.dp.dt)
@@ -1028,8 +1129,11 @@ class Fitter:
 			output = conv_confidence_matrix
 		return output
 	
-	def decision_pdf(self,first_passage_pdfs,parameters):
-		conv_val,conv_x = self.get_dead_time_convolver(parameters)
+	def decision_pdf(self,first_passage_pdfs,parameters,dead_time_convolver=None):
+		try:
+			conv_val,conv_x = dead_time_convolver
+		except:
+			conv_val,conv_x = self.get_dead_time_convolver(parameters)
 		_nT = len(conv_x)
 		decision_pdfs = np.zeros((2,self.dp.nT+_nT))
 		for decision_ind,first_passage_pdf in enumerate(first_passage_pdfs):
@@ -1037,20 +1141,49 @@ class Fitter:
 				decision_pdfs[decision_ind,index:index+_nT]+= first_passage_pdf[index]*conv_val
 		return decision_pdfs
 	
-	def mapped_confidence_probability(self,confidence_mapping_pdf_matrix):
-		return np.sum(confidence_mapping_pdf_matrix,axis=2)*self.dp.dt
-	
 	# Experiment dependant merits
 	# Luminancia experiment
 	def lum_full_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			if must_compute_first_passage_time:
+				first_passage_time = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = first_passage_time
+			else:
+				first_passage_time = self.__fit_internals__['first_passage_times'][drift]
+			gs = self.decision_pdf(first_passage_time,parameters,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
@@ -1058,7 +1191,7 @@ class Fitter:
 		return nlog_likelihood
 	
 	def lum_confidence_only_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
 			self.dp.set_cost(parameters['cost'])
@@ -1069,8 +1202,9 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		
 		for index,drift in enumerate(self.mu):
 			if must_compute_first_passage_time:
@@ -1078,24 +1212,54 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def lum_full_confidence_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-		
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1104,14 +1268,46 @@ class Fitter:
 	
 	# 2AFC experiment
 	def afc_full_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			if must_compute_first_passage_time:
+				first_passage_time = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = first_passage_time
+			else:
+				first_passage_time = self.__fit_internals__['first_passage_times'][drift]
+			gs = self.decision_pdf(first_passage_time,parameters,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
@@ -1119,7 +1315,7 @@ class Fitter:
 		return nlog_likelihood
 	
 	def afc_confidence_only_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
 			self.dp.set_cost(parameters['cost'])
@@ -1130,8 +1326,9 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		
 		for index,drift in enumerate(self.mu):
 			if must_compute_first_passage_time:
@@ -1139,24 +1336,54 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def afc_full_confidence_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-		
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1165,14 +1392,46 @@ class Fitter:
 	
 	# Auditivo experiment
 	def aud_full_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			if must_compute_first_passage_time:
+				first_passage_time = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = first_passage_time
+			else:
+				first_passage_time = self.__fit_internals__['first_passage_times'][drift]
+			gs = self.decision_pdf(first_passage_time,parameters,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
@@ -1180,7 +1439,7 @@ class Fitter:
 		return nlog_likelihood
 	
 	def aud_confidence_only_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
 			self.dp.set_cost(parameters['cost'])
@@ -1191,8 +1450,9 @@ class Fitter:
 		else:
 			must_compute_first_passage_time = False
 			first_passage_times = self.__fit_internals__['first_passage_times']
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		
 		for index,drift in enumerate(self.mu):
 			if must_compute_first_passage_time:
@@ -1200,24 +1460,54 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def aud_full_confidence_merit(self,x):
-		parameters = self.get_parameters_dict(x)
+		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
-		self.dp.set_cost(parameters['cost'])
-		self.dp.set_internal_var(parameters['internal_var'])
-		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
+			self.dp.set_cost(parameters['cost'])
+			self.dp.set_internal_var(parameters['internal_var'])
+			must_compute_first_passage_time = True
+			must_store_first_passage_time = False
+			xub,xlb = self.dp.xbounds()
+		else:
+			if self.__fit_internals__ is None:
+				must_compute_first_passage_time = True
+				must_store_first_passage_time = True
+				self.dp.set_cost(parameters['cost'])
+				self.dp.set_internal_var(parameters['internal_var'])
+				xub,xlb = self.dp.xbounds()
+				self.__fit_internals__ = {'xub':xub,'xlb':xlb,'first_passage_times':{}}
+			else:
+				must_compute_first_passage_time = False
+				first_passage_times = self.__fit_internals__['first_passage_times']
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-		
+		if 'dead_time' in self.get_fitted_parameters() or 'dead_time_sigma' in self.get_fitted_parameters():
+			dead_time_convolver = self.get_dead_time_convolver(parameters)
+		else:
+			if self.__fit_internals__ is None:
+				dead_time_convolver = self.get_dead_time_convolver(parameters)
+				self.__fit_internals__ = {'dead_time_convolver':dead_time_convolver}
+			else:
+				try:
+					dead_time_convolver = self.__fit_internals__['dead_time_convolver']
+				except:
+					dead_time_convolver = self.get_dead_time_convolver(parameters)
+					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
 		for index,drift in enumerate(self.mu):
-			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			if must_compute_first_passage_time:
+				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
+				if must_store_first_passage_time:
+					self.__fit_internals__['first_passage_times'][drift] = gs
+			else:
+				gs = self.__fit_internals__['first_passage_times'][drift]
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1231,8 +1521,9 @@ class Fitter:
 		self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		for index,drift in enumerate(self.mu):
-			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters)
+			gs = self.decision_pdf(np.array(self.dp.rt(drift,bounds=(xub,xlb))),parameters,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,gs.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf in zip(self.rt[indeces],self.performance[indeces]):
@@ -1244,12 +1535,13 @@ class Fitter:
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences),axis=2)
+			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
@@ -1260,12 +1552,13 @@ class Fitter:
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1281,7 +1574,7 @@ class Fitter:
 			self.dp.set_internal_var(parameters['internal_var'])
 		xub,xlb = self.dp.xbounds()
 		
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)
 		mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
 		
 		output = None
@@ -1295,7 +1588,7 @@ class Fitter:
 				output+= rt_conf_lik_matrix*self.mu_prob[index]
 		output/=(np.sum(output)*self.dp.dt)
 		t = np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
-		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/self.confidence_partition*np.ones_like(t)
+		random_rt_likelihood = 0.5*parameters['phase_out_prob']/(self.max_RT-self.min_RT)/float(self.confidence_partition)*np.ones_like(t)
 		random_rt_likelihood[np.logical_or(t<self.min_RT,t>self.max_RT)] = 0.
 		return output*(1.-parameters['phase_out_prob'])+random_rt_likelihood, np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
 	
@@ -1615,6 +1908,11 @@ def parse_input():
  '-g' or '--debug': Activates the debug messages
  '-v' or '--verbose': Activates info messages (by default only warnings and errors
                       are printed).
+ '-w': Override an existing saved fitter. This flag is only used if the 
+       '--fit' flag is not disabled. If the flag '-w' is supplied, the script
+       will override the saved fitter instance associated to the fitted
+       subjectSession. If this flag is not supplied, the script will skip
+       the subjectSession's that were already fitted.
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -1626,9 +1924,15 @@ def parse_input():
  
  '--fixed_parameters': A dictionary of fixed parameters. The dictionary must be written as
                        '{"fixed_parameter_name":fixed_parameter_value,...}'. For example,
-                       '{"cost":0.2,"dead_time":0.5}'. [Default depends on experiment.
-                       For Luminance experiment '{"internal_var":0}'. For the other
-                       experiments '{}'.]
+                       '{"cost":0.2,"dead_time":0.5}'. Note that the value null
+                       can be passed as a fixed parameter. In that case, the
+                       parameter will be fixed to its default value or, if the flag
+                       -f is also supplied, to the parameter value loaded from the
+                       previous fitting round.
+                       Default depends on the method. If the method is full, the
+                       confidence parameters will be fixed, and in fact ignored.
+                       If the method is confidence_only, the decision parameters
+                       are fixed to their default values.
  
  '--start_point': A dictionary of starting points for the fitting procedure.
                   The dictionary must be written as '{"parameter_name":start_point_value,etc}'.
@@ -1678,7 +1982,7 @@ def parse_input():
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
-				'start_point_from_fit_output':None}
+				'start_point_from_fit_output':None,'override':False}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -1715,6 +2019,8 @@ def parse_input():
 				options['fit'] = True
 			elif arg=='--no-fit':
 				options['fit'] = False
+			elif arg=='-w':
+				options['override'] = True
 			elif arg=='-u' or arg=='--units':
 				key = 'time_units'
 				expecting_key = False
@@ -1804,6 +2110,17 @@ def prepare_fit_args(fitter,options,fname):
 	for k in loaded_parameters.keys():
 		if not k in temp.get_fitted_parameters():
 			del loaded_parameters[k]
+	logging.debug('Loaded parameters: {0}'.format(loaded_parameters))
+	if temp.time_units!=fitter.time_units:
+		logging.debug('Changing loaded parameters time units')
+		for fp in loaded_parameters.keys():
+			if fp in ['cost','internal_var']:
+				scaling_factor = 1e3 if fitter.time_units=='seconds' else 1e-3
+			elif fp in ['dead_time','dead_time_sigma']:
+				scaling_factor = 1e-3 if fitter.time_units=='seconds' else 1e3
+			else:
+				scaling_factor = 1.
+			loaded_parameters[fp]*=scaling_factor
 	if fitter.method=='full':
 		start_point = loaded_parameters.copy()
 		fixed_parameters = loaded_parameters.copy()
@@ -1870,26 +2187,21 @@ def prepare_fit_args(fitter,options,fname):
 		start_point = loaded_parameters.copy()
 		fixed_parameters = {}
 	
-	if temp.time_units!=fitter.time_units:
-		fittable_pars = fitter.get_fittable_parameters()
-		scaling_factor = []
-		for fp in fitter.get_fittable_parameters():
-			if fp in ['cost','internal_var']:
-				scaling_factor = 1e3 if fitter.time_units=='seconds' else 1e-3
-			elif fp in ['dead_time','dead_time_sigma']:
-				scaling_factor = 1e-3 if fitter.time_units=='seconds' else 1e3
-			else:
-				scaling_factor = 1.
-			if fp in start_point.keys():
-				start_point[fp]*=scaling_factor
-			if fp in fixed_parameters.keys():
-				fixed_parameters[fp]*=scaling_factor
-	
-	fixed_parameters.update(options['fixed_parameters'])
+	for k in options['fixed_parameters'].keys():
+		if options['fixed_parameters'][k] is None:
+			try:
+				fixed_parameters[k] = start_point[k]
+			except:
+				fixed_parameters[k] = None
+		else:
+			fixed_parameters[k] = options['fixed_parameters'][k]
 	start_point.update(options['start_point'])
-	return fixed_parameters,start_point,options['bounds']
+	logging.debug('Prepared fixed_parameters = {0}'.format(fixed_parameters))
+	logging.debug('Prepared start_point = {0}'.format(start_point))
+	return fixed_parameters,start_point
 
 if __name__=="__main__":
+	# Parse input from sys.argv
 	options = parse_input()
 	if options['debug']:
 		logging.basicConfig(level=logging.DEBUG)
@@ -1900,6 +2212,7 @@ if __name__=="__main__":
 	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
+	# Prepare figure saver
 	if save:
 		if task==0 and ntasks==1:
 			fname = "fits_cognition_{method}{suffix}".format(method=options['method'],suffix=options['suffix'])
@@ -1916,80 +2229,74 @@ if __name__=="__main__":
 	else:
 		saver = None
 	
+	# Prepare subjectSessions list
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
 	if options['experiment']!='all':
 		subjects = io.filter_subjects_list(subjects,'experiment_'+options['experiment'])
 	logging.debug('Total number of subjectSessions listed = {0}'.format(len(subjects)))
 	logging.debug('Total number of subjectSessions that will be fitted = {0}'.format(len(range(task,len(subjects),ntasks))))
 	fitter_plot_handler = None
+	
+	# Main loop over subjectSessions
 	for i,s in enumerate(subjects):
 		logging.debug('Enumerated {0} subject {1}'.format(i,s))
 		if (i-task)%ntasks==0:
 			logging.debug('Task will execute for enumerated {0} subject {1}'.format(i,s))
+			# Fit parameters if the user did not disable the fit flag
 			if options['fit']:
+				logging.debug('Flag "fit" was True')
 				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],\
 					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
 					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
 					   confidence_partition=options['confidence_partition'])
+				if not options['override']:
+					fname = fitter.get_save_file_name()
+					if os.path.exists(fname) and os.path.isfile(fname):
+						logging.warning('File {0} already exists, will skip enumerated subject {1}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i))
+						continue
+				
+				# Set start point and fixed parameters to the user supplied values
+				# Or to the parameters loaded from a previous fit round
 				if options['start_point_from_fit_output']:
+					logging.debug('Flag start_point_from_fit_output was present. Will load parameters from previous fit round')
 					loaded_method = options['start_point_from_fit_output']['method']
 					loaded_optimizer = options['start_point_from_fit_output']['optimizer']
 					loaded_suffix = options['start_point_from_fit_output']['suffix']
 					fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
-					fname = fname.format(experiment=s.experiment,method=loaded_method,name=s.name,session=s.get_session(),
+					fname = fname.format(experiment=s.experiment,method=loaded_method,name=s.get_name(),session=s.get_session(),
 								 optimizer=loaded_optimizer,suffix=loaded_suffix)
-					fixed_parameters,start_point,bounds = prepare_fit_args(fitter,options,fname)
+					logging.debug('Will load parameters from file: {0}'.format(fname))
+					fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
 				else:
-					fixed_parameters=options['fixed_parameters']
-					start_point=options['start_point']
-					bounds=options['bounds']
-					
-				logging.debug('Flag "fit" was True')
-				try:
-					fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
-											start_point=start_point,\
-											bounds=bounds,\
-											optimizer_kwargs=options['optimizer_kwargs'])
-					fitter.save()
-				except:
-					continue
-				if options['method']=='full':
-					logging.debug('Used method "full" to fit the decision parameters. Will now execute "confidence_only" method.')
-					parameters = fitter.get_parameters_dict_from_fit_output(fit_output)
-					del parameters['high_confidence_threshold']
-					del parameters['confidence_map_slope']
-					fitter.method = 'confidence_only'
-					fit_output = fitter.fit(fixed_parameters=parameters,\
-											optimizer_kwargs=options['optimizer_kwargs'])
-					fitter.save()
+					fixed_parameters = options['fixed_parameters']
+					start_point = options['start_point']
+				bounds = options['bounds']
+				
+				# Perform fit and save fit output
+				fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
+										start_point=start_point,\
+										bounds=bounds,\
+										optimizer_kwargs=options['optimizer_kwargs'])
+				fitter.save()
+			# Prepare plotable data
 			if options['plot'] or save or options['save_plot_handler'] or options['load_plot_handler']:
 				logging.debug('Plot, save save_plot_fitter or load_plot_fitter flags were True.')
 				fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
 				method = options['method']
+				# Try to load the fitted data from file 'fname' or continue to next subject
 				try:
-					if method=='full':
-						try:
-							formated_fname = fname.format(experiment=s.experiment,method='confidence_only',name=s.name,session=s.get_session(),
+					formated_fname = fname.format(experiment=s.experiment,method=method,name=s.get_name(),session=s.get_session(),
 								 optimizer=options['optimizer'],suffix=options['suffix'])
-							logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
-							fitter = load_Fitter_from_file(formated_fname)
-						except:
-							logging.debug('Failed to load fitter confidence_only output file. Will attempt to load full method output file')
-							formated_fname = fname.format(experiment=s.experiment,method='full',name=s.name,session=s.get_session(),
-								 optimizer=options['optimizer'],suffix=options['suffix'])
-							logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
-							fitter = load_Fitter_from_file(formated_fname)
-					else:
-						formated_fname = fname.format(experiment=s.experiment,method=method,name=s.name,session=s.get_session(),
-									 optimizer=options['optimizer'],suffix=options['suffix'])
-						logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
-						fitter = load_Fitter_from_file(formated_fname)
+					logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
+					fitter = load_Fitter_from_file(formated_fname)
 				except:
 					logging.warning('Failed to load fitter from file. Will continue to next subject.')
 					if options['debug']:
 						raise
 					else:
 						continue
+				
+				# Create or load Fitter_plot_handler for the current subjectSession
 				logging.debug('Getting fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
 				if not options['load_plot_handler']:
 					logging.debug('Will not load Fitter_plot_handler from disk')
@@ -2006,11 +2313,13 @@ if __name__=="__main__":
 					except:
 						logging.debug('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
 						continue
+				# Add the new Fitter_plot_handler to the bucket of plot handlers
 				logging.debug('Adding Fitter_plot_handlers')
 				if fitter_plot_handler is None:
 					fitter_plot_handler = temp
 				else:
 					fitter_plot_handler+= temp
+	# Plot and show, or plot and save depending on the flags supplied by the user
 	if options['plot'] or save:
 		logging.debug('Plotting results from fitter_plot_handler.')
 		if options['plot_merge'] and options['load_plot_handler']:

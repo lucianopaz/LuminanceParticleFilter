@@ -711,6 +711,37 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
+def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg'):
+	fname+=suffix
+	mo.set_time_units('seconds')
+	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
+	model_vars = [1e-4,1e-3,1e-2,1e-1,1,1e2,1e3,1e4]
+	costs = np.linspace(0,0.5,10)
+	#~ s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,len(model_vars))]
+	#~ s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,len(model_vars))]
+	mus = np.array([0.1,0.5,1.])
+	
+	plt.figure(figsize=(14,7))
+	#~ gs1 = gridspec.GridSpec(2, 1,left=0.1, right=0.5,hspace=0.08)
+	#~ gs2 = gridspec.GridSpec(1, 1,left=0.505, right=0.52)
+	#~ gs3 = gridspec.GridSpec(1, 1,left=0.65, right=0.95)
+	#~ ax1 = plt.subplot(gs1[0])
+	#~ ax2 = plt.subplot(gs1[1])
+	performance = np.zeros((len(mus),len(costs),len(model_vars)))
+	evidence = np.zeros_like(performance)
+	for k,mu in enumerate(mus):
+		print mu
+		for i,cost in enumerate(costs):
+			m.set_cost(cost)
+			for j,var in enumerate(model_vars):
+				m.set_internal_var(var)
+				xub,xlb = m.xbounds()
+				performance[k,i,j] = np.sum(m.rt(mu,bounds=(xub,xlb))[0])*m.dt
+		plt.subplot(1,3,k+1)
+		plt.plot(model_vars,performance[k].T)#,aspect='auto',cmap=None,interpolation='none',origin='lower')
+		plt.xlabel(r'$\sigma$')
+	plt.show()
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -728,6 +759,7 @@ def parse_input():
  '--bounds_vs_T_n_dt_sketch': Plot bounds as a function of dt and T sketch
  '--vexplore_drop_sketch': Plot variance of p(g+dg|g) as a function of time and also plot the drop in mean v_explore
  '--bounds_vs_var': Plot decision bounds as a function of model_var
+ '--performance_vs_var_and_cost'
  
  '--show': Show the matplotlib figures after all have been created
  '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
@@ -735,7 +767,7 @@ def parse_input():
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
-				'bounds_vs_var':False}
+				'bounds_vs_var':False,'performance_vs_var_and_cost':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -778,6 +810,8 @@ if __name__=="__main__":
 		vexplore_drop_sketch(suffix=opts['suffix'])
 	if opts['bounds_vs_var']:
 		bounds_vs_var(suffix=opts['suffix'])
+	if opts['performance_vs_var_and_cost']:
+		performance_vs_var_and_cost(suffix=opts['suffix'])
 	
 	if opts['show']:
 		plt.show(True)

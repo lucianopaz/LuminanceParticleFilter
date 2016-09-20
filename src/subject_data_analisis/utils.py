@@ -85,34 +85,36 @@ def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
 def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
 	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
 
-def average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float):
+def average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float):
 	"""
-	b = average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float)
+	b = average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float)
 	
 	This function downsamples a numpy array of arbitrary shape. It does
 	so by computing the average value of the input array 'a' inside a
-	window of steps. This window can be an arbitrary float, and the
-	function handles the averaging of the edges of each window properly.
+	window of steps in order to produce an array with the supplied
+	output_len. The output_len does not need to be submultiple of the
+	original array's shape, and the function handles the averaging of
+	the edges of each window properly.
 	
 	Inputs:
 	- a:           np.array that will be downsampled
-	- window:      Scalar that specifies the width of the window in
-	               which the average is computed
+	- output_len:  Scalar that specifies the length of the output in the
+	               downsampled axis.
 	- axis:        The axis of the input array along which the array
 	               will be downsampled. By default axis is None, and in
 	               that case, the downsampling is performed on the
 	               flattened array.
-	- ignore_nans: Ignore nans in the averaging or not. Default is to
-	               ignore.
+	- ignore_nans: Bool that specifies whether to ignore nans in while
+	               averaging or not. Default is to ignore.
 	- dtype:       Specifies the output array's dtype. Default is
 	               np.float
 	
 	Output:
 	- b:           The downsampled array. If axis is None, it will be a
-	               flat array of shape equal to (int(np.ceil(a.size/window))).
+	               flat array of shape equal to (int(output_len)).
 	               If axis is not None, 'b' will have the same shape as
 	               'a' except for the specified axis, that will have
-	               int(np.ceil(a.shape[axis]/window)) elements
+	               int(output_len) elements
 	
 	Example
 	>>> import numpy as np
@@ -142,12 +144,14 @@ def average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float):
 		a = a.flatten()
 		axis = 0
 		sum_weight = 0
-		b = np.zeros((int(np.ceil(a.shape[0]/window))),dtype=dtype)
+		window = float(a.shape[0])/float(output_len)
+		b = np.zeros((int(output_len)),dtype=dtype)
 	else:
 		a = np.swapaxes(a,0,axis)
 		sum_weight = np.zeros_like(a[0],dtype=np.float)
 		b_shape = list(a.shape)
-		b_shape[0] = int(np.ceil(b_shape[0]/window))
+		window = float(b_shape[0]/output_len)
+		b_shape[0] = int(output_len)
 		b = np.zeros(tuple(b_shape),dtype=dtype)
 	flat_array = a.ndim==1
 	
@@ -167,7 +171,7 @@ def average_downsample(a,window,axis=None,ignore_nans=True,dtype=np.float):
 		position = (i+1)*step_size
 		index = int(position)
 		if prev_index==index:
-			weight = valid_indeces*step_size
+			weight = valid_indeces.astype(dtype)*step_size
 			sum_weight+= weight
 			if flat_array:
 				b[index]+= a[i]*weight if valid_indeces else 0.

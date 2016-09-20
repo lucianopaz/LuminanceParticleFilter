@@ -72,7 +72,7 @@ class Sweeper:
 		#~ self.fitter.set_start_point({'cost':0.,'internal_var':7000.,'dead_time':0.5,'dead_time_sigma':0.08,'phase_out_prob':0.05})
 		#~ self.fitter.set_bounds()
 		#~ self.fitter.fixed_parameters,self.fitter.fitted_parameters,start_point = self.fitter.sanitize_parameters_x0_bounds()[:3]
-		#~ self.parameters = self.fitter.get_parameters_dict(start_point)
+		#~ self.parameters = self.fitter.get_parameters_dict_from_array(start_point)
 		self.set_parameters()
 	
 	def set_parameters(self,d={}):

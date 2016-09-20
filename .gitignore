@@ -28,3 +28,4 @@ fits/*
 
 # Cluster job files
 *.qsub
+*.sbatch
