@@ -1134,11 +1134,12 @@ class Fitter:
 			conv_val,conv_x = dead_time_convolver
 		except:
 			conv_val,conv_x = self.get_dead_time_convolver(parameters)
-		_nT = len(conv_x)
-		decision_pdfs = np.zeros((2,self.dp.nT+_nT))
-		for decision_ind,first_passage_pdf in enumerate(first_passage_pdfs):
-			for index in range(self.dp.nT-1,-1,-1):
-				decision_pdfs[decision_ind,index:index+_nT]+= first_passage_pdf[index]*conv_val
+		decision_pdfs = scipy.signal.fftconvolve(first_passage_pdfs,conv_val.reshape((1,-1)),mode='full')
+		#~ _nT = len(conv_x)
+		#~ decision_pdfs = np.zeros((2,self.dp.nT+_nT))
+		#~ for decision_ind,first_passage_pdf in enumerate(first_passage_pdfs):
+			#~ for index in range(self.dp.nT-1,-1,-1):
+				#~ decision_pdfs[decision_ind,index:index+_nT]+= first_passage_pdf[index]*conv_val
 		return decision_pdfs
 	
 	# Experiment dependant merits
