@@ -89,6 +89,10 @@ class SubjectSession:
 			sessions = [int(re.search('(?<=sesion)[0-9]+',f).group()) for f in data_files]
 			for f,session in zip(data_files,sessions):
 				selected_side, performance, rt, contraste, confidence, phase, orientation = np.loadtxt(f, delimiter=' ', unpack=True)
+				# 2AFC has too much resolution in the variable 'contraste'
+				# and it slows down the fitting procedure. We will
+				# coarse the data in the following statement
+				contraste = np.round(contraste*5e3)/5e3
 				if isinstance(self.name,int):
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
 										orientation,phase,self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
@@ -404,7 +408,11 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 	except:
 		loaded_plot_libs = False
 	
-	subjects = unique_subject_sessions(raw_data_dir)
+	try:
+		subjects = unique_subject_sessions(raw_data_dir)
+	except:
+		raw_data_dir = raw_data_dir.replace('/home/','/Users/')
+		subjects = unique_subject_sessions(raw_data_dir)
 	
 	#~ bla = {'2AFC':[],'Auditivo':[],'Luminancia':[]}
 	#~ for s in subjects:
@@ -433,6 +441,8 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 		if key=='headers':
 			continue
 		data = experiments_data[key]
+		#~ data[:,0] = np.round(data[:,0]*5e3)/5e3
+		print key,len(set(data[:,0]))
 		matches = True
 		for test_subj in [t for t in merged_all if t.experiment==key]:
 			testdata = test_subj.load_data()

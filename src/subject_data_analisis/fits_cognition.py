@@ -40,6 +40,7 @@ try:
 	from matplotlib import pyplot as plt
 	from matplotlib.backends.backend_pdf import PdfPages
 	import matplotlib.gridspec as gridspec
+	from matplotlib.colors import LogNorm
 	can_plot = True
 except:
 	can_plot = False
@@ -737,11 +738,11 @@ class Fitter:
 		if self.time_units=='seconds':
 			defaults = {'cost':[0.,0.4],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
 					'phase_out_prob':[0.,0.2],'internal_var':[1e-6,1e5],
-					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
+					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,200.]}
 		else:
 			defaults = {'cost':[0.,0.0004],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
 					'phase_out_prob':[0.,0.2],'internal_var':[1e-9,1e2],
-					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,1e3]}
+					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,200.]}
 		default_sp = self.default_start_point()
 		defaults['internal_var'] = [default_sp['internal_var']*0.2,default_sp['internal_var']*1.8]
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
@@ -1750,25 +1751,30 @@ class Fitter_plot_handler():
 			plt.plot(model['confidence']['x'],-model['confidence']['y'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted confidence axes')
 			plt.xlabel('Confidence')
+			axconf.set_yscale('log')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 			logging.debug('Completed confidence axes plot, legend and labels')
 			
-			vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
-						   np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
+			#~ vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
+						   #~ np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
+			vmin = np.min([np.min(subj['hit_histogram']['z'][(subj['hit_histogram']['z']>0).nonzero()]),
+						   np.min(subj['miss_histogram']['z'][(subj['miss_histogram']['z']>0).nonzero()])])
+						   #~ np.min(model['hit_histogram']['z'][(model['hit_histogram']['z']>0).nonzero()]),
+						   #~ np.min(model['miss_histogram']['z'][(model['miss_histogram']['z']>0).nonzero()])])
 			vmax = np.max([np.max([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
 						   np.max([model['hit_histogram']['z'],model['miss_histogram']['z']])])
 			
 			ax00 = plt.subplot(gs2[0,0])
 			logging.debug('Created subject hit axes')
 			plt.imshow(subj['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['hit_histogram']['x'][0],subj['hit_histogram']['x'][-1],0,1])
+						extent=[subj['hit_histogram']['x'][0],subj['hit_histogram']['x'][-1],0,1],norm=LogNorm())
 			plt.ylabel('Confidence')
 			plt.title('Hit')
 			logging.debug('Populated subject hit axes')
 			ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
 			logging.debug('Created model hit axes')
 			plt.imshow(model['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['hit_histogram']['x'][0],model['hit_histogram']['x'][-1],0,1])
+						extent=[model['hit_histogram']['x'][0],model['hit_histogram']['x'][-1],0,1],norm=LogNorm())
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Confidence')
 			logging.debug('Populated model hit axes')
@@ -1776,13 +1782,13 @@ class Fitter_plot_handler():
 			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created subject miss axes')
 			plt.imshow(subj['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['miss_histogram']['x'][0],subj['miss_histogram']['x'][-1],0,1])
+						extent=[subj['miss_histogram']['x'][0],subj['miss_histogram']['x'][-1],0,1],norm=LogNorm())
 			plt.title('Miss')
 			logging.debug('Populated subject miss axes')
 			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created model miss axes')
 			im = plt.imshow(model['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['miss_histogram']['x'][0],model['miss_histogram']['x'][-1],0,1])
+						extent=[model['miss_histogram']['x'][0],model['miss_histogram']['x'][-1],0,1],norm=LogNorm())
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			if xlim_rt_cutoff:
 				ax00.set_xlim([0,rt_cutoff])
@@ -1877,6 +1883,14 @@ def parse_input():
                 "Luminancia" experiment, it is chopped down to 1 second.
                 [Defaults to 1 second for the Luminancia experiment
                 and 14 seconds for the other experiments]
+ '--plot_handler_rt_cutoff': Same as rt_cutoff but is used to create the
+                             subject's RT histogram when constructing
+                             the Fitter_plot_handler. [Default the fitter's rt_cutoff.
+                             IMPORTANT! Fitter instances are saved with the rt_cutoff
+                             value they were created with. If a fitter instance was
+                             loaded from a file in order to get the Fitter_plot_handler,
+                             then its rt_cutoff may be different than the value
+                             specified in a separate run of the script.]
  '--confidence_partition': An Int that specifies the number of bins in which to partition
                            the [0,1] confidence report interval [Default 100]
  '--merge': Can be None, 'all', 'all_sessions' or 'all_subjects'. This parameter
@@ -1983,7 +1997,7 @@ def parse_input():
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
-				'start_point_from_fit_output':None,'override':False}
+				'start_point_from_fit_output':None,'override':False,'plot_handler_rt_cutoff':None}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -2033,6 +2047,9 @@ def parse_input():
 				expecting_key = False
 			elif arg=='--rt_cutoff':
 				key = 'rt_cutoff'
+				expecting_key = False
+			elif arg=='--plot_handler_rt_cutoff':
+				key = 'plot_handler_rt_cutoff'
 				expecting_key = False
 			elif arg=='-e' or arg=='--experiment':
 				key = 'experiment'
@@ -2301,7 +2318,11 @@ if __name__=="__main__":
 				logging.debug('Getting fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
 				if not options['load_plot_handler']:
 					logging.debug('Will not load Fitter_plot_handler from disk')
-					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'])
+					if not options['plot_handler_rt_cutoff'] is None:
+						edges = linspace(0,options['plot_handler_rt_cutoff'],51)
+					else:
+						edges = None
+					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'],edges=edges)
 					if options['save_plot_handler']:
 						logging.debug('Saving Fitter_plot_handler to file={0}.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
 						temp.save(formated_fname.replace('.pkl','_plot_handler.pkl'))
