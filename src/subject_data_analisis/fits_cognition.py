@@ -1,4 +1,5 @@
 from __future__ import division
+from __future__ import print_function
 
 import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy, re
 import scipy.signal
@@ -205,6 +206,10 @@ def load_Fitter_from_file(fname):
 	fitter = pickle.load(f)
 	f.close()
 	return fitter
+
+def Fitter_filename(experiment,method,name,session,optimizer,suffix):
+	return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
+			experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix)
 
 class Fitter:
 	#~ __module__ = os.path.splitext(os.path.basename(__file__))[0]
@@ -604,8 +609,7 @@ class Fitter:
 		return Fitter_plot_handler(output,self.time_units)
 	
 	def get_save_file_name(self):
-		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
-				experiment=self.experiment,method=self.method,name=self.subjectSession.get_name(),
+		return Fitter_filename(experiment=self.experiment,method=self.method,name=self.subjectSession.get_name(),
 				session=self.subjectSession.get_session(),optimizer=self.optimizer,suffix=self.suffix)
 	
 	# Defaults
@@ -688,8 +692,6 @@ class Fitter:
 				except Exception, e:
 					logging.warning('Could not fit internal_var from data')
 					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
-				#~ print np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/np.sqrt(self.__default_start_point__['internal_var'])))),self.__default_start_point__['internal_var']
-				#~ raise Exception('Testing')
 			if not 'phase_out_prob' in self.__default_start_point__.keys() or self.__default_start_point__['phase_out_prob'] is None:
 				self.__default_start_point__['phase_out_prob'] = 0.05
 			if not 'dead_time' in self.__default_start_point__.keys() or self.__default_start_point__['dead_time'] is None:
@@ -1659,10 +1661,10 @@ class Fitter_plot_handler():
 						orig = self[key_aliaser(other_key)][category][required_data]
 						added = other[other_key][category][required_data]
 						if len(torig)<len(tadded):
-							summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
+							summed = added+np.pad(orig, ((0,0),(0,len(tadded)-len(torig))),'constant',constant_values=(0., 0.))
 							self[key_aliaser(other_key)][category][required_data] = summed
 						elif len(torig)>len(tadded):
-							summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
+							summed = orig+np.pad(added, ((0,0),(0,len(torig)-len(tadded))),'constant',constant_values=(0., 0.))
 							self[key_aliaser(other_key)][category][required_data] = summed
 						else:
 							self[key_aliaser(other_key)][category][required_data]+= added
@@ -1705,11 +1707,10 @@ class Fitter_plot_handler():
 		
 		for key in sorted(self.keys()):
 			logging.info('Preparing to plot key {0}'.format(key))
-			print key
 			subj = self.dictionary[key]['experimental']
 			model = self.dictionary[key]['theoretical']
 			
-			rt_cutoff = subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array']['x'][-2])
+			rt_cutoff = subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])
 			
 			if fig is None:
 				fig = plt.figure(figsize=(10,12))
@@ -1719,7 +1720,7 @@ class Fitter_plot_handler():
 				fig.clf()
 				plt.figure(fig.number)
 				logging.debug('Cleared figure instance {0} and setted it as the current figure'.format(fig.number))
-			gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, wspace=0.1, top=0.95,bottom=0.70)
+			gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, top=0.95,bottom=0.70)
 			gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
 			gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
 			logging.debug('Created gridspecs')
@@ -1746,6 +1747,7 @@ class Fitter_plot_handler():
 			plt.xlabel('Confidence')
 			axconf.set_yscale('log')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+			#~ gs1.tight_layout(fig,rect=(0.10, 0.70, 0.90, 0.95), pad=0, w_pad=0.03)
 			logging.debug('Completed confidence axes plot, legend and labels')
 			
 			#~ vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
@@ -2075,7 +2077,7 @@ def parse_input():
 				key = 'plot_merge'
 				expecting_key = False
 			elif arg=='-h' or arg=='--help':
-				print script_help
+				print(script_help)
 				sys.exit()
 			else:
 				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format(opt=arg,pos=i+1))
@@ -2083,6 +2085,8 @@ def parse_input():
 			expecting_key = True
 			if key in ['task','ntasks','task_base','confidence_partition']:
 				options[key] = int(arg)
+			elif key in ['rt_cutoff','plot_handler_rt_cutoff']:
+				options[key] = float(arg)
 			elif json_encoded_key:
 				options[key] = json.loads(arg)
 				json_encoded_key = False
@@ -2250,9 +2254,9 @@ if __name__=="__main__":
 	
 	# Main loop over subjectSessions
 	for i,s in enumerate(subjects):
-		logging.debug('Enumerated {0} subject {1}'.format(i,s))
+		logging.debug('Enumerated {0} subject {1}'.format(i,s.get_key()))
 		if (i-task)%ntasks==0:
-			logging.info('Task will execute for enumerated {0} subject {1}'.format(i,s))
+			logging.info('Task will execute for enumerated {0} subject {1}'.format(i,s.get_key()))
 			# Fit parameters if the user did not disable the fit flag
 			if options['fit']:
 				logging.debug('Flag "fit" was True')
@@ -2260,78 +2264,72 @@ if __name__=="__main__":
 					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
 					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
 					   confidence_partition=options['confidence_partition'])
-				if not options['override']:
-					fname = fitter.get_save_file_name()
-					if os.path.exists(fname) and os.path.isfile(fname):
-						logging.warning('File {0} already exists, will skip enumerated subject {1}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i))
-						continue
-				
-				# Set start point and fixed parameters to the user supplied values
-				# Or to the parameters loaded from a previous fit round
-				if options['start_point_from_fit_output']:
-					logging.debug('Flag start_point_from_fit_output was present. Will load parameters from previous fit round')
-					loaded_method = options['start_point_from_fit_output']['method']
-					loaded_optimizer = options['start_point_from_fit_output']['optimizer']
-					loaded_suffix = options['start_point_from_fit_output']['suffix']
-					fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
-					fname = fname.format(experiment=s.experiment,method=loaded_method,name=s.get_name(),session=s.get_session(),
-								 optimizer=loaded_optimizer,suffix=loaded_suffix)
-					logging.debug('Will load parameters from file: {0}'.format(fname))
-					fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
-				else:
-					fixed_parameters = options['fixed_parameters']
-					start_point = options['start_point']
-				bounds = options['bounds']
-				
-				# Perform fit and save fit output
-				fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
-										start_point=start_point,\
-										bounds=bounds,\
-										optimizer_kwargs=options['optimizer_kwargs'])
-				fitter.save()
-			# Prepare plotable data
-			if options['plot'] or save or options['save_plot_handler'] or options['load_plot_handler']:
-				logging.debug('Plot, save save_plot_fitter or load_plot_fitter flags were True.')
-				fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
-				method = options['method']
-				# Try to load the fitted data from file 'fname' or continue to next subject
-				try:
-					formated_fname = fname.format(experiment=s.experiment,method=method,name=s.get_name(),session=s.get_session(),
-								 optimizer=options['optimizer'],suffix=options['suffix'])
-					logging.debug('Attempting to load fitter from file "{0}".'.format(formated_fname))
-					fitter = load_Fitter_from_file(formated_fname)
-				except:
-					logging.warning('Failed to load fitter from file. Will continue to next subject.')
-					if options['debug']:
-						raise
+				fname = fitter.get_save_file_name()
+				if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
+					# Set start point and fixed parameters to the user supplied values
+					# Or to the parameters loaded from a previous fit round
+					if options['start_point_from_fit_output']:
+						logging.debug('Flag start_point_from_fit_output was present. Will load parameters from previous fit round')
+						loaded_method = options['start_point_from_fit_output']['method']
+						loaded_optimizer = options['start_point_from_fit_output']['optimizer']
+						loaded_suffix = options['start_point_from_fit_output']['suffix']
+						fname = 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
+						fname = fname.format(experiment=s.experiment,method=loaded_method,name=s.get_name(),session=s.get_session(),
+									 optimizer=loaded_optimizer,suffix=loaded_suffix)
+						logging.debug('Will load parameters from file: {0}'.format(fname))
+						fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
 					else:
+						fixed_parameters = options['fixed_parameters']
+						start_point = options['start_point']
+					bounds = options['bounds']
+					
+					# Perform fit and save fit output
+					fit_output = fitter.fit(fixed_parameters=fixed_parameters,\
+											start_point=start_point,\
+											bounds=bounds,\
+											optimizer_kwargs=options['optimizer_kwargs'])
+					fitter.save()
+				else:
+					logging.warning('File {0} already exists, will skip enumerated subject {1} whose key is {2}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i,s.get_key()))
+			# Prepare plotable data
+			if options['plot'] or save or options['save_plot_handler']:
+				logging.debug('Plot, save or save_plot_fitter flags were True.')
+				if options['load_plot_handler']:
+					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
+							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix']).replace('.pkl','_plot_handler.pkl')
+					logging.debug('Loading Fitter_plot_handler from file={0}'.format(fname))
+					try:
+						f = open(fname,'r')
+						temp = pickle.load(f)
+						f.close()
+					except:
+						logging.warning('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(fname.replace('.pkl','_plot_handler.pkl')))
 						continue
-				
-				# Create or load Fitter_plot_handler for the current subjectSession
-				logging.debug('Getting fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
-				if not options['load_plot_handler']:
-					logging.debug('Will not load Fitter_plot_handler from disk')
+				else:
+					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
+							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix'])
+					# Try to load the fitted data from file 'fname' or continue to next subject
+					try:
+						logging.debug('Attempting to load fitter from file "{0}".'.format(fname))
+						fitter = load_Fitter_from_file(fname)
+					except:
+						logging.warning('Failed to load fitter from file. Will continue to next subject.')
+						continue
+					# Create Fitter_plot_handler for the loaded Fitter instance
+					logging.debug('Getting Fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
 					if not options['plot_handler_rt_cutoff'] is None:
 						if s.experiment=='Luminancia':
 							cutoff = np.min([1.,options['plot_handler_rt_cutoff']])
 						else:
 							cutoff = options['plot_handler_rt_cutoff']
-						edges = linspace(0,cutoff,51)
+						logging.debug('Fitter_plot_handler will use rt_cutoff = {0}'.format(cutoff))
+						edges = np.linspace(0,cutoff,51)
 					else:
 						edges = None
 					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'],edges=edges)
 					if options['save_plot_handler']:
-						logging.debug('Saving Fitter_plot_handler to file={0}.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
-						temp.save(formated_fname.replace('.pkl','_plot_handler.pkl'))
-				else:
-					logging.debug('Loading Fitter_plot_handler from file={0}'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
-					try:
-						f = open(formated_fname.replace('.pkl','_plot_handler.pkl'),'r')
-						temp = pickle.load(f)
-						f.close()
-					except:
-						logging.debug('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(formated_fname.replace('.pkl','_plot_handler.pkl')))
-						continue
+						logging.debug('Saving Fitter_plot_handler to file={0}.'.format(fname.replace('.pkl','_plot_handler.pkl')))
+						temp.save(fname.replace('.pkl','_plot_handler.pkl'))
 				# Add the new Fitter_plot_handler to the bucket of plot handlers
 				logging.debug('Adding Fitter_plot_handlers')
 				if fitter_plot_handler is None:
@@ -2340,10 +2338,10 @@ if __name__=="__main__":
 					fitter_plot_handler+= temp
 	# Plot and show, or plot and save depending on the flags supplied by the user
 	if options['plot'] or save:
-		logging.debug('Plotting results from fitter_plot_handler.')
+		logging.debug('Plotting results from fitter_plot_handler')
 		if options['plot_merge'] and options['load_plot_handler']:
 			fitter_plot_handler = fitter_plot_handler.merge(options['plot_merge'])
 		fitter_plot_handler.plot(saver=saver,display=options['plot'])
 		if save:
-			logging.debug('Closing saver.')
+			logging.debug('Closing saver')
 			saver.close()
