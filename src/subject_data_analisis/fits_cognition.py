@@ -211,7 +211,7 @@ class Fitter:
 	# Initer
 	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100):
-		logging.info('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
+		logging.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
 						experiment=subjectSession.experiment,name=subjectSession.name,session=subjectSession.session))
 		self.raw_data_dir = raw_data_dir
 		self.set_experiment(subjectSession.experiment)
@@ -534,9 +534,9 @@ class Fitter:
 		if must_downsample:
 			#~ conv_val = average_downsample(dense_conv_val,conv_x_nT)
 			if dense_conv_x_nT%conv_x_nT==0:
-				ratio = np.round(dense_conv_x_nT/conv_x_nT)
+				ratio = int(np.round(dense_conv_x_nT/conv_x_nT))
 			else:
-				ratio = np.ceil(dense_conv_x_nT/conv_x_nT)
+				ratio = int(np.ceil(dense_conv_x_nT/conv_x_nT))
 			tail = dense_conv_x_nT%ratio
 			if tail!=0:
 				padded_cv = np.concatenate((dense_conv_val,np.nan*np.ones(ratio-tail,dtype=np.float)),axis=0)
@@ -737,12 +737,14 @@ class Fitter:
 	def default_bounds(self):
 		if self.time_units=='seconds':
 			defaults = {'cost':[0.,0.4],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.],
-					'phase_out_prob':[0.,0.2],'internal_var':[1e-6,1e5],
-					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,200.]}
+					'phase_out_prob':[0.,0.2],
+					'high_confidence_threshold':[0.,np.log(self.dp.g[-1]/(1.-self.dp.g[-1]))],
+					'confidence_map_slope':[0.,100.]}
 		else:
 			defaults = {'cost':[0.,0.0004],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.],
-					'phase_out_prob':[0.,0.2],'internal_var':[1e-9,1e2],
-					'high_confidence_threshold':[0.,50.],'confidence_map_slope':[0.,200.]}
+					'phase_out_prob':[0.,0.2],
+					'high_confidence_threshold':[0.,np.log(self.dp.g[-1]/(1.-self.dp.g[-1]))],
+					'confidence_map_slope':[0.,100.]}
 		default_sp = self.default_start_point()
 		defaults['internal_var'] = [default_sp['internal_var']*0.2,default_sp['internal_var']*1.8]
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
@@ -751,7 +753,7 @@ class Fitter:
 	
 	def default_optimizer_kwargs(self):
 		if self.optimizer=='cma':
-			return {'restarts':1}
+			return {'restarts':1,'restart_from_best':'True'}
 		else:
 			return {'disp': False, 'maxiter': 1000, 'maxfev': 10000, 'repetitions': 10}
 	
@@ -864,7 +866,8 @@ class Fitter:
 		return (fixed_parameters,fitted_parameters,sanitized_start_point,sanitized_bounds)
 	
 	def sanitize_fmin_output(self,output,package='cma'):
-		logging.info('Sanitizing minizer output')
+		logging.debug('Sanitizing minizer output with package: {0}'.format(package))
+		logging.debug('Output to sanitize: {0}'.format(output))
 		if package=='cma':
 			fitted_x = {}
 			for index,par in enumerate(self.fitted_parameters):
@@ -880,7 +883,6 @@ class Fitter:
 	
 	# Minimizer related methods
 	def init_minimizer(self,start_point,bounds,optimizer_kwargs):
-		logging.info('Initing minimizer')
 		logging.debug('init_minimizer args: start_point=%(start_point)s, bounds=%(bounds)s, optimizer_kwargs=%(optimizer_kwargs)s',{'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs})
 		if self.optimizer=='cma':
 			scaling_factor = bounds[1]-bounds[0]
@@ -889,8 +891,10 @@ class Fitter:
 			options.update(optimizer_kwargs)
 			restarts = options['restarts']
 			del options['restarts']
+			restart_from_best = options['restart_from_best']
+			del options['restart_from_best']
 			options = cma.CMAOptions(options)
-			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts),package='cma')
+			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts,restart_from_best=restart_from_best),package='cma')
 			#~ minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
 		else:
 			repetitions = optimizer_kwargs['repetitions']
@@ -900,6 +904,7 @@ class Fitter:
 				for val,(lb,ub) in zip(rsp,bounds):
 					temp.append(val*(ub-lb)+lb)
 				_start_points.append(np.array(temp))
+			logging.debug('Array of start_points = {0}',_start_points)
 			start_point_generator = iter(_start_points)
 			minimizer = lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='scipy')
 			#~ minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
@@ -911,10 +916,10 @@ class Fitter:
 		repetitions = 0
 		for start_point in start_point_generator:
 			repetitions+=1
-			logging.info('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
+			logging.debug('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
 			res = scipy.optimize.minimize(merit,start_point, method=self.optimizer,bounds=bounds,options=optimizer_kwargs)
-			logging.info('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
-			logging.info('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
+			logging.debug('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
+			logging.debug('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
 			output['xs'].append(res.x)
 			output['funs'].append(res.fun)
 			output['nfev']+=res.nfev
@@ -922,7 +927,7 @@ class Fitter:
 			if output['funbest'] is None or res.fun<output['funbest']:
 				output['funbest'] = res.fun
 				output['xbest'] = res.x
-			logging.info('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
+			logging.debug('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
 		arr_xs = np.array(output['xs'])
 		arr_funs = np.array(output['funs'])
 		output['xmean'] = np.mean(arr_xs)
@@ -958,10 +963,13 @@ class Fitter:
 		phigh[high_confidence_threshold==log_odds] = 0.5
 		
 		if _dt:
-			ratio = np.ceil(_nT/self.dp.nT)
-			tail = _nT%self.dp.nT
+			if _nT%self.dp.nT==0:
+				ratio = int(np.round(_nT/self.dp.nT))
+			else:
+				ratio = int(np.ceil(_nT/self.dp.nT))
+			tail = _nT%ratio
 			if tail!=0:
-				padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,self.dp.nT-tail),dtype=np.float)),axis=1)
+				padded_phigh = np.concatenate((phigh,np.nan*np.ones((2,ratio-tail),dtype=np.float)),axis=1)
 			else:
 				padded_phigh = phigh
 			padded_phigh = np.reshape(padded_phigh,(2,-1,ratio))
@@ -1604,20 +1612,28 @@ class Fitter:
 class Fitter_plot_handler():
 	def __init__(self,obj,time_units):
 		self._time_units = time_units
-		self.required_data = ['hit_histogram','miss_histogram','rt','confidence']
+		self.required_data = ['hit_histogram','miss_histogram','rt','confidence','t_array','c_array']
+		# For backward compatibility
+		new_style_required = ['t_array','c_array']
 		self.categories = ['experimental','theoretical']
-		self.required_data_entries = {'hit_histogram':['x','y','z'],'miss_histogram':['x','y','z'],'rt':['x','y'],'confidence':['x','y']}
 		self.dictionary = {}
 		try:
 			for key in obj.keys():
 				self.dictionary[key] = {}
 				for category in self.categories:
 					self.dictionary[key][category] = {}
-					for required_data in self.required_data:
-						self.dictionary[key][category][required_data] = {}
-						for required_data_entry in self.required_data_entries[required_data]:
-							self.dictionary[key][category][required_data][required_data_entry] = \
-								copy.deepcopy(obj[key][category][required_data][required_data_entry])
+					if any([not req in obj[key][category] for req in new_style_required]):
+						# Old style handler
+						self.dictionary[key][category]['t_array'] = copy.deepcopy(obj[key][category]['hit_histogram']['x'])
+						self.dictionary[key][category]['c_array'] = copy.deepcopy(obj[key][category]['hit_histogram']['y'])
+						self.dictionary[key][category]['hit_histogram'] = copy.deepcopy(obj[key][category]['hit_histogram']['z'])
+						self.dictionary[key][category]['miss_histogram'] = copy.deepcopy(obj[key][category]['miss_histogram']['z'])
+						self.dictionary[key][category]['rt'] = copy.deepcopy(obj[key][category]['rt']['y'])
+						self.dictionary[key][category]['confidence'] = copy.deepcopy(obj[key][category]['confidence']['y'])
+					else:
+						# New style handler
+						for required_data in self.required_data:
+							self.dictionary[key][category][required_data] = copy.deepcopy(obj[key][category][required_data])
 		except:
 			raise RuntimeError('Invalid object used to init Fitter_plot_handler')
 	
@@ -1637,47 +1653,30 @@ class Fitter_plot_handler():
 		for other_key in other.keys():
 			if key_aliaser(other_key) in self.keys():
 				for category in self.categories:
-					for required_data in self.required_data:
-						if required_data in ['hit_histogram','miss_histogram']:
-							xorig = self[key_aliaser(other_key)][category][required_data]['x']
-							xadded = other[other_key][category][required_data]['x']
-							orig = self[key_aliaser(other_key)][category][required_data]['z']
-							added = other[other_key][category][required_data]['z']
-							if len(xorig)<len(xadded):
-								self[key_aliaser(other_key)][category][required_data]['x'] = copy.copy(xadded)
-								summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
-								self[key_aliaser(other_key)][category][required_data]['z'] = summed
-							elif len(xorig)>len(xadded):
-								summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
-								self[key_aliaser(other_key)][category][required_data]['z'] = summed
-							else:
-								self[key_aliaser(other_key)][category][required_data]['z']+= added
-						elif required_data in ['rt']:
-							xorig = self[key_aliaser(other_key)][category][required_data]['x']
-							xadded = other[other_key][category][required_data]['x']
-							orig = self[key_aliaser(other_key)][category][required_data]['y']
-							added = other[other_key][category][required_data]['y']
-							if len(xorig)<len(xadded):
-								self[key_aliaser(other_key)][category][required_data]['x'] = copy.copy(xadded)
-								summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
-								self[key_aliaser(other_key)][category][required_data]['y'] = summed
-							elif len(xorig)>len(xadded):
-								summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
-								self[key_aliaser(other_key)][category][required_data]['y'] = summed
-							else:
-								self[key_aliaser(other_key)][category][required_data]['y']+= added
+					torig = self[key_aliaser(other_key)][category]['t_array']
+					tadded = other[other_key][category]['t_array']
+					for required_data in ['hit_histogram','miss_histogram','rt']:
+						orig = self[key_aliaser(other_key)][category][required_data]
+						added = other[other_key][category][required_data]
+						if len(torig)<len(tadded):
+							summed = added+np.pad(orig, ((0,0),(0,len(xadded)-len(xorig))),'constant',constant_values=(0., 0.))
+							self[key_aliaser(other_key)][category][required_data] = summed
+						elif len(torig)>len(tadded):
+							summed = orig+np.pad(added, ((0,0),(0,len(xorig)-len(xadded))),'constant',constant_values=(0., 0.))
+							self[key_aliaser(other_key)][category][required_data] = summed
 						else:
-							self[key_aliaser(other_key)][category][required_data]['y']+= \
-								other[other_key][category][required_data]['y']
+							self[key_aliaser(other_key)][category][required_data]+= added
+					if len(torig)<len(tadded):
+						self[key_aliaser(other_key)][category]['t_array'] = copy.copy(tadded)
+					self[key_aliaser(other_key)][category]['confidence']+= \
+							other[other_key][category]['confidence']
 			else:
 				self[key_aliaser(other_key)] = {}
 				for category in self.categories:
 					self[key_aliaser(other_key)][category] = {}
 					for required_data in self.required_data:
-						self[key_aliaser(other_key)][category][required_data] = {}
-						for required_data_entry in self.required_data_entries[required_data]:
-							self[key_aliaser(other_key)][category][required_data][required_data_entry] = \
-								copy.deepcopy(other[other_key][category][required_data][required_data_entry])
+						self[key_aliaser(other_key)][category][required_data] = \
+							copy.deepcopy(other[other_key][category][required_data])
 		return self
 	
 	def __iadd__(self,other):
@@ -1691,19 +1690,13 @@ class Fitter_plot_handler():
 	def normalize(self):
 		for key in self.keys():
 			for category in self.categories:
+				dt = self[key][category]['t_array'][1]-self[key][category]['t_array'][0]
 				for required_data in self.required_data:
-					if required_data in ['hit_histogram','miss_histogram']:
-						data = self[key][category][required_data]['z']
-						t = self[key][category][required_data]['x']
-						dt = t[1]-t[0]
-						self[key][category][required_data]['z']/=(np.sum(data)*dt)
-					elif required_data=='rt':
-						data = self[key][category][required_data]['y']
-						t = self[key][category][required_data]['x']
-						dt = t[1]-t[0]
-						self[key][category][required_data]['y']/=(np.sum(data)*dt)
-					else:
-						self[key][category][required_data]['y']/=np.sum(self[key][category][required_data]['y'])
+					if not required_data in ['t_array','c_array']:
+						if required_data!='confidence':
+							self[key][category][required_data]/= (np.sum(self[key][category][required_data])*dt)
+						else:
+							self[key][category][required_data]/= np.sum(self[key][category][required_data])
 	
 	def plot(self,saver=None,display=True,xlim_rt_cutoff=True,fig=None):
 		if not can_plot:
@@ -1716,7 +1709,7 @@ class Fitter_plot_handler():
 			subj = self.dictionary[key]['experimental']
 			model = self.dictionary[key]['theoretical']
 			
-			rt_cutoff = subj['rt']['x'][-1]+0.5*(subj['rt']['x'][-1]-subj['rt']['x'][-2])
+			rt_cutoff = subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array']['x'][-2])
 			
 			if fig is None:
 				fig = plt.figure(figsize=(10,12))
@@ -1732,10 +1725,10 @@ class Fitter_plot_handler():
 			logging.debug('Created gridspecs')
 			axrt = plt.subplot(gs1[0])
 			logging.debug('Created rt axes')
-			plt.step(subj['rt']['x'],subj['rt']['y'][0],'b',label='Subject hit')
-			plt.step(subj['rt']['x'],-subj['rt']['y'][1],'r',label='Subject miss')
-			plt.plot(model['rt']['x'],model['rt']['y'][0],'b',label='Model hit',linewidth=3)
-			plt.plot(model['rt']['x'],-model['rt']['y'][1],'r',label='Model miss',linewidth=3)
+			plt.step(subj['t_array'],subj['rt'][0],'b',label='Subject hit')
+			plt.step(subj['t_array'],-subj['rt'][1],'r',label='Subject miss')
+			plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
+			plt.plot(model['t_array'],-model['rt'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted rt axes')
 			if xlim_rt_cutoff:
 				axrt.set_xlim([0,rt_cutoff])
@@ -1745,10 +1738,10 @@ class Fitter_plot_handler():
 			logging.debug('Completed rt axes plot, legend and labels')
 			axconf = plt.subplot(gs1[1])
 			logging.debug('Created confidence axes')
-			plt.step(subj['confidence']['x'],subj['confidence']['y'][0],'b',label='Subject hit')
-			plt.step(subj['confidence']['x'],-subj['confidence']['y'][1],'r',label='Subject miss')
-			plt.plot(model['confidence']['x'],model['confidence']['y'][0],'b',label='Model hit',linewidth=3)
-			plt.plot(model['confidence']['x'],-model['confidence']['y'][1],'r',label='Model miss',linewidth=3)
+			plt.step(subj['c_array'],subj['confidence'][0],'b',label='Subject hit')
+			plt.step(subj['c_array'],-subj['confidence'][1],'r',label='Subject miss')
+			plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
+			plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted confidence axes')
 			plt.xlabel('Confidence')
 			axconf.set_yscale('log')
@@ -1757,38 +1750,38 @@ class Fitter_plot_handler():
 			
 			#~ vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
 						   #~ np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
-			vmin = np.min([np.min(subj['hit_histogram']['z'][(subj['hit_histogram']['z']>0).nonzero()]),
-						   np.min(subj['miss_histogram']['z'][(subj['miss_histogram']['z']>0).nonzero()])])
-						   #~ np.min(model['hit_histogram']['z'][(model['hit_histogram']['z']>0).nonzero()]),
-						   #~ np.min(model['miss_histogram']['z'][(model['miss_histogram']['z']>0).nonzero()])])
-			vmax = np.max([np.max([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
-						   np.max([model['hit_histogram']['z'],model['miss_histogram']['z']])])
+			vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
+						   np.min(subj['miss_histogram'][(subj['miss_histogram']>0).nonzero()])])
+						   #~ np.min(model['hit_histogram'][(model['hit_histogram']>0).nonzero()]),
+						   #~ np.min(model['miss_histogram'][(model['miss_histogram']>0).nonzero()])])
+			vmax = np.max([np.max([subj['hit_histogram'],subj['miss_histogram']]),
+						   np.max([model['hit_histogram'],model['miss_histogram']])])
 			
 			ax00 = plt.subplot(gs2[0,0])
 			logging.debug('Created subject hit axes')
-			plt.imshow(subj['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['hit_histogram']['x'][0],subj['hit_histogram']['x'][-1],0,1],norm=LogNorm())
+			plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=LogNorm())
 			plt.ylabel('Confidence')
 			plt.title('Hit')
 			logging.debug('Populated subject hit axes')
 			ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
 			logging.debug('Created model hit axes')
-			plt.imshow(model['hit_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['hit_histogram']['x'][0],model['hit_histogram']['x'][-1],0,1],norm=LogNorm())
+			plt.imshow(model['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=LogNorm())
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Confidence')
 			logging.debug('Populated model hit axes')
 			
 			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created subject miss axes')
-			plt.imshow(subj['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['miss_histogram']['x'][0],subj['miss_histogram']['x'][-1],0,1],norm=LogNorm())
+			plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=LogNorm())
 			plt.title('Miss')
 			logging.debug('Populated subject miss axes')
 			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created model miss axes')
-			im = plt.imshow(model['miss_histogram']['z'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['miss_histogram']['x'][0],model['miss_histogram']['x'][-1],0,1],norm=LogNorm())
+			im = plt.imshow(model['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=LogNorm())
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			if xlim_rt_cutoff:
 				ax00.set_xlim([0,rt_cutoff])
@@ -2259,7 +2252,7 @@ if __name__=="__main__":
 	for i,s in enumerate(subjects):
 		logging.debug('Enumerated {0} subject {1}'.format(i,s))
 		if (i-task)%ntasks==0:
-			logging.debug('Task will execute for enumerated {0} subject {1}'.format(i,s))
+			logging.info('Task will execute for enumerated {0} subject {1}'.format(i,s))
 			# Fit parameters if the user did not disable the fit flag
 			if options['fit']:
 				logging.debug('Flag "fit" was True')
@@ -2319,7 +2312,11 @@ if __name__=="__main__":
 				if not options['load_plot_handler']:
 					logging.debug('Will not load Fitter_plot_handler from disk')
 					if not options['plot_handler_rt_cutoff'] is None:
-						edges = linspace(0,options['plot_handler_rt_cutoff'],51)
+						if s.experiment=='Luminancia':
+							cutoff = np.min([1.,options['plot_handler_rt_cutoff']])
+						else:
+							cutoff = options['plot_handler_rt_cutoff']
+						edges = linspace(0,cutoff,51)
 					else:
 						edges = None
 					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'],edges=edges)

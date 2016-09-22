@@ -2936,7 +2936,7 @@ class CMAEvolutionStrategy(OOOptimizer):
                 print('   Covariance matrix is diagonal' + s)
 
     def _set_x0(self, x0):
-        if x0 == str(x0):
+        if isinstance(x0,str):
             x0 = eval(x0)
         self.x0 = array(x0)  # should not have column or row, is just 1-D
         if self.x0.ndim == 2:
@@ -5460,7 +5460,7 @@ def fmin(objective_function, x0, sigma0,
                 # ignore further input args and keep original options
             else:  # default case
                 if irun and eval(str(fmin_options['restart_from_best'])):
-                    print_warning('CAVE: restart_from_best is often not useful',
+                    _print_warning('CAVE: restart_from_best is often not useful',
                                   verbose=opts['verbose'])
                     es = CMAEvolutionStrategy(best.x, sigma_factor * sigma0, opts)
                 else:
