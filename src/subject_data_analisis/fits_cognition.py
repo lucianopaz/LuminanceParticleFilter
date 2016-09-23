@@ -1605,11 +1605,11 @@ class Fitter:
 		return output*(1.-parameters['phase_out_prob'])+random_rt_likelihood, np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
 	
 	# Plotter
-	def plot_fit(self,fit_output=None,saver=None,display=True):
+	def plot_fit(self,fit_output=None,saver=None,show=True):
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to plot fit')
 		
-		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,display=display)
+		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,show=show)
 
 class Fitter_plot_handler():
 	def __init__(self,obj,time_units):
@@ -1700,7 +1700,7 @@ class Fitter_plot_handler():
 						else:
 							self[key][category][required_data]/= np.sum(self[key][category][required_data])
 	
-	def plot(self,saver=None,display=True,xlim_rt_cutoff=True,fig=None):
+	def plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True):
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to produce any plot')
 		self.normalize()
@@ -1740,36 +1740,44 @@ class Fitter_plot_handler():
 			axconf = plt.subplot(gs1[1])
 			logging.debug('Created confidence axes')
 			plt.step(subj['c_array'],subj['confidence'][0],'b',label='Subject hit')
-			plt.step(subj['c_array'],-subj['confidence'][1],'r',label='Subject miss')
 			plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
-			plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
+			if logscale:
+				plt.step(subj['c_array'],subj['confidence'][1],'r',label='Subject miss')
+				plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
+				axconf.set_yscale('log')
+			else:
+				plt.step(subj['c_array'],-subj['confidence'][1],'r',label='Subject miss')
+				plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted confidence axes')
 			plt.xlabel('Confidence')
-			axconf.set_yscale('log')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 			#~ gs1.tight_layout(fig,rect=(0.10, 0.70, 0.90, 0.95), pad=0, w_pad=0.03)
 			logging.debug('Completed confidence axes plot, legend and labels')
 			
-			#~ vmin = np.min([np.min([subj['hit_histogram']['z'],subj['miss_histogram']['z']]),
-						   #~ np.min([model['hit_histogram']['z'],model['miss_histogram']['z']])])
-			vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
-						   np.min(subj['miss_histogram'][(subj['miss_histogram']>0).nonzero()])])
-						   #~ np.min(model['hit_histogram'][(model['hit_histogram']>0).nonzero()]),
-						   #~ np.min(model['miss_histogram'][(model['miss_histogram']>0).nonzero()])])
+			if logscale:
+				vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
+							   np.min(subj['miss_histogram'][(subj['miss_histogram']>0).nonzero()])])
+				norm = LogNorm()
+			else:
+				vmin = np.min([np.min(subj['hit_histogram']),
+							   np.min(subj['miss_histogram']),
+							   np.min(model['hit_histogram']),
+							   np.min(model['miss_histogram'])])
+				norm = None
 			vmax = np.max([np.max([subj['hit_histogram'],subj['miss_histogram']]),
 						   np.max([model['hit_histogram'],model['miss_histogram']])])
 			
 			ax00 = plt.subplot(gs2[0,0])
 			logging.debug('Created subject hit axes')
 			plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=LogNorm())
+						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=norm)
 			plt.ylabel('Confidence')
 			plt.title('Hit')
 			logging.debug('Populated subject hit axes')
 			ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
 			logging.debug('Created model hit axes')
 			plt.imshow(model['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=LogNorm())
+						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			plt.ylabel('Confidence')
 			logging.debug('Populated model hit axes')
@@ -1777,13 +1785,13 @@ class Fitter_plot_handler():
 			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created subject miss axes')
 			plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=LogNorm())
+						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=norm)
 			plt.title('Miss')
 			logging.debug('Populated subject miss axes')
 			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created model miss axes')
 			im = plt.imshow(model['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=LogNorm())
+						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
 			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 			if xlim_rt_cutoff:
 				ax00.set_xlim([0,rt_cutoff])
@@ -1809,8 +1817,8 @@ class Fitter_plot_handler():
 					plt.savefig(saver,bbox_inches='tight')
 				else:
 					saver.savefig(fig,bbox_inches='tight')
-			if display:
-				logging.debug('Displaying figure')
+			if show:
+				logging.debug('Showing figure')
 				plt.show(True)
 	
 	def save(self,fname):
@@ -1828,11 +1836,11 @@ class Fitter_plot_handler():
 	
 	def merge(self,merge='all'):
 		if merge=='subjects':
-			key_aliaser = lambda key: re.sub('_subject_[0-9]+','',key)
+			key_aliaser = lambda key: re.sub('_subject_[\[\]\-0-9]+','',key)
 		elif merge=='sessions':
 			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',key)
 		elif merge=='all':
-			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',re.sub('_subject_[0-9]+','',key))
+			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',re.sub('_subject_[\[\]\-0-9]+','',key))
 		else:
 			raise ValueError('Unknown merge option={0}'.format(merge))
 		output = Fitter_plot_handler({},self._time_units)
@@ -1862,7 +1870,7 @@ def parse_input():
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--save_plot_handler': This flag takes no value. If present, the plot_handler is saved.
  '--load_plot_handler': This flag takes no value. If present, the plot_handler is loaded from the disk.
- '--plot': This flag takes no values. If present it displays the plotted figure
+ '--show': This flag takes no values. If present it displays the plotted figure
            and freezes execution until the figure is closed.
  '--fit': This flag takes no values. If present it performs the fit for the selected
           method. By default, this flag is always set.
@@ -1988,7 +1996,7 @@ def parse_input():
  Example:
  python moving_bounds_fits.py -t 1 -n 1 --save"""
 	options =  {'task':1,'ntasks':1,'task_base':1,'method':'full','optimizer':'cma','save':False,
-				'plot':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':None,
+				'show':False,'fit':True,'time_units':'seconds','suffix':'','rt_cutoff':None,
 				'merge':None,'fixed_parameters':{},'dpKwargs':{},'start_point':{},'bounds':{},
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
@@ -2019,8 +2027,8 @@ def parse_input():
 				options['save_plot_handler'] = True
 			elif arg=='--load_plot_handler':
 				options['load_plot_handler'] = True
-			elif arg=='--plot':
-				options['plot'] = True
+			elif arg=='--show':
+				options['show'] = True
 			elif arg=='-g' or arg=='--debug':
 				options['debug'] = True
 			elif arg=='-v' or arg=='--verbose':
@@ -2224,25 +2232,8 @@ if __name__=="__main__":
 		logging.basicConfig(level=logging.INFO)
 	else:
 		logging.basicConfig(level=logging.WARNING)
-	save = options['save']
 	task = options['task']
 	ntasks = options['ntasks']
-	# Prepare figure saver
-	if save:
-		if task==0 and ntasks==1:
-			fname = "fits_cognition_{method}{suffix}".format(method=options['method'],suffix=options['suffix'])
-		else:
-			fname = "fits_cognition_{method}_{task}_{ntasks}{suffix}".format(method=options['method'],task=task,ntasks=ntasks,suffix=options['suffix'])
-		if os.path.isdir("../../figs"):
-			fname = "../../figs/"+fname
-		if loc==Location.cluster:
-			fname+='.png'
-			saver = fname
-		else:
-			fname+='.pdf'
-			saver = PdfPages(fname)
-	else:
-		saver = None
 	
 	# Prepare subjectSessions list
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
@@ -2292,8 +2283,8 @@ if __name__=="__main__":
 				else:
 					logging.warning('File {0} already exists, will skip enumerated subject {1} whose key is {2}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i,s.get_key()))
 			# Prepare plotable data
-			if options['plot'] or save or options['save_plot_handler']:
-				logging.debug('Plot, save or save_plot_fitter flags were True.')
+			if options['show'] or options['save'] or options['save_plot_handler']:
+				logging.debug('show, save or save_plot_fitter flags were True.')
 				if options['load_plot_handler']:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
 							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix']).replace('.pkl','_plot_handler.pkl')
@@ -2303,7 +2294,7 @@ if __name__=="__main__":
 						temp = pickle.load(f)
 						f.close()
 					except:
-						logging.warning('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(fname.replace('.pkl','_plot_handler.pkl')))
+						logging.warning('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(fname))
 						continue
 				else:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
@@ -2313,7 +2304,7 @@ if __name__=="__main__":
 						logging.debug('Attempting to load fitter from file "{0}".'.format(fname))
 						fitter = load_Fitter_from_file(fname)
 					except:
-						logging.warning('Failed to load fitter from file. Will continue to next subject.')
+						logging.warning('Failed to load fitter from file {0}. Will continue to next subject.'.format(fname))
 						continue
 					# Create Fitter_plot_handler for the loaded Fitter instance
 					logging.debug('Getting Fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
@@ -2328,20 +2319,42 @@ if __name__=="__main__":
 						edges = None
 					temp = fitter.get_fitter_plot_handler(merge=options['plot_merge'],edges=edges)
 					if options['save_plot_handler']:
-						logging.debug('Saving Fitter_plot_handler to file={0}.'.format(fname.replace('.pkl','_plot_handler.pkl')))
-						temp.save(fname.replace('.pkl','_plot_handler.pkl'))
+						fname = fname.replace('.pkl','_plot_handler.pkl')
+						if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
+							logging.debug('Saving Fitter_plot_handler to file={0}.'.format(fname))
+							temp.save(fname)
+						else:
+							logging.warning('Could not save Fitter_plot_handler. File {0} already exists. To override supply the flag -w.'.format(fname))
 				# Add the new Fitter_plot_handler to the bucket of plot handlers
 				logging.debug('Adding Fitter_plot_handlers')
 				if fitter_plot_handler is None:
 					fitter_plot_handler = temp
 				else:
 					fitter_plot_handler+= temp
+	
+	# Prepare figure saver
+	if options['save']:
+		if task==0 and ntasks==1:
+			fname = "fits_cognition_{experiment}{method}{suffix}".format(experiment=options['experiment']+'_' if options['experiment']!='all' else '',method=options['method'],suffix=options['suffix'])
+		else:
+			fname = "fits_cognition_{experiment}{method}_{task}_{ntasks}{suffix}".format(experiment=options['experiment']+'_' if options['experiment']!='all' else '',method=options['method'],task=task,ntasks=ntasks,suffix=options['suffix'])
+		if os.path.isdir("../../figs"):
+			fname = "../../figs/"+fname
+		if loc==Location.cluster:
+			fname+='.png'
+			saver = fname
+		else:
+			fname+='.pdf'
+			saver = PdfPages(fname)
+	else:
+		saver = None
 	# Plot and show, or plot and save depending on the flags supplied by the user
-	if options['plot'] or save:
+	if options['show'] or options['save']:
 		logging.debug('Plotting results from fitter_plot_handler')
+		assert not fitter_plot_handler is None, 'Could not create the Fitter_plot_handler to plot the fitter results'
 		if options['plot_merge'] and options['load_plot_handler']:
 			fitter_plot_handler = fitter_plot_handler.merge(options['plot_merge'])
-		fitter_plot_handler.plot(saver=saver,display=options['plot'])
-		if save:
+		fitter_plot_handler.plot(saver=saver,show=options['show'])
+		if options['save']:
 			logging.debug('Closing saver')
 			saver.close()

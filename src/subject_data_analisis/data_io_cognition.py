@@ -20,9 +20,13 @@ class SubjectSession:
 			self.name = [str(n) for n in name]
 			self.data_dir = [str(d) for d in data_dir]
 			self._single_data_dir = False
+			self._map_data_dir_name = {}
+			for n,d in zip(self.name,self.data_dir):
+				self._map_data_dir_name[d] = n
 		else:
 			self.name = str(name)
 			self.data_dir = str(data_dir)
+			self._map_data_dir_name = {self.data_dir:self.name}
 			self._single_data_dir = True
 	
 	def get_name(self):
@@ -41,6 +45,23 @@ class SubjectSession:
 	
 	def get_key(self):
 		return '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.get_name(),session=self.get_session())
+	
+	def get_name_from_data_dir(self,data_dir,override_raw_data_dir=None):
+		if override_raw_data_dir is None:
+			return self._map_data_dir_name[data_dir]
+		else:
+			return self._map_data_dir_name[data_dir.replace(override_raw_data_dir['replacement'],override_raw_data_dir['original'])]
+	
+	def change_name(self,new_name,orig=None):
+		if not self._single_data_dir:
+			if orig is None:
+				raise ValueError('Must supply the original name value when the SubjectSession has more than one data_dir')
+			changed_index = [index for index,n in self.name if n==orig][0]
+			self.name[changed_index] = new_name
+			self._map_data_dir_name[self.data_dir[changed_index]] = new_name
+		else:
+			self.name = new_name
+			self._map_data_dir_name[self.data_dir] = new_name
 	
 	def list_data_files(self,override_raw_data_dir=None):
 		if self._single_data_dir:
@@ -74,9 +95,10 @@ class SubjectSession:
 					selected_side = aux['trial'][:,9];
 				else:
 					selected_side = np.nan*np.ones_like(rt)
-				if isinstance(self.name,int):
+				name = self.get_name_from_data_dir(os.path.dirname(f),override_raw_data_dir)
+				if isinstance(name,int):
 					data_matrix = np.array([mean_target_lum,rt,performance,confidence,selected_side,
-										self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
+										name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([mean_target_lum,rt,performance,confidence,selected_side,
 										session*np.ones_like(rt)]).squeeze().T
@@ -93,9 +115,10 @@ class SubjectSession:
 				# and it slows down the fitting procedure. We will
 				# coarse the data in the following statement
 				contraste = np.round(contraste*5e3)/5e3
-				if isinstance(self.name,int):
+				name = self.get_name_from_data_dir(os.path.dirname(f),override_raw_data_dir)
+				if isinstance(name,int):
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										orientation,phase,self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
+										orientation,phase,name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
 										orientation,phase,session*np.ones_like(rt)]).squeeze().T
@@ -117,9 +140,10 @@ class SubjectSession:
 				selected_side = aux['RTA']
 				confidence_rt = aux['SEGUTIME']
 				target_location = aux['orden']
-				if isinstance(self.name,int):
+				name = self.get_name_from_data_dir(os.path.dirname(f),override_raw_data_dir)
+				if isinstance(name,int):
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
-										confidence_rt,target_location,self.name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
+										confidence_rt,target_location,name*np.ones_like(rt),session*np.ones_like(rt)]).squeeze().T
 				else:
 					data_matrix = np.array([contraste,rt,performance,confidence,selected_side,
 										confidence_rt,target_location,session*np.ones_like(rt)]).squeeze().T
@@ -139,33 +163,27 @@ class SubjectSession:
 		numeric_name = isinstance(self.name,int)
 		if self.experiment=='Luminancia':
 			if numeric_name:
-				return ['mean target lum [cd/m^2]','RT [s]','performance','confidence','selected side','subject id','session']
+				return ['mean target lum [cd/m^2]','RT [s]','performance','confidence','selected side','name','session']
 			else:
 				return ['mean target lum [cd/m^2]','RT [s]','performance','confidence','selected side','session']
 		elif self.experiment=='2AFC':
 			if numeric_name:
-				return ['contraste','RT [s]','performance','confidence','selected side','orientation [º]','phase','subject id','session']
+				return ['contraste','RT [s]','performance','confidence','selected side','orientation [º]','phase','name','session']
 			else:
 				return ['contraste','RT [s]','performance','confidence','selected side','orientation [º]','phase','session']
 		elif self.experiment=='Auditivo':
 			if numeric_name:
-				return ['contraste','RT [s]','performance','confidence','selected side','confidence RT [s]','target location','subject id','session']
+				return ['contraste','RT [s]','performance','confidence','selected side','confidence RT [s]','target location','name','session']
 			else:
 				return ['contraste','RT [s]','performance','confidence','selected side','confidence RT [s]','target location','session']
 		else:
 			raise ValueError('No column description available for the experiment: {0}'.format(self.experiment))
 	
 	def __getstate__(self):
-		return {'name':self.name,'session':self.session,'_single_session':self._single_session,\
-				'experiment':self.experiment,'_single_data_dir':self._single_data_dir,'data_dir':self.data_dir}
+		return {'name':self.name,'session':self.session,'experiment':self.experiment,'data_dir':self.data_dir}
 	
 	def __setstate__(self,state):
-		self.name = state['name']
-		self.session = state['session']
-		self._single_session = state['_single_session']
-		self.experiment = state['experiment']
-		self._single_data_dir = state['_single_data_dir']
-		self.data_dir = state['data_dir']
+		self.__init__(name=state['name'],session=state['session'],experiment=state['experiment'],data_dir=state['data_dir'])
 
 def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_session=None):
 	"""
@@ -220,10 +238,10 @@ def anonimize_subjects(subjectSessions):
 		name_to_id[name] = subject_id
 	for ss in subjectSessions:
 		if ss._single_data_dir:
-			ss.name = name_to_id[ss.name]
+			ss.change_name(name_to_id[ss.name])
 		else:
-			for index,name in ss.name:
-				ss.name[index] = name_to_id[name]
+			for name in ss.name:
+				ss.change_name(name_to_id[ss.name],ss.name)
 	return subjectSessions
 
 def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_details=None):
@@ -289,15 +307,20 @@ def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by
 def merge_subjectSessions(subjectSessions,merge='all'):
 	merge = merge.lower()
 	if merge=='all':
+		names = {}
 		data_dirs = {}
 		sessions = {}
 		for ss in subjectSessions:
 			exp = ss.experiment
 			if exp not in data_dirs.keys():
 				data_dirs[exp] = []
+			if exp not in names.keys():
+				names[exp] = []
 			if ss._single_data_dir:
+				names[exp].append(ss.name)
 				data_dirs[exp].append(ss.data_dir)
 			else:
+				names[exp].extend(ss.name)
 				data_dirs[exp].extend(ss.data_dir)
 			if exp not in sessions.keys():
 				sessions[exp] = []
@@ -305,14 +328,14 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 				sessions[exp].append(ss.session)
 			else:
 				sessions[exp].extend(ss.session)
-		output = [SubjectSession('all',sessions[exp],exp,data_dirs[exp]) for exp in data_dirs.keys()]
+		output = [SubjectSession(names[exp],sessions[exp],exp,data_dirs[exp]) for exp in data_dirs.keys()]
 	elif merge=='sessions':
 		sessions = {}
 		for ss in subjectSessions:
 			exp = str(ss.experiment)
-			name = str(ss.get_name())
+			name = ss.name
 			data_dir = ss.data_dir
-			key = exp+'_'+name
+			key = exp+'_'+ss.get_name()
 			if key not in sessions.keys():
 				sessions[key] = {'data':[],'name':name,'experiment':exp,'data_dir':data_dir}
 			if ss._single_session:
@@ -326,7 +349,7 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 			exp = str(ss.experiment)
 			session = ss.session
 			data_dir = ss.data_dir
-			key = exp+'_'+str(session)
+			key = exp+'_'+ss.get_session()
 			if key not in data_dirs.keys():
 				data_dirs[key] = {'data':[],'name':[],'session':session,'experiment':exp}
 			if ss._single_data_dir:
@@ -399,7 +422,7 @@ def compute_roc(performance,confidence,partition=101):
 	return roc
 
 def compute_auc(roc):
-	return scipy.integrate.simps(roc[:,1],roc[:,0])
+	return scipy.integrate.trapz(roc[:,1],roc[:,0])
 
 def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'):
 	try:
@@ -407,7 +430,7 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 		loaded_plot_libs = True
 	except:
 		loaded_plot_libs = False
-	
+	subjects = unique_subject_sessions(raw_data_dir)
 	try:
 		subjects = unique_subject_sessions(raw_data_dir)
 	except:
