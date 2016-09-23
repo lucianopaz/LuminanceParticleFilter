@@ -8,7 +8,7 @@ import fits_cognition as fits
 from fits_cognition import Fitter
 import matplotlib as mt
 from matplotlib import pyplot as plt
-import os, re, pickle, warnings, json, logging, copy
+import os, re, pickle, warnings, json, logging, copy, scipy.integrate
 
 def subjectSession_measures(subjectSession):
 	data = subjectSession.load_data()
@@ -65,18 +65,27 @@ def fitter_measures(fitter):
 	rt = np.sum(np.sum(model_prediction,axis=0)*t_array[None,:])/norm
 	hit_rt = np.sum(model_prediction[0]*t_array[None,:])/norm0
 	miss_rt = np.sum(model_prediction[1]*t_array[None,:])/norm1
+	
+	pconf_hit = np.hstack((np.zeros(1),np.cumsum(np.sum(model_prediction[0],axis=1)*dt)))
+	pconf_hit/=pconf_hit[-1]
+	pconf_miss = np.hstack((np.zeros(1),np.cumsum(np.sum(model_prediction[1],axis=1)*dt)))
+	pconf_miss/=pconf_miss[-1]
+	
+	auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
+	
 	key = 'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
 	out = {key:{'experiment':fitter.experiment,'parameters':parameters,'merit':merit,\
 				'performance':performance,'rt':rt,'hit_rt':hit_rt,'miss_rt':miss_rt,\
 				'confidence':confidence,'hit_confidence':hit_confidence,\
-				'miss_confidence':miss_confidence}}
+				'miss_confidence':miss_confidence,'auc':auc}}
 	return out
 
 def get_summary(method = 'full_confidence', optimizer = 'cma', suffix = '', override=False):
-	if override:
+	if override or not(os.path.exists('summary_statistics.pkl') and os.path.isfile('summary_statistics.pkl')):
 		subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 		summary = {'experimental':{},'theoretical':{}}
 		for s in subjects:
+			print(s.get_key())
 			fname = fits.Fitter_filename(s.experiment,method,s.get_name(),s.get_session(),optimizer,suffix)
 			if not(os.path.exists(fname) and os.path.isfile(fname)):
 				continue
