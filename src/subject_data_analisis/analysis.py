@@ -8,7 +8,9 @@ import fits_cognition as fits
 from fits_cognition import Fitter
 import matplotlib as mt
 from matplotlib import pyplot as plt
-import os, re, pickle, warnings, json, logging, copy, scipy.integrate
+import matplotlib.gridspec as gridspec
+import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools
+from sklearn import cluster
 
 def subjectSession_measures(subjectSession):
 	data = subjectSession.load_data()
@@ -39,7 +41,7 @@ def subjectSession_measures(subjectSession):
 				else:
 					miss_means = np.nan*np.ones(2)
 					miss_stds = np.nan*np.ones(2)
-				key = '_'.join(['subject_'+str(un),'session_'+str(us)])
+				key = '_'.join(['experiment_'+subjectSession.experiment,'subject_'+str(un),'session_'+str(us)])
 				out[key] = {'experiment':subjectSession.experiment,'n':n,'auc':auc,\
 							'name':un,'session':us,\
 							'means':{'rt':means[0],'performance':means[1],'confidence':means[2],\
@@ -74,7 +76,7 @@ def fitter_measures(fitter):
 	
 	auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
 	
-	key = 'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
+	key = 'experiment_'+fitter.experiment+'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
 	out = {key:{'experiment':fitter.experiment,'parameters':parameters,'merit':merit,\
 				'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),\
 				'performance':performance,'rt':rt,'hit_rt':hit_rt,'miss_rt':miss_rt,\
@@ -113,8 +115,14 @@ def get_parameter_array_from_summary(summary):
 	names = []
 	for k in summary['theoretical'].keys():
 		vals = summary['theoretical'][k]
-		names.append(vals['name'])
-		sessions.append(vals['session'])
+		try:
+			names.append(int(vals['name']))
+		except:
+			names.append(vals['name'])
+		try:
+			sessions.append(int(vals['session']))
+		except:
+			sessions.append(vals['session'])
 		experiments.append(vals['experiment'])
 		parameter_names = parameter_names | set(vals['parameters'].keys())
 		parameter_dicts.append(vals['parameters'])
@@ -140,33 +148,130 @@ def normalize_internal_vars(internal_vars,experiments):
 		internal_vars[inds] = internal_vars[inds]/np.std(internal_vars[inds],keepdims=True)
 	return internal_vars
 
-if __name__=="__main__":
-	summary = get_summary()
-	parameters,parameter_names,names,sessions,experiments = get_parameter_array_from_summary(summary)
-	uses,indses = np.unique(sessions,return_inverse=True)
-	uexp,indexp = np.unique(experiments,return_inverse=True)
-	c = (indses+indexp*len(uses)).astype(np.float)/float(len(uses)*len(uexp))
+def scatter_parameters(parameters,parameter_names,names,sessions,experiments,merge=None,merge_method=np.mean):
+	unames,indnames = np.unique(names,return_inverse=True)
+	uexps,indexps = np.unique(experiments,return_inverse=True)
+	usess,indsess = np.unique(sessions,return_inverse=True)
+	if not merge is None:
+		if merge=='subjects':
+			temp_pars = []
+			temp_sess = []
+			temp_exps = []
+			for e in uexps:
+				for s in usess:
+					inds = np.logical_and(experiments==e,sessions==s)
+					if any(inds):
+						temp_pars.append(merge_method(parameters[inds],axis=0))
+						temp_sess.append(s)
+						temp_exps.append(e)
+			names = None
+			parameters = np.array(temp_pars)
+			sessions = np.array(temp_sess)
+			experiments = np.array(temp_exps)
+			colors = ['r','g','b']
+			cbar_im = np.array([[1,0,0],[0,0.5,0],[0,0,1]])
+			cbar_labels = ['2AFC','Auditivo','Luminancia']
+			categories,ind_categories = np.unique(sessions,return_inverse=True)
+			markers = ['o','s','D']
+			labels = ['Session 1','Session 2','Session 3']
+		elif merge=='sessions':
+			temp_pars = []
+			temp_nams = []
+			temp_exps = []
+			for e in uexps:
+				for n in unames:
+					inds = np.logical_and(experiments==e,names==n)
+					if any(inds):
+						temp_pars.append(merge_method(parameters[inds],axis=0))
+						temp_nams.append(n)
+						temp_exps.append(e)
+			sessions = None
+			parameters = np.array(temp_pars)
+			names = np.array(temp_nams)
+			experiments = np.array(temp_exps)
+			unames,indnames = np.unique(names,return_inverse=True)
+			colors = [plt.get_cmap('rainbow')(x) for x in indnames.astype(np.float)/float(len(unames)-1)]
+			cbar_im = np.array([plt.get_cmap('rainbow')(x) for x in np.arange(len(unames),dtype=np.float)/float(len(unames)-1)])
+			cbar_labels = [str(n) for n in unames]
+			categories,ind_categories = np.unique(experiments,return_inverse=True)
+			markers = ['o','s','D']
+			labels = ['2AFC','Auditivo','Luminancia']
+		else:
+			raise ValueError('Unknown merge option: {0}'.format(merge))
+	else:
+		a = np.array([sessions,experiments]).T
+		b = np.ascontiguousarray(a).view(np.dtype((np.void, a.dtype.itemsize * a.shape[1])))
+		categories, ind_categories = np.unique(b, return_inverse=True)
+		colors = [plt.get_cmap('rainbow')(x) for x in indnames.astype(np.float)/float(len(unames)-1)]
+		cbar_im = np.array([plt.get_cmap('rainbow')(x) for x in np.arange(len(unames),dtype=np.float)/float(len(unames)-1)])
+		cbar_labels = [str(n) for n in unames]
+		markers = ['o','+','s','^','v','8','D','*']
+		labels = []
+		for i,c in enumerate(categories):
+			inds = ind_categories==i
+			session = sessions[inds][0]
+			experiment = experiments[inds][0]
+			labels.append('Exp = '+str(experiment)+' Ses = '+str(session))
 	
 	decision_inds = np.array([i for i,pn in enumerate(parameter_names) if pn in ['cost','internal_var','phase_out_prob']],dtype=np.intp)
 	confidence_inds = np.array([i for i,pn in enumerate(parameter_names) if pn in ['high_confidence_threshold','confidence_map_slope']],dtype=np.intp)
 	
-	plt.figure()
-	plt.subplot(131)
-	plt.scatter(parameters[:,decision_inds[0]],parameters[:,decision_inds[1]],c=c)
-	plt.xlabel(parameter_names[decision_inds[0]])
-	plt.ylabel(parameter_names[decision_inds[1]])
-	plt.subplot(132)
-	plt.scatter(parameters[:,decision_inds[0]],parameters[:,decision_inds[2]],c=c)
-	plt.xlabel(parameter_names[decision_inds[0]])
-	plt.ylabel(parameter_names[decision_inds[2]])
-	plt.subplot(133)
-	plt.scatter(parameters[:,decision_inds[1]],parameters[:,decision_inds[2]],c=c)
-	plt.xlabel(parameter_names[decision_inds[1]])
-	plt.ylabel(parameter_names[decision_inds[2]])
+	plt.figure(figsize=(10,8))
+	gs1 = gridspec.GridSpec(2, 2, left=0.05, right=0.85)
+	gs2 = gridspec.GridSpec(1, 1, left=0.90, right=0.93)
+	ax1 = plt.subplot(gs1[0])
+	ax2 = plt.subplot(gs1[1])
+	ax3 = plt.subplot(gs1[2])
+	ax4 = plt.subplot(gs1[3])
+	for cat_index,category in enumerate(categories):
+		inds = ind_categories==cat_index
+		ax1.scatter(parameters[inds,decision_inds[0]],parameters[inds,decision_inds[1]],c=colors,marker=markers[cat_index],cmap='rainbow')
+		ax2.scatter(parameters[inds,decision_inds[0]],parameters[inds,decision_inds[2]],c=colors,marker=markers[cat_index],cmap='rainbow')
+		ax3.scatter(parameters[inds,decision_inds[1]],parameters[inds,decision_inds[2]],c=colors,marker=markers[cat_index],cmap='rainbow')
+		ax4.scatter(parameters[inds,confidence_inds[0]],parameters[inds,confidence_inds[1]],c=colors,marker=markers[cat_index],cmap='rainbow',label=labels[cat_index])
+	ax1.set_xlabel(parameter_names[decision_inds[0]])
+	ax1.set_ylabel(parameter_names[decision_inds[1]])
+	ax2.set_xlabel(parameter_names[decision_inds[0]])
+	ax2.set_ylabel(parameter_names[decision_inds[2]])
+	ax3.set_xlabel(parameter_names[decision_inds[1]])
+	ax3.set_ylabel(parameter_names[decision_inds[2]])
+	ax4.legend(loc='upper center', fancybox=True, framealpha=0.5, scatterpoints=3)
+	ax4.set_xlabel(parameter_names[confidence_inds[0]])
+	ax4.set_ylabel(parameter_names[confidence_inds[1]])
 	
-	plt.figure()
-	plt.scatter(parameters[:,confidence_inds[0]],parameters[:,confidence_inds[1]],c=c)
-	plt.xlabel(parameter_names[confidence_inds[0]])
-	plt.ylabel(parameter_names[confidence_inds[1]])
+	ax_cbar = plt.subplot(gs2[0])
+	plt.imshow(cbar_im.reshape((-1,1,cbar_im.shape[1])),aspect='auto',cmap=None,interpolation='none',origin='lower',extent=[0,1,0.5,len(cbar_labels)+0.5])
+	ax_cbar.xaxis.set_ticks([])
+	ax_cbar.yaxis.set_ticks(np.arange(len(cbar_labels))+1)
+	ax_cbar.yaxis.set_ticklabels(cbar_labels)
+	ax_cbar.tick_params(labelleft=False, labelright=True)
 	
 	plt.show(True)
+
+def hierarchical_clustering(parameters):
+	#~ agg = cluster.AgglomerativeClustering(n_clusters=8, affinity='euclidean', compute_full_tree=True, linkage='ward')
+	#~ agg.fit(parameters)
+	#~ print(agg)
+	#~ print(agg.labels_)
+	#~ print(agg.n_leaves_)
+	#~ print(agg.n_components_)
+	#~ print(agg.children_)
+	children,n_components,n_leaves,parents,distances = cluster.ward_tree(parameters, return_distance=True)
+	virtual_tree_node_iterator = itertools.count(n_leaves)
+	tree = [{'node_id': next(virtual_tree_node_iterator), 'left': x[0], 'right':x[1]} for i,x in enumerate(children)]
+	print(children)
+	print(n_components)
+	print(n_leaves)
+	print(parents)
+	print(distances)
+	print(tree)
+
+if __name__=="__main__":
+	summary = get_summary()
+	parameters,parameter_names,names,sessions,experiments = get_parameter_array_from_summary(summary)
+	scatter_parameters(parameters,parameter_names,names,sessions,experiments)
+	#~ scatter_parameters(parameters,parameter_names,names,sessions,experiments,merge='subjects')
+	#~ scatter_parameters(parameters,parameter_names,names,sessions,experiments,merge='subjects',merge_method=np.median)
+	#~ scatter_parameters(parameters,parameter_names,names,sessions,experiments,merge='sessions')
+	#~ scatter_parameters(parameters,parameter_names,names,sessions,experiments,merge='sessions',merge_method=np.median)
+	hierarchical_clustering(parameters)

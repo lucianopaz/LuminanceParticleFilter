@@ -29,3 +29,6 @@ fits/*
 # Cluster job files
 *.qsub
 *.sbatch
+
+# Large figures
+figs/fits_cognition*.pdf
