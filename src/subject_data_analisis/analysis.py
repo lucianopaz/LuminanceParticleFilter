@@ -41,6 +41,7 @@ def subjectSession_measures(subjectSession):
 					miss_stds = np.nan*np.ones(2)
 				key = '_'.join(['subject_'+str(un),'session_'+str(us)])
 				out[key] = {'experiment':subjectSession.experiment,'n':n,'auc':auc,\
+							'name':un,'session':us,\
 							'means':{'rt':means[0],'performance':means[1],'confidence':means[2],\
 									'hit_rt':hit_means[0],'miss_rt':miss_means[0],\
 									'hit_confidence':hit_means[1],'miss_confidence':miss_means[1]},\
@@ -75,6 +76,7 @@ def fitter_measures(fitter):
 	
 	key = 'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
 	out = {key:{'experiment':fitter.experiment,'parameters':parameters,'merit':merit,\
+				'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),\
 				'performance':performance,'rt':rt,'hit_rt':hit_rt,'miss_rt':miss_rt,\
 				'confidence':confidence,'hit_confidence':hit_confidence,\
 				'miss_confidence':miss_confidence,'auc':auc}}
@@ -103,5 +105,68 @@ def get_summary(method = 'full_confidence', optimizer = 'cma', suffix = '', over
 		f.close()
 	return summary
 
+def get_parameter_array_from_summary(summary):
+	parameter_names = set([])
+	parameter_dicts = []
+	experiments = []
+	sessions = []
+	names = []
+	for k in summary['theoretical'].keys():
+		vals = summary['theoretical'][k]
+		names.append(vals['name'])
+		sessions.append(vals['session'])
+		experiments.append(vals['experiment'])
+		parameter_names = parameter_names | set(vals['parameters'].keys())
+		parameter_dicts.append(vals['parameters'])
+	parameter_names = sorted(list(parameter_names))
+	parameters = []
+	for pd in parameter_dicts:
+		vals = []
+		for pn in parameter_names:
+			vals.append(pd[pn])
+		parameters.append(np.array(vals))
+	parameters = np.array(parameters)
+	names = np.array(names)
+	sessions = np.array(sessions)
+	experiments = np.array(experiments)
+	ind = [i for i,v in enumerate(parameter_names) if v=='internal_var'][0]
+	parameters[:,ind] = normalize_internal_vars(parameters[:,ind],experiments)
+	return parameters,parameter_names,names,sessions,experiments
+
+def normalize_internal_vars(internal_vars,experiments):
+	unique_experiments = sorted(list(set(experiments)))
+	for ue in unique_experiments:
+		inds = experiments==ue
+		internal_vars[inds] = internal_vars[inds]/np.std(internal_vars[inds],keepdims=True)
+	return internal_vars
+
 if __name__=="__main__":
 	summary = get_summary()
+	parameters,parameter_names,names,sessions,experiments = get_parameter_array_from_summary(summary)
+	uses,indses = np.unique(sessions,return_inverse=True)
+	uexp,indexp = np.unique(experiments,return_inverse=True)
+	c = (indses+indexp*len(uses)).astype(np.float)/float(len(uses)*len(uexp))
+	
+	decision_inds = np.array([i for i,pn in enumerate(parameter_names) if pn in ['cost','internal_var','phase_out_prob']],dtype=np.intp)
+	confidence_inds = np.array([i for i,pn in enumerate(parameter_names) if pn in ['high_confidence_threshold','confidence_map_slope']],dtype=np.intp)
+	
+	plt.figure()
+	plt.subplot(131)
+	plt.scatter(parameters[:,decision_inds[0]],parameters[:,decision_inds[1]],c=c)
+	plt.xlabel(parameter_names[decision_inds[0]])
+	plt.ylabel(parameter_names[decision_inds[1]])
+	plt.subplot(132)
+	plt.scatter(parameters[:,decision_inds[0]],parameters[:,decision_inds[2]],c=c)
+	plt.xlabel(parameter_names[decision_inds[0]])
+	plt.ylabel(parameter_names[decision_inds[2]])
+	plt.subplot(133)
+	plt.scatter(parameters[:,decision_inds[1]],parameters[:,decision_inds[2]],c=c)
+	plt.xlabel(parameter_names[decision_inds[1]])
+	plt.ylabel(parameter_names[decision_inds[2]])
+	
+	plt.figure()
+	plt.scatter(parameters[:,confidence_inds[0]],parameters[:,confidence_inds[1]],c=c)
+	plt.xlabel(parameter_names[confidence_inds[0]])
+	plt.ylabel(parameter_names[confidence_inds[1]])
+	
+	plt.show(True)
