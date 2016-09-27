@@ -248,6 +248,18 @@ def scatter_parameters(parameters,parameter_names,names,sessions,experiments,mer
 	
 	plt.show(True)
 
+def build_tree(children,n_leaves):
+	root = len(children)+n_leaves-1
+	root_children = children[-1]
+	return '({child1},{child2}){nodename}'.format(child1=go_down_tree(children,root_children[0],n_leaves),child2=go_down_tree(children,root_children[1],n_leaves),nodename=root)
+
+def go_down_tree(children,nodename,n_leaves):
+	if nodename<n_leaves:
+		return nodename
+	else:
+		node_children = children[nodename-n_leaves]
+		return '({child1},{child2}){nodename}'.format(child1=go_down_tree(children,node_children[0],n_leaves),child2=go_down_tree(children,node_children[1],n_leaves),nodename=nodename)
+
 def hierarchical_clustering(parameters):
 	#~ agg = cluster.AgglomerativeClustering(n_clusters=8, affinity='euclidean', compute_full_tree=True, linkage='ward')
 	#~ agg.fit(parameters)
@@ -257,14 +269,15 @@ def hierarchical_clustering(parameters):
 	#~ print(agg.n_components_)
 	#~ print(agg.children_)
 	children,n_components,n_leaves,parents,distances = cluster.ward_tree(parameters, return_distance=True)
-	virtual_tree_node_iterator = itertools.count(n_leaves)
-	tree = [{'node_id': next(virtual_tree_node_iterator), 'left': x[0], 'right':x[1]} for i,x in enumerate(children)]
-	print(children)
-	print(n_components)
-	print(n_leaves)
-	print(parents)
-	print(distances)
-	print(tree)
+	print(build_tree(children,n_leaves))
+	#~ virtual_tree_node_iterator = itertools.count(n_leaves)
+	#~ tree = [{'node_id': next(virtual_tree_node_iterator), 'left': x[0], 'right':x[1]} for i,x in enumerate(children)]
+	#~ print(children)
+	#~ print(n_components)
+	#~ print(n_leaves)
+	#~ print(parents)
+	#~ print(distances)
+	#~ print(tree)
 
 if __name__=="__main__":
 	summary = get_summary()
