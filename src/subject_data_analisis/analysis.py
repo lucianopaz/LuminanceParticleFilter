@@ -10,21 +10,21 @@ import matplotlib as mt
 from matplotlib import pyplot as plt
 from matplotlib import colors as mt_colors
 import matplotlib.gridspec as gridspec
-import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools, ete3
+import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools, ete3, sys
 from sklearn import cluster
 
 class Analyzer():
 	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '', override=False,\
-				n_clusters=2, affinity='euclidean', connectivity=None, linkage='ward', pooling_func=np.nanmean):
+				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean, connectivity=None):
 		self.method = method
 		self.optimizer = optimizer
 		self.suffix = suffix
 		self.get_summary(override=override)
 		self.init_clusterer(n_clusters=n_clusters, affinity=affinity,\
-				connectivity=connectivity, linkage=linkage, pooling_func=pooling_func)
+				linkage=linkage, pooling_func=pooling_func, connectivity=connectivity)
 	
-	def init_clusterer(self,n_clusters=2, affinity='euclidean',connectivity=None,\
-						compute_full_tree=True, linkage='ward', pooling_func=np.nanmean):
+	def init_clusterer(self,n_clusters=2, affinity='euclidean', compute_full_tree=True,\
+						linkage='ward', pooling_func=np.nanmean,connectivity=None):
 		self.agg_clusterer = cluster.AgglomerativeClustering(n_clusters=n_clusters, affinity=affinity,\
 				connectivity=connectivity,compute_full_tree=compute_full_tree, linkage=linkage,\
 				pooling_func=pooling_func)
@@ -101,7 +101,9 @@ class Analyzer():
 	
 	def fitter_measures(self,fitter):
 		parameters = fitter.get_parameters_dict_from_fit_output()
-		merit = fitter.forced_compute_full_confidence_merit(parameters)
+		full_confidence_merit = fitter.forced_compute_full_confidence_merit(parameters)
+		full_merit = fitter.forced_compute_full_merit(parameters)
+		confidence_only_merit = fitter.forced_compute_confidence_only_merit(parameters)
 		model_prediction,t_array = fitter.theoretical_rt_confidence_distribution()
 		dt = fitter.dp.dt
 		c_array = np.linspace(0,1,fitter.confidence_partition)
@@ -124,7 +126,8 @@ class Analyzer():
 		auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
 		
 		key = 'experiment_'+fitter.experiment+'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
-		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'merit':merit,\
+		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'full_merit':full_merit,\
+					'full_confidence_merit':full_confidence_merit,'confidence_only_merit':confidence_only_merit,\
 					'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),\
 					'performance':performance,'rt':rt,'hit_rt':hit_rt,'miss_rt':miss_rt,\
 					'confidence':confidence,'hit_confidence':hit_confidence,\
@@ -157,7 +160,13 @@ class Analyzer():
 		for pd in parameter_dicts:
 			vals = []
 			for pn in self._parameter_names:
-				vals.append(pd[pn])
+				if pn=='high_confidence_threshold':
+					val = pd[pn] if pd[pn]<=2. else np.nan
+				elif pn=='confidence_map_slope':
+					val = pd[pn] if pd[pn]<=100. else np.nan
+				else:
+					val = pd[pn]
+				vals.append(val)
 			self._parameters.append(np.array(vals))
 		self._parameters = np.array(self._parameters)
 		self._names = np.array(self._names)
@@ -303,7 +312,9 @@ class Analyzer():
 		if show:
 			plt.show(True)
 	
-	def cluster(self,merge=None,clustered_parameters=['cost','internal_var','phase_out_prob']):
+	def cluster(self,merge=None,clustered_parameters=['cost','internal_var','phase_out_prob'],filter_nans='post'):
+		if not filter_nans in ['pre','post','none']:
+			raise ValueError('filter_nans must be "pre", "post" or "none". User supplied {0}'.format(filter_nans))
 		try:
 			parameter_names = self._parameter_names
 		except:
@@ -352,7 +363,12 @@ class Analyzer():
 			else:
 				raise ValueError('Unknown merge option: {0}'.format(merge))
 			X = np.array(X)
+		# Select X
+		if filter_nans=='pre':
+			X = X[np.logical_not(np.any(np.isnan(X),axis=1))]
 		X = X[:,clustered_parameters_inds]
+		if filter_nans=='post':
+			X = X[np.logical_not(np.any(np.isnan(X),axis=1))]
 		self.agg_clusterer.fit(X)
 		newick_tree = self.build_Newick_tree(self.agg_clusterer.children_,self.agg_clusterer.n_leaves_,X,leaf_labels)
 		tree = ete3.Tree(newick_tree)
@@ -385,11 +401,19 @@ class Analyzer():
 			raise NotImplementedError('get_branch_span is not implemented for affinity: {0}'.format(self.affinity))
 
 def default_tree_layout(node):
+	"""
+	default_tree_layout(node)
+	
+	Takes an ete3.TreeNode instance and sets its default style adding the
+	appropriate TextFaces
+	"""
+	style = ete3.NodeStyle(vt_line_width=3,hz_line_width=3,size=0)
 	if node.is_leaf():
 		portions = node.name.split('_')
 		experiment = None
 		subject = None
 		session = None
+		name_alias = []
 		if not portions[0] in ['subj','ses']:
 			start_ind = 1
 			experiment = portions[0]
@@ -400,23 +424,56 @@ def default_tree_layout(node):
 				subject = val
 			elif key=='ses':
 				session = val
-		if experiment:
+		if not experiment is None:
 			bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[experiment]
-			fgcolor = {'2AFC':'#000000','Auditivo':'#000000','Luminancia':'#FFFFFF'}[experiment]
-		elif session:
-			bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[session]
-			fgcolor = {'1':'#000000','2':'#000000','3':'#FFFFFF'}[session]
+			fgcolor = {'2AFC':'#000000','Auditivo':'#000000','Luminancia':'#000000'}[experiment]
 		else:
-			bgcolor = '#FFFFFF'
-		node.set_style(ete3.NodeStyle(bgcolor=bgcolor))
-		ete3.add_face_to_node(ete3.TextFace(node.name,fgcolor=fgcolor), node, column=0, position="branch-right")
+			bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[session]
+			fgcolor = {'1':'#000000','2':'#000000','3':'#000000'}[session]
+		if experiment:
+			name_alias.append({'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}[experiment])
+		if subject:
+			name_alias.append('Subj {0}'.format(subject))
+		if session:
+			name_alias.append('Ses {0}'.format(session))
+		name_alias = ' '.join(name_alias)
+		style['vt_line_color'] = bgcolor
+		style['hz_line_color'] = bgcolor
+		style['size'] = 3
+		style['fgcolor'] = bgcolor
+		face = ete3.TextFace(name_alias,fgcolor=fgcolor)
+		#~ face.rotation = -15
+		node.add_face(face, column=0, position="aligned")
+	else:
+		child_leaf_color = None
+		equal_leaf_types = True
+		for child_leaf in (n for n in node.iter_descendants("postorder") if n.is_leaf()):
+			portions = child_leaf.name.split('_')
+			try:
+				bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[portions[0]]
+			except:
+				bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[portions[-1]]
+			if child_leaf_color is None:
+				child_leaf_color = bgcolor
+			elif child_leaf_color!=bgcolor:
+				equal_leaf_types = False
+				break
+		if equal_leaf_types:
+			style['vt_line_color'] = child_leaf_color
+			style['hz_line_color'] = child_leaf_color
+	node.set_style(style)
 
 def default_tree_style(mode='r'):
+	"""
+	default_tree_style(mode='r')
+	
+	mode can be 'r' or 'c'. Returns an ete3.TreeStyle instance with a
+	rectangular or circular display depending on the supplied mode
+	"""
 	tree_style = ete3.TreeStyle()
 	tree_style.layout_fn = default_tree_layout
 	tree_style.show_leaf_name = False
 	tree_style.show_scale = False
-	#~ tree_style.show_branch_length = True
 	if mode=='r':
 		tree_style.rotation = 90
 		tree_style.branch_vertical_margin = 10
@@ -426,38 +483,193 @@ def default_tree_style(mode='r'):
 		tree_style.arc_span = 180
 	return tree_style
 
+def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
+				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
+				merge='names',filter_nans='post', tree_mode='r',show=False):
+	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+												  'confidence_map_slope':'all',\
+												  'cost':'all',\
+												  'high_confidence_threshold':'all',\
+												  'dead_time':'all',\
+												  'dead_time_sigma':'all',\
+												  'phase_out_prob':'all'})
+	
+	decision_parameters=['cost','internal_var','phase_out_prob']
+	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters,filter_nans=filter_nans)
+	if show:
+		tree.copy().show(tree_style=default_tree_style(mode=tree_mode))
+	tree.render('../../figs/decision_cluster.svg',tree_style=default_tree_style(mode=tree_mode), layout=default_tree_layout)
+	
+	confidence_parameters=['high_confidence_threshold','confidence_map_slope']
+	tree = a.cluster(merge=merge,clustered_parameters=confidence_parameters,filter_nans=filter_nans)
+	if show:
+		tree.copy().show(tree_style=default_tree_style(mode=tree_mode))
+	tree.render('../../figs/confidence_cluster.svg',tree_style=default_tree_style(mode=tree_mode), layout=default_tree_layout)
+
 def test():
 	a = Analyzer()
-	#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','confidence_map_slope':'all','dead_time':'name','dead_time_sigma':'session'})
-	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
-	
-	#~ a.scatter_parameters(show=True)
-	#~ a.scatter_parameters(merge='subjects',show=True)
-	#~ a.scatter_parameters(merge='sessions',show=True)
-	
-	clustered_parameters=['high_confidence_threshold','confidence_map_slope']
+	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
+	tree = a.cluster(merge='names')
+	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
+	tree.show(tree_style=default_tree_style(mode='r'))
+	tree = a.cluster(merge='sessions')
+	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
+	tree.show(tree_style=default_tree_style(mode='c'))
+	tree = a.cluster()
+	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
+	tree.show(tree_style=default_tree_style(mode='c'))
+	a.scatter_parameters()
+	a.scatter_parameters(merge='subjects')
+	a.scatter_parameters(merge='sessions')
 	a.set_pooling_func(np.median)
-	style = default_tree_style(mode='r')
-	tree = a.cluster(merge='names',clustered_parameters=clustered_parameters)
-	#~ tree.render('cluster_test.svg',tree_style=style, layout=default_tree_layout)
-	tree.show(tree_style=style)
-	#~ tree = a.cluster(merge='sessions')
-	#~ tree.render('cluster_test.svg',tree_style=style, layout=default_tree_layout)
-	#~ tree.show(tree_style=style)
-	#~ tree = a.cluster()
-	#~ tree.render('cluster_test.svg',tree_style=style, layout=default_tree_layout)
-	#~ tree.show(tree_style=style)
-	#~ a.scatter_parameters()
-	#~ a.scatter_parameters(merge='subjects')
-	#~ a.scatter_parameters(merge='sessions')
-	#~ a.set_pooling_func(np.median)
-	#~ print(a.cluster())
-	#~ print(a.cluster(merge='sessions'))
-	#~ print(a.cluster(merge='experiments'))
-	#~ print(a.cluster(merge='names'))
-	#~ a.scatter_parameters(merge='subjects')
-	#~ a.scatter_parameters(merge='sessions')
-	#~ plt.show(True)
+	a.scatter_parameters(merge='subjects')
+	a.scatter_parameters(merge='sessions')
+	plt.show(True)
+
+def parse_input():
+	script_help = """ moving_bounds_fits.py help
+ Sintax:
+ moving_bounds_fits.py [option flag] [option value]
+ 
+ moving_bounds_fits.py -h [or --help] displays help
+ 
+ Optional arguments are:
+ '--show': This flag takes no values. If present it displays the plotted figure
+           and freezes execution until the figure is closed.
+ '--test': This flag takes no values. If present the script's testsuite is
+           executed.
+ '-w': Override the existing saved summary file. If the flag '-w' is
+       supplied, the script  will override the saved summary file. If this
+       flag is not supplied, the script will attempt to load the summary
+       and if it fails, it will produce the summary file. WARNING:
+       the generation of the summary file takes a very long time.
+ '-m' or '--method': String that identifies the fit method. Available values are full,
+                     confidence_only and full_confidence. [Default 'full_confidence']
+ '-o' or '--optimizer': String that identifies the optimizer used for fitting.
+                        Available values are 'cma' and all the scipy.optimize.minimize methods.
+                        [Default 'cma']
+ '-sf' or '--suffix': A string suffix to paste to the filenames. [Default '']
+ '-n' or '--n_clusters': An integer that specifies the number of clusters
+                         constructed by the scikit-learn AgglomerativeClustering
+                         class. [Default 2]
+ '-a' or '--affinity': The scikit-learn AgglomerativeClustering class affinity
+                       posible values are 'euclidean', 'l1', 'l2', 'cosine',
+                       'manhattan' or 'precomputed'. If linkage is 'ward',
+                       only 'euclidean' is accepted. Refer to the scikit-learn
+                       documentation for more information. [Default 'euclidean']
+ '-l' or '--linkage': The scikit-learn AgglomerativeClustering class linkage
+                      posible values are 'ward', 'complete' or 'average'.
+                      Refer to the scikit-learn documentation for more
+                      information. [Default 'ward']
+ '-pf' or '--pooling_func': The scikit-learn AgglomerativeClustering class pooling_func.
+                            Default is np.nanmean (notice that numpy is
+                            aliased as np when supplying an option).
+                            The pooling_func is also used when scattering
+                            the parameters but this functionality is only
+                            accesible when importing the analysis.py package).
+ '--merge': Can be 'none', 'experiments', 'sessions' or 'names'. This option
+            controls if the fitted model parameters should be pooled together
+            or not, and how they should be pooled. If 'None', the parameters are not
+            pooled together. The parameters have three separate categories:
+            the experiment to which they belong, the subject name and the
+            experimental session. If the supplied option value is 'experiments',
+            'sessions' or 'names', the parameters that belong to different
+            categories of the supplied option value will be pooled together
+            using the pooling_func. For example, if the option value is
+            'names', the parameters for will still distinguish the experiment
+            and session, but the parameters for different subject names will
+            be pooled together. [Default 'names']
+ '-f' or '--filter_nans': Can be 'pre', 'post' or 'none'. This option controls
+                          how to filter the parameters that are nans. If 'none',
+                          no filter is applied. If 'pre', the parameters
+                          that contain a nan entry are filtered before
+                          reducing the parameters to the clustered parameter
+                          space. If 'post', the parameters that contain a
+                          nan entry are filtered after the reduction takes
+                          place. [Default 'post']
+ '-t' or '--tree_mode': Can be 'r' or 'c' and controls how to plot the
+                         cluster hierarchy. If 'r', the tree is plotted
+                         in rectangular mode. If 'c', the tree is plotted
+                         in circular mode.
+ Example:
+ python analysis.py --show -pf np.nanmedian"""
+	str_caster = lambda x: str(x).lower()
+	int_caster = int
+	evaler = eval
+	available_options_casters = {'method':str_caster,\
+								'optimizer':str_caster,\
+								'suffix':str_caster,\
+								'override':None,\
+								'n_clusters':int_caster,\
+								'affinity':str_caster,\
+								'linkage':str_caster,\
+								'pooling_func':evaler,\
+								'merge':str_caster,\
+								'filter_nans':str_caster,\
+								'tree_mode':str_caster,\
+								'show':None,\
+								'test':None}
+	options =  {'test':False,'override':False,'show':False}
+	expecting_key = True
+	key = None
+	for i,arg in enumerate(sys.argv[1:]):
+		if expecting_key:
+			if arg=='--test':
+				options['test'] = True
+			elif arg=='-w' or arg=='--override':
+				options['override'] = True
+			elif arg=='--show':
+				options['show'] = True
+			elif arg=='-m' or arg=='--method':
+				key = 'method'
+				expecting_key = False
+			elif arg=='-o' or arg=='--optimizer':
+				key = 'optimizer'
+				expecting_key = False
+			elif arg=='-n' or arg=='--n_clusters':
+				key = 'n_clusters'
+				expecting_key = False
+			elif arg=='-a' or arg=='--affinity':
+				key = 'affinity'
+				expecting_key = False
+			elif arg=='-l' or arg=='--linkage':
+				key = 'linkage'
+				expecting_key = False
+			elif arg=='-pf' or arg=='--pooling_func':
+				key = 'pooling_func'
+				expecting_key = False
+			elif arg=='--merge':
+				key = 'merge'
+				expecting_key = False
+			elif arg=='-f' or arg=='--filter_nans':
+				key = 'filter_nans'
+				expecting_key = False
+			elif arg=='-t' or arg=='--tree_mode':
+				key = 'tree_mode'
+				expecting_key = False
+			elif arg=='-h' or arg=='--help':
+				print(script_help)
+				sys.exit()
+			else:
+				raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format(opt=arg,pos=i+1))
+		else:
+			expecting_key = True
+			options[key] = available_options_casters[key](arg)
+	try:
+		if options['merge']=='none':
+			options['merge'] = None
+	except:
+		pass
+	if not expecting_key:
+		raise RuntimeError("Expected a value after encountering key '{0}' but no value was supplied".format(arg))
+	return options
 
 if __name__=="__main__":
-	test()
+	# Parse input from sys.argv
+	options = parse_input()
+	if options['test']:
+		test()
+	else:
+		del options['test']
+		cluster_analysis(**options)

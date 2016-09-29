@@ -635,7 +635,9 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	fname+=suffix
 	mo.set_time_units('seconds')
 	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
-	model_vars = [1e-4,1e-3,1e-2,1e-1,1,1e2,1e3,1e4]
+	
+	model_vars = 10.**np.linspace(-4,4,17)
+	#~ model_vars = [1e-4,1e-3,1e-2,1e-1,1,1e2,1e3,1e4]
 	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,len(model_vars))]
 	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,len(model_vars))]
 	#~ s1_colors = [plt.get_cmap('brg')(x) for x in np.linspace(0,0.5,len(model_vars))]
@@ -697,7 +699,7 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 		print 'Par = {0}+-{1}'.format(popt,np.sqrt(pcov))
 	
 	ax = plt.subplot(gs3[0])
-	plt.plot(evidence,performance,'o',label='Simulations')
+	plt.plot(evidence,performance,'o',label='Simulations',color='k')
 	x = np.linspace(0,100,10000)
 	plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt))
 	plt.xlim([0,10])
