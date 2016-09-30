@@ -10,6 +10,8 @@ from matplotlib import ticker
 import data_io as io
 import cost_time as ct
 import moving_bounds_fits as mo
+import analysis
+from matplotlib import image as mpimg
 
 def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalignment='top',horizontalalignment='right',**kwargs):
 	ax.text(horizontal, vertical, label,transform=ax.transAxes,
@@ -744,6 +746,44 @@ def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg
 		plt.xlabel(r'$\sigma$')
 	plt.show()
 
+def cluster_hierachy(fname='cluster_hierachy',suffix='.svg'):
+	fname+=suffix
+	analysis.cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
+				affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
+				merge='names',filter_nans='post', tree_mode='r',extension='png')
+	a = analysis.Analyzer(method='full_confidence', optimizer='cma', suffix='',\
+							override=False, affinity='euclidean', linkage='ward', pooling_func=np.nanmean)
+	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+												  'confidence_map_slope':'all',\
+												  'cost':'all',\
+												  'high_confidence_threshold':'all',\
+												  'dead_time':'all',\
+												  'dead_time_sigma':'all',\
+												  'phase_out_prob':'all'})
+	
+	decision_parameters=['cost','internal_var','phase_out_prob']
+	confidence_parameters=['high_confidence_threshold','confidence_map_slope']
+	
+	fig = plt.figure(figsize=(8,8))
+	ax1 = fig.add_subplot(2,2,1,projection='3d')
+	ax2 = fig.add_subplot(2,2,2)
+	ax3 = fig.add_subplot(2,2,3)
+	ax4 = fig.add_subplot(2,2,4)
+	
+	a.controlled_scatter(axes=ax1,scattered_parameters=decision_parameters,merge=None)
+	a.controlled_scatter(axes=ax2,scattered_parameters=confidence_parameters,merge=None)
+	ax2.legend(loc='best', fancybox=True, framealpha=0.5)
+	decision_hierarchy = mpimg.imread('../../figs/decision_cluster.png')
+	confidence_hierarchy = mpimg.imread('../../figs/confidence_cluster.png')
+	ax3.imshow(decision_hierarchy)
+	ax3.set_axis_off()
+	ax4.imshow(confidence_hierarchy)
+	ax4.set_axis_off()
+	#~ place_axes_subfig_label(ax1,'A',horizontal=-0.05,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
+	
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -769,7 +809,7 @@ def parse_input():
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
-				'bounds_vs_var':False,'performance_vs_var_and_cost':False}
+				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierachy':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -814,6 +854,8 @@ if __name__=="__main__":
 		bounds_vs_var(suffix=opts['suffix'])
 	if opts['performance_vs_var_and_cost']:
 		performance_vs_var_and_cost(suffix=opts['suffix'])
+	if opts['cluster_hierachy']:
+		cluster_hierachy(suffix=opts['suffix'])
 	
 	if opts['show']:
 		plt.show(True)

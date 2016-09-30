@@ -12,6 +12,7 @@ from matplotlib import colors as mt_colors
 import matplotlib.gridspec as gridspec
 import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools, ete3, sys
 from sklearn import cluster
+from mpl_toolkits.mplot3d import Axes3D
 
 class Analyzer():
 	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '', override=False,\
@@ -312,6 +313,160 @@ class Analyzer():
 		if show:
 			plt.show(True)
 	
+	def controlled_scatter(self,scattered_parameters=['cost','internal_var','phase_out_prob'],axes=None,color_category='experiment',marker_category='session',merge=None,show=False):
+		if len(scattered_parameters)<2 or len(scattered_parameters)>3:
+			raise ValueError('Can only scatter sets of 2 or 3 parameters. User supplied scattered_parameters={0}'.format(scattered_parameters))
+		elif len(scattered_parameters)==2:
+			threeD = False
+		else:
+			threeD = True
+		try:
+			params = self._parameters
+		except:
+			self.get_parameter_array_from_summary()
+			params = self._parameters
+		_x = params[:,self._parameter_names.index(scattered_parameters[0])]
+		_y = params[:,self._parameter_names.index(scattered_parameters[1])]
+		if threeD:
+			_z = params[:,self._parameter_names.index(scattered_parameters[2])]
+		else:
+			_z = None
+		if color_category not in [None,'experiment','session','name']:
+			raise ValueError("color_category must be in [None,'experiment','session','name']. User supplied: {0}".format(color_category))
+		if marker_category not in [None, 'experiment','session']:
+			raise ValueError("marker_category must be in [None,'experiment','session']. User supplied: {0}".format(marker_category))
+		if marker_category==color_category and not marker_category is None:
+			raise ValueError("If color_category and marker_category are not None, they must be different")
+		if merge==(marker_category+'s') or merge==(color_category+'s'):
+			raise ValueError("Cannot set merge equal to color_category or marker_category")
+		
+		if not merge is None:
+			unams,indnams = np.unique(self._names,return_inverse=True)
+			usess,indsess = np.unique(self._sessions,return_inverse=True)
+			uexps,indexps = np.unique(self._experiments,return_inverse=True)
+			cat_inds = []
+			names = []
+			sessions = []
+			experiments = []
+			if merge=='experiments':
+				for i,un in enumerate(unams):
+					for us in usess:
+						inds = np.logical_and(self._names==un,self._sessions==us)
+						if any(inds):
+							cat_inds.append(inds)
+							names.append(i)
+							sessions.append(us)
+			elif merge=='sessions':
+				for i,un in enumerate(unams):
+					for ue in uexps:
+						inds = np.logical_and(self._names==un,self._experiments==ue)
+						if any(inds):
+							cat_inds.append(inds)
+							names.append(i)
+							experiments.append(ue)
+			elif merge=='names':
+				for ue in uexps:
+					for us in usess:
+						inds = np.logical_and(self._experiments==ue,self._sessions==us)
+						if any(inds):
+							cat_inds.append(inds)
+							experiments.append(ue)
+							sessions.append(us)
+			else:
+				raise ValueError("Unknown merge option supplied: {0}. Available options are None, 'experiments', 'sessions' or 'names'".format(merge))
+			x = []
+			y = []
+			if threeD:
+				z = []
+			for inds in cat_inds:
+				x.append(self.pooling_func(_x[inds],axis=0))
+				y.append(self.pooling_func(_y[inds],axis=0))
+				if threeD:
+					z.append(self.pooling_func(_z[inds],axis=0))
+			x = np.array(x)
+			y = np.array(y)
+			if threeD:
+				z = np.array(z)
+		else:
+			unams,names = np.unique(self._names,return_inverse=True)
+			sessions = self._sessions
+			experiments = self._experiments
+			x = _x
+			y = _y
+			if threeD:
+				z = _z
+		
+		if not color_category is None:
+			if color_category=='experiment':
+				c = [{'2AFC':[1.,0.,0.],'Auditivo':[0.,0.5,0.],'Luminancia':[0.,0.,1.]}[exp] for exp in experiments]
+			elif color_category=='session':
+				c = [{'1':[1.,0.,0.],'2':[0.,0.5,0.],'3':[0.,0.,1.]}[ses] for ses in sessions]
+			else:
+				c = [plt.get_cmap('rainbow')(x) for x in names.astype(np.float)/float(len(unams)-1)]
+			c = np.array(c)
+		else:
+			c = 'k'
+			
+		if not marker_category is None:
+			if marker_category=='experiment':
+				uexps,indexps = np.unique(experiments,return_inverse=True)
+				marker_inds = [indexps==i for i,ue in enumerate(uexps)]
+				markers = [{'2AFC':'o','Auditivo':'s','Luminancia':'D'}[exp] for exp in uexps]
+				labels = [{'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}[exp] for exp in uexps]
+			else:
+				usess,indsess = np.unique(sessions,return_inverse=True)
+				marker_inds = [indsess==i for i,ue in enumerate(usess)]
+				markers = [{1:'o',2:'s',3:'D'}[int(ses)] for ses in usess]
+				labels = [{1:'Ses 1',2:'Ses 2',3:'Ses 3'}[int(ses)] for ses in usess]
+		else:
+			marker_inds = [np.ones(len(x),dtype=np.bool)]
+			markers = ['c']
+			labels = [None]
+		
+		if axes is None:
+			fig = plt.figure()
+			if threeD:
+				axes = fig.add_subplot(111, projection='3d')
+			else:
+				axes = plt.subplot(111)
+		
+		parameter_aliases = {'cost':r'$c$',\
+							'internal_var':r'$\sigma^{2}$',\
+							'phase_out_prob':r'$p_{po}$',\
+							'high_confidence_threshold':r'$C_{H}$',\
+							'confidence_map_slope':r'$\alpha$',\
+							'dead_time':r'\tau_{c}',\
+							'dead_time_sigma':r'$\sigma_{c}$'}
+		if not threeD:
+			for m,inds,label in zip(markers,marker_inds,labels):
+				try:
+					axes.scatter(x[inds],y[inds],c=c[inds],marker=m, s=40, label=label)
+				except:
+					axes.scatter(x[inds],y[inds],c=c,marker=m, s=40, label=label)
+			axes.set_xlabel(parameter_aliases[scattered_parameters[0]],fontsize=16)
+			axes.set_ylabel(parameter_aliases[scattered_parameters[1]],fontsize=16)
+			axes.set_xticklabels([])
+			axes.set_yticklabels([])
+		else:
+			for m,inds,label in zip(markers,marker_inds,labels):
+				try:
+					axes.scatter(x[inds],y[inds],z[inds],c=c[inds],marker=m, s=40, label=label)
+				except:
+					axes.scatter(x[inds],y[inds],z[inds],c=c,marker=m, s=40, label=label)
+			axes.set_xlabel(parameter_aliases[scattered_parameters[0]],fontsize=16)
+			axes.set_ylabel(parameter_aliases[scattered_parameters[1]],fontsize=16)
+			axes.set_zlabel(parameter_aliases[scattered_parameters[2]],fontsize=16)
+			axes.view_init(elev=None,azim=145)
+			axes.set_xticklabels([])
+			axes.set_yticklabels([])
+			axes.set_zticklabels([])
+		
+		if show:
+			plt.show(True)
+			return None
+		else:
+			return axes
+	
 	def cluster(self,merge=None,clustered_parameters=['cost','internal_var','phase_out_prob'],filter_nans='post'):
 		if not filter_nans in ['pre','post','none']:
 			raise ValueError('filter_nans must be "pre", "post" or "none". User supplied {0}'.format(filter_nans))
@@ -463,7 +618,7 @@ def default_tree_layout(node):
 			style['hz_line_color'] = child_leaf_color
 	node.set_style(style)
 
-def default_tree_style(mode='r'):
+def default_tree_style(mode='r',title=None):
 	"""
 	default_tree_style(mode='r')
 	
@@ -474,6 +629,8 @@ def default_tree_style(mode='r'):
 	tree_style.layout_fn = default_tree_layout
 	tree_style.show_leaf_name = False
 	tree_style.show_scale = False
+	if not title is None:
+		tree_style.title.add_face(ete3.TextFace(title, fsize=18), column=0)
 	if mode=='r':
 		tree_style.rotation = 90
 		tree_style.branch_vertical_margin = 10
@@ -485,7 +642,7 @@ def default_tree_style(mode='r'):
 
 def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
-				merge='names',filter_nans='post', tree_mode='r',show=False):
+				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
 												  'confidence_map_slope':'all',\
@@ -498,14 +655,23 @@ def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', overr
 	decision_parameters=['cost','internal_var','phase_out_prob']
 	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters,filter_nans=filter_nans)
 	if show:
-		tree.copy().show(tree_style=default_tree_style(mode=tree_mode))
-	tree.render('../../figs/decision_cluster.svg',tree_style=default_tree_style(mode=tree_mode), layout=default_tree_layout)
+		tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='Decision Hierarchy'))
+	tree.render('../../figs/decision_cluster.'+extension,tree_style=default_tree_style(mode=tree_mode,title='Decision Hierarchy'), layout=default_tree_layout,\
+				dpi=300, units='mm', w=150)
 	
 	confidence_parameters=['high_confidence_threshold','confidence_map_slope']
 	tree = a.cluster(merge=merge,clustered_parameters=confidence_parameters,filter_nans=filter_nans)
 	if show:
-		tree.copy().show(tree_style=default_tree_style(mode=tree_mode))
-	tree.render('../../figs/confidence_cluster.svg',tree_style=default_tree_style(mode=tree_mode), layout=default_tree_layout)
+		tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'))
+	tree.render('../../figs/confidence_cluster.'+extension,tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'), layout=default_tree_layout,\
+				dpi=300, units='mm', w=150)
+	
+	if show:
+		a.controlled_scatter(scattered_parameters=decision_parameters,merge=merge)
+		plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		a.controlled_scatter(scattered_parameters=confidence_parameters,merge=merge)
+		plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		plt.show(True)
 
 def test():
 	a = Analyzer()
@@ -550,6 +716,9 @@ def parse_input():
                         Available values are 'cma' and all the scipy.optimize.minimize methods.
                         [Default 'cma']
  '-sf' or '--suffix': A string suffix to paste to the filenames. [Default '']
+ '-e' or '--extension': A string that determines the graphics fileformat
+                        in which the tree graph will be saved. Available
+                        extensions are 'pdf', 'png' or 'svg'. [Default 'svg']
  '-n' or '--n_clusters': An integer that specifies the number of clusters
                          constructed by the scikit-learn AgglomerativeClustering
                          class. [Default 2]
@@ -600,6 +769,7 @@ def parse_input():
 	available_options_casters = {'method':str_caster,\
 								'optimizer':str_caster,\
 								'suffix':str_caster,\
+								'extension':str_caster,\
 								'override':None,\
 								'n_clusters':int_caster,\
 								'affinity':str_caster,\
@@ -626,6 +796,12 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-o' or arg=='--optimizer':
 				key = 'optimizer'
+				expecting_key = False
+			elif arg=='-sf' or arg=='--suffix':
+				key = 'suffix'
+				expecting_key = False
+			elif arg=='-e' or arg=='--extension':
+				key = 'extension'
 				expecting_key = False
 			elif arg=='-n' or arg=='--n_clusters':
 				key = 'n_clusters'
