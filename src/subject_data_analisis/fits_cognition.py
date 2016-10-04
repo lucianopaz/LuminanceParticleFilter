@@ -467,13 +467,19 @@ class Fitter:
 		try:
 			return self.fixed_parameters
 		except:
-			return self._fixed_parameters
+			try:
+				return self._fixed_parameters
+			except:
+				return self.default_fixed_parameters()
 	
 	def get_fitted_parameters(self):
 		try:
 			return self.fitted_parameters
 		except:
-			return self._fitted_parameters
+			try:
+				return self._fitted_parameters
+			except:
+				return [p for p in self.get_fittable_parameters() if p not in self.default_fixed_parameters().keys()]
 	
 	def get_start_point(self):
 		return self._start_point

@@ -7,16 +7,25 @@ import matplotlib.gridspec as gridspec
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import ticker
+from mpl_toolkits.mplot3d import Axes3D
 import data_io as io
+import data_io_cognition as io_cog
 import cost_time as ct
 import moving_bounds_fits as mo
+import fits_cognition as fits
 import analysis
 from matplotlib import image as mpimg
+from matplotlib.colors import LogNorm
 
 def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalignment='top',horizontalalignment='right',**kwargs):
-	ax.text(horizontal, vertical, label,transform=ax.transAxes,
-			verticalalignment=verticalalignment, horizontalalignment=horizontalalignment,
-			**kwargs)
+	if isinstance(ax,Axes3D):
+		ax.text2D(horizontal, vertical, label,transform=ax.transAxes,
+				verticalalignment=verticalalignment, horizontalalignment=horizontalalignment,
+				**kwargs)
+	else:
+		ax.text(horizontal, vertical, label,transform=ax.transAxes,
+				verticalalignment=verticalalignment, horizontalalignment=horizontalalignment,
+				**kwargs)
 
 def value_and_bounds_sketch(fname='value_and_bounds_sketch',suffix='.svg'):
 	fname+=suffix
@@ -779,8 +788,70 @@ def cluster_hierachy(fname='cluster_hierachy',suffix='.svg'):
 	ax3.set_axis_off()
 	ax4.imshow(confidence_hierarchy)
 	ax4.set_axis_off()
-	#~ place_axes_subfig_label(ax1,'A',horizontal=-0.05,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax1,'A',horizontal=-0.05,vertical=1.02,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
+	
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
+def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
+	fname+=suffix
+	
+	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	subjects = io_cog.merge_subjectSessions(io_cog.filter_subjects_list(subjects,'experiment_Luminancia'),merge='all')
+	subject = subjects[0]
+	
+	fitter = fits.Fitter(subject,method='full_cognition',decisionPolicyKwArgs={'n':201,'dt':1e-3,'T':1.})
+	parameters = fitter.get_parameters_dict()
+	parameters['high_confidence_threshold'] = 1.2
+	parameters['dead_time_sigma'] = 0.3
+	bin_map = fitter.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
+	cont_map = fitter.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+	plt.figure(figsize=(14,6))
+	ax1 = plt.subplot(121)
+	plt.plot(fitter.dp.t,bin_map[0],'r',label='Binary',linewidth=2)
+	plt.plot(fitter.dp.t,cont_map[0],'b',label='Continuous',linewidth=2)
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	plt.gca().set_xlim([0,0.4])
+	plt.xlabel('T [s]')
+	plt.ylabel(r'$M(C(\theta_{+}(t)))$',fontsize='13')
+	xytext_bin = [fitter.dp.t[(bin_map[0]==0).nonzero()[0][0]],0.8]
+	xytext_cont = [fitter.dp.t[np.argmin(np.abs(cont_map[0]-0.2))+2],0.2]
+	
+	fpt = fitter.dp.rt(0,fitter.dp.xbounds())
+	bin_pdf = fitter.confidence_mapping_pdf_matrix(fpt,parameters,bin_map)
+	t = np.arange(0,bin_pdf.shape[-1],dtype=np.float)*fitter.dp.dt
+	
+	gs = gridspec.GridSpec(2, 1,left=0.54, right=0.94,hspace=0.25)
+	ax2 = plt.subplot(gs[0])
+	#~ plt.imshow(bin_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1])
+	plt.plot(t,bin_pdf[0][-1],color='forestgreen',label='high confidence',linewidth=2)
+	plt.plot(t,bin_pdf[0][0],color='mediumpurple',label='low confidence',linewidth=2)
+	plt.ylabel('Prob density')
+	plt.xlabel('T [s]')
+	plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	
+	cont_pdf = fitter.confidence_mapping_pdf_matrix(fpt,parameters,cont_map)
+	ax3 = plt.subplot(gs[1])
+	plt.imshow(cont_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1],\
+				vmin=1e-5,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
+	plt.xlabel('T [s]')
+	plt.ylabel(r'$M(C(t))$',fontsize='13')
+	cbar = plt.colorbar()
+	cbar.set_label('Prob density')
+	
+	ax1.annotate('', xy=[-0.12,0.8], xytext=xytext_bin,
+				size=10, va="center", ha="center",
+				xycoords=(ax2,'axes fraction'), textcoords=('data'),
+				arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
+	
+	ax1.annotate('', xy=[-0.17,0.2], xytext=xytext_cont,
+				size=10, va="center", ha="center",
+				xycoords=(ax3,'axes fraction'), textcoords=('data'),
+				arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
+	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.05,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.08,vertical=1.12,fontsize='24')
+	place_axes_subfig_label(ax3,'C',horizontal=-0.11,vertical=1.12,fontsize='24')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -809,7 +880,8 @@ def parse_input():
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
-				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierachy':False}
+				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierachy':False,\
+				'confidence_mapping':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -856,6 +928,8 @@ if __name__=="__main__":
 		performance_vs_var_and_cost(suffix=opts['suffix'])
 	if opts['cluster_hierachy']:
 		cluster_hierachy(suffix=opts['suffix'])
+	if opts['confidence_mapping']:
+		confidence_mapping(suffix=opts['suffix'])
 	
 	if opts['show']:
 		plt.show(True)
