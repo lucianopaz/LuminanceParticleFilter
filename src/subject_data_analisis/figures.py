@@ -16,6 +16,7 @@ import fits_cognition as fits
 import analysis
 from matplotlib import image as mpimg
 from matplotlib.colors import LogNorm
+from fits_cognition import Fitter_plot_handler
 
 def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalignment='top',horizontalalignment='right',**kwargs):
 	if isinstance(ax,Axes3D):
@@ -755,7 +756,7 @@ def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg
 		plt.xlabel(r'$\sigma$')
 	plt.show()
 
-def cluster_hierachy(fname='cluster_hierachy',suffix='.svg'):
+def cluster_hierarchy(fname='cluster_hierarchy',suffix='.svg'):
 	fname+=suffix
 	analysis.cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
 				affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
@@ -773,23 +774,30 @@ def cluster_hierachy(fname='cluster_hierachy',suffix='.svg'):
 	decision_parameters=['cost','internal_var','phase_out_prob']
 	confidence_parameters=['high_confidence_threshold','confidence_map_slope']
 	
-	fig = plt.figure(figsize=(8,8))
-	ax1 = fig.add_subplot(2,2,1,projection='3d')
-	ax2 = fig.add_subplot(2,2,2)
-	ax3 = fig.add_subplot(2,2,3)
-	ax4 = fig.add_subplot(2,2,4)
+	fig = plt.figure(figsize=(13,10))
+	gs = gridspec.GridSpec(2, 2, width_ratios=[1,1], height_ratios=[8,7])
+	ax1 = fig.add_subplot(gs[0,0],projection='3d')
+	ax2 = fig.add_subplot(gs[0,1])
+	ax3 = fig.add_subplot(gs[1,0])
+	ax4 = fig.add_subplot(gs[1,1])
 	
-	a.controlled_scatter(axes=ax1,scattered_parameters=decision_parameters,merge=None)
-	a.controlled_scatter(axes=ax2,scattered_parameters=confidence_parameters,merge=None)
-	ax2.legend(loc='best', fancybox=True, framealpha=0.5)
+	a.controlled_scatter(axes=ax1,scattered_parameters=decision_parameters,merge='names')
+	a.controlled_scatter(axes=ax2,scattered_parameters=confidence_parameters,merge='names')
+	ax1.set_xlabel(ax1.get_xlabel(),fontsize=22)
+	ax1.set_ylabel(ax1.get_ylabel(),fontsize=22)
+	ax1.set_zlabel(ax1.get_zlabel(),fontsize=22)
+	ax2.set_xlabel(ax2.get_xlabel(),fontsize=22)
+	ax2.set_ylabel(ax2.get_ylabel(),fontsize=22)
+	
+	ax2.legend(loc='upper left', fancybox=True, framealpha=0.5, fontsize=15)
 	decision_hierarchy = mpimg.imread('../../figs/decision_cluster.png')
 	confidence_hierarchy = mpimg.imread('../../figs/confidence_cluster.png')
 	ax3.imshow(decision_hierarchy)
 	ax3.set_axis_off()
 	ax4.imshow(confidence_hierarchy)
 	ax4.set_axis_off()
-	place_axes_subfig_label(ax1,'A',horizontal=-0.05,vertical=1.02,fontsize='24')
-	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
+	place_axes_subfig_label(ax1,'A',horizontal=0.16,vertical=1.02,fontsize='30')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='30')
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
@@ -830,12 +838,16 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	plt.xlabel('T [s]')
 	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
+	vmin = 1e-5
+	
 	cont_pdf = fitter.confidence_mapping_pdf_matrix(fpt,parameters,cont_map)
 	ax3 = plt.subplot(gs[1])
+	if not vmin is None:
+		cont_pdf[cont_pdf<vmin] = vmin
 	plt.imshow(cont_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1],\
-				vmin=1e-5,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
+				vmin=vmin,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
 	plt.xlabel('T [s]')
-	plt.ylabel(r'$M(C(t))$',fontsize='13')
+	plt.ylabel(r'$M(C(g))$',fontsize='13')
 	cbar = plt.colorbar()
 	cbar.set_label('Prob density')
 	
@@ -855,6 +867,96 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
+def fits_cognition(fname='fits_cognition',suffix='.svg'):
+	fname+=suffix
+	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	fitter_plot_handler = None
+	for i,s in enumerate(subjects):
+		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
+				session=s.get_session(),optimizer='cma',suffix='').replace('.pkl','_plot_handler.pkl')
+		try:
+			f = open(handler_fname,'r')
+			temp = pickle.load(f)
+			f.close()
+		except:
+			continue
+		if fitter_plot_handler is None:
+			fitter_plot_handler = temp
+		else:
+			fitter_plot_handler+= temp
+	fitter_plot_handler = fitter_plot_handler.merge('all')
+	
+	experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
+	row_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
+	plot_gs = gridspec.GridSpec(3, 2,left=0.25, right=0.98,hspace=0.20,wspace=0.18)
+	exp_scheme_gs = gridspec.GridSpec(3, 1,left=0., right=0.16,hspace=0.25)
+	plt.figure(figsize=(12,11))
+	fitter_plot_handler.normalize()
+	for experiment in fitter_plot_handler.keys():
+		subj = fitter_plot_handler[experiment]['experimental']
+		model = fitter_plot_handler[experiment]['theoretical']
+		row = row_index[experiment]
+		exp_name = experiment_alias[experiment]
+		
+		axrt = plt.subplot(plot_gs[row-1,0])
+		plt.step(subj['t_array'],subj['rt'][0],'b',label='Subject hit')
+		plt.step(subj['t_array'],subj['rt'][1],'r',label='Subject miss')
+		plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
+		plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		if row==1:
+			plt.title('RT distribution')
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('T [s]')
+		plt.ylabel('Prob density')
+		
+		axconf = plt.subplot(plot_gs[row-1,1])
+		plt.step(subj['c_array'],subj['confidence'][0],'b',label='Subject hit')
+		plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
+		plt.step(subj['c_array'],subj['confidence'][1],'r',label='Subject miss')
+		plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
+		axconf.set_yscale('log')
+		if row==1:
+			plt.title('Confidence distribution')
+		elif row==3:
+			plt.xlabel('Confidence')
+		
+		aximg = plt.subplot(exp_scheme_gs[row-1])
+		
+		exp_scheme = mpimg.imread('../../figs/'+experiment+'.png')
+		aximg.imshow(exp_scheme)
+		aximg.set_axis_off()
+		plt.title(exp_name)
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
+def auxiliary_2AFC_stimuli():
+	x = np.array([np.linspace(-1,1,1000)])
+	y = x.copy().T
+	n1 = np.random.randint(0,2,(x.size,y.size))
+	n2 = np.random.randint(0,2,(x.size,y.size))
+	n3 = np.random.randint(0,2,(x.size,y.size))
+	freq = 3.*np.pi
+	ori = -30.*np.pi/180.
+	grating = np.sin(freq*(np.sin(ori)*x+y))
+	mask = np.sqrt(x**2+y**2)<=1.
+	alpha = 0.15
+
+	target = alpha*grating+(1-alpha)*n1
+	distractor = alpha*n2+(1-alpha)*n3
+	target[np.logical_not(mask)] = np.nan
+	distractor[np.logical_not(mask)] = np.nan
+
+	plt.figure()
+	plt.imshow(target,cmap=plt.get_cmap('gray'))
+	plt.gca().set_axis_off()
+	plt.savefig('../../figs/2AFC_target.png',bbox_inches='tight',dpi=200, transparent=True, pad_inches=0.)
+	plt.figure()
+	plt.imshow(distractor,cmap=plt.get_cmap('gray'))
+	plt.gca().set_axis_off()
+	plt.savefig('../../figs/2AFC_distractor.png',bbox_inches='tight',dpi=200, transparent=True, pad_inches=0.)
+
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -873,6 +975,9 @@ def parse_input():
  '--vexplore_drop_sketch': Plot variance of p(g+dg|g) as a function of time and also plot the drop in mean v_explore
  '--bounds_vs_var': Plot decision bounds as a function of model_var
  '--performance_vs_var_and_cost'
+ '--cluster_hierarchy'
+ '--confidence_mapping'
+ '--fits_cognition'
  
  '--show': Show the matplotlib figures after all have been created
  '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
@@ -880,8 +985,8 @@ def parse_input():
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
-				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierachy':False,\
-				'confidence_mapping':False}
+				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,\
+				'confidence_mapping':False,'fits_cognition':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -906,30 +1011,9 @@ def parse_input():
 
 if __name__=="__main__":
 	opts = parse_input()
-	if opts['bounds_vs_cost']:
-		bounds_vs_cost(suffix=opts['suffix'])
-	if opts['rt_fit']:
-		rt_fit(suffix=opts['suffix'])
-	if opts['value_and_bounds_sketch']:
-		value_and_bounds_sketch(suffix=opts['suffix'])
-	if opts['confidence_sketch']:
-		confidence_sketch(suffix=opts['suffix'])
-	if opts['decision_rt_sketch']:
-		decision_rt_sketch(suffix=opts['suffix'])
-	if opts['bounds_vs_T_n_dt_sketch']:
-		bounds_vs_T_n_dt_sketch(suffix=opts['suffix'])
-	if opts['prior_sketch']:
-		prior_sketch(suffix=opts['suffix'])
-	if opts['vexplore_drop_sketch']:
-		vexplore_drop_sketch(suffix=opts['suffix'])
-	if opts['bounds_vs_var']:
-		bounds_vs_var(suffix=opts['suffix'])
-	if opts['performance_vs_var_and_cost']:
-		performance_vs_var_and_cost(suffix=opts['suffix'])
-	if opts['cluster_hierachy']:
-		cluster_hierachy(suffix=opts['suffix'])
-	if opts['confidence_mapping']:
-		confidence_mapping(suffix=opts['suffix'])
+	for k in opts.keys():
+		if k not in ['suffix','show'] and opts[k]:
+			eval(k+"(suffix=opts['suffix'])")
 	
 	if opts['show']:
 		plt.show(True)
