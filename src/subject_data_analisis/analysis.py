@@ -676,22 +676,57 @@ def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', overr
 def test():
 	a = Analyzer()
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
-	tree = a.cluster(merge='names')
-	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
-	tree.show(tree_style=default_tree_style(mode='r'))
-	tree = a.cluster(merge='sessions')
-	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
-	tree.show(tree_style=default_tree_style(mode='c'))
-	tree = a.cluster()
-	tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
-	tree.show(tree_style=default_tree_style(mode='c'))
-	a.scatter_parameters()
-	a.scatter_parameters(merge='subjects')
-	a.scatter_parameters(merge='sessions')
-	a.set_pooling_func(np.median)
-	a.scatter_parameters(merge='subjects')
-	a.scatter_parameters(merge='sessions')
-	plt.show(True)
+	#~ tree = a.cluster(merge='names')
+	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
+	#~ tree.show(tree_style=default_tree_style(mode='r'))
+	#~ tree = a.cluster(merge='sessions')
+	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
+	#~ tree.show(tree_style=default_tree_style(mode='c'))
+	#~ tree = a.cluster()
+	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
+	#~ tree.show(tree_style=default_tree_style(mode='c'))
+	#~ a.scatter_parameters()
+	#~ a.scatter_parameters(merge='subjects')
+	#~ a.scatter_parameters(merge='sessions')
+	#~ a.set_pooling_func(np.median)
+	#~ a.scatter_parameters(merge='subjects')
+	#~ a.scatter_parameters(merge='sessions')
+	unams,indnams = np.unique(a._names,return_inverse=True)
+	#~ uexps,indexps = np.unique(a._experiments,return_inverse=True)
+	usess,indsess = np.unique(a._sessions,return_inverse=True)
+	
+	for un in unams:
+		inds = a._names==un
+		pars = a._parameters[inds]
+		cost = pars[:,a._parameter_names.index('cost')]
+		internal_var = pars[:,a._parameter_names.index('internal_var')]
+		phase_out_prob = pars[:,a._parameter_names.index('phase_out_prob')]
+		high_confidence_threshold = pars[:,a._parameter_names.index('high_confidence_threshold')]
+		confidence_map_slope = pars[:,a._parameter_names.index('confidence_map_slope')]
+		plt.figure(figsize=(10,10))
+		ax1 = plt.subplot(221)
+		ax2 = plt.subplot(222)
+		ax3 = plt.subplot(223)
+		ax4 = plt.subplot(224)
+		for us,marker in zip(usess,['o','s','D']):
+			inds2 = a._sessions[inds]==us
+			if any(inds2):
+				colors = [{'2AFC':'r','Auditivo':'g','Luminancia':'b'}[str(x).strip('\x00')] for x in a._experiments[inds][inds2]]
+				ax1.scatter(cost[inds2],internal_var[inds2],c=colors,s=20,label=us,marker=marker)
+				ax2.scatter(cost[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
+				ax3.scatter(internal_var[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
+				ax4.scatter(confidence_map_slope[inds2],high_confidence_threshold[inds2],c=colors,s=20,label=us,marker=marker)
+		ax1.set_xlabel('cost')
+		ax1.set_ylabel('internal_var')
+		ax2.set_xlabel('cost')
+		ax2.set_ylabel('phase_out_prob')
+		ax3.set_xlabel('internal_var')
+		ax3.set_ylabel('phase_out_prob')
+		ax3.legend()
+		ax4.set_xlabel('confidence_map_slope')
+		ax4.set_ylabel('high_confidence_threshold')
+		plt.suptitle('Subject: '+str(un))
+		plt.show(True)
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help
@@ -783,6 +818,8 @@ def parse_input():
 	options =  {'test':False,'override':False,'show':False}
 	expecting_key = True
 	key = None
+	if len(sys.argv)==1:
+		options['test'] = True
 	for i,arg in enumerate(sys.argv[1:]):
 		if expecting_key:
 			if arg=='--test':
