@@ -13,6 +13,93 @@ import matplotlib.gridspec as gridspec
 import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools, ete3, sys
 from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
+import scipy.stats as stats
+import utils
+
+def default_tree_layout(node):
+	"""
+	default_tree_layout(node)
+	
+	Takes an ete3.TreeNode instance and sets its default style adding the
+	appropriate TextFaces
+	"""
+	style = ete3.NodeStyle(vt_line_width=3,hz_line_width=3,size=0)
+	if node.is_leaf():
+		portions = node.name.split('_')
+		experiment = None
+		subject = None
+		session = None
+		name_alias = []
+		if not portions[0] in ['subj','ses']:
+			start_ind = 1
+			experiment = portions[0]
+		else:
+			start_ind = 0
+		for key,val in zip(portions[start_ind::2],portions[start_ind+1::2]):
+			if key=='subj':
+				subject = val
+			elif key=='ses':
+				session = val
+		if not experiment is None:
+			bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[experiment]
+			fgcolor = {'2AFC':'#000000','Auditivo':'#000000','Luminancia':'#000000'}[experiment]
+		else:
+			bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[session]
+			fgcolor = {'1':'#000000','2':'#000000','3':'#000000'}[session]
+		if experiment:
+			name_alias.append({'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}[experiment])
+		if subject:
+			name_alias.append('Subj {0}'.format(subject))
+		if session:
+			name_alias.append('Ses {0}'.format(session))
+		name_alias = ' '.join(name_alias)
+		style['vt_line_color'] = bgcolor
+		style['hz_line_color'] = bgcolor
+		style['size'] = 3
+		style['fgcolor'] = bgcolor
+		face = ete3.TextFace(name_alias,fgcolor=fgcolor)
+		#~ face.rotation = -15
+		node.add_face(face, column=0, position="aligned")
+	else:
+		child_leaf_color = None
+		equal_leaf_types = True
+		for child_leaf in (n for n in node.iter_descendants("postorder") if n.is_leaf()):
+			portions = child_leaf.name.split('_')
+			try:
+				bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[portions[0]]
+			except:
+				bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[portions[-1]]
+			if child_leaf_color is None:
+				child_leaf_color = bgcolor
+			elif child_leaf_color!=bgcolor:
+				equal_leaf_types = False
+				break
+		if equal_leaf_types:
+			style['vt_line_color'] = child_leaf_color
+			style['hz_line_color'] = child_leaf_color
+	node.set_style(style)
+
+def default_tree_style(mode='r',title=None):
+	"""
+	default_tree_style(mode='r')
+	
+	mode can be 'r' or 'c'. Returns an ete3.TreeStyle instance with a
+	rectangular or circular display depending on the supplied mode
+	"""
+	tree_style = ete3.TreeStyle()
+	tree_style.layout_fn = default_tree_layout
+	tree_style.show_leaf_name = False
+	tree_style.show_scale = False
+	if not title is None:
+		tree_style.title.add_face(ete3.TextFace(title, fsize=18), column=0)
+	if mode=='r':
+		tree_style.rotation = 90
+		tree_style.branch_vertical_margin = 10
+	else:
+		tree_style.mode = 'c'
+		tree_style.arc_start = 0 # 0 degrees = 3 o'clock
+		tree_style.arc_span = 180
+	return tree_style
 
 class Analyzer():
 	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '', override=False,\
@@ -435,7 +522,7 @@ class Analyzer():
 							'phase_out_prob':r'$p_{po}$',\
 							'high_confidence_threshold':r'$C_{H}$',\
 							'confidence_map_slope':r'$\alpha$',\
-							'dead_time':r'\tau_{c}',\
+							'dead_time':r'$\tau_{c}$',\
 							'dead_time_sigma':r'$\sigma_{c}$'}
 		if not threeD:
 			for m,inds,label in zip(markers,marker_inds,labels):
@@ -555,91 +642,6 @@ class Analyzer():
 		else:
 			raise NotImplementedError('get_branch_span is not implemented for affinity: {0}'.format(self.affinity))
 
-def default_tree_layout(node):
-	"""
-	default_tree_layout(node)
-	
-	Takes an ete3.TreeNode instance and sets its default style adding the
-	appropriate TextFaces
-	"""
-	style = ete3.NodeStyle(vt_line_width=3,hz_line_width=3,size=0)
-	if node.is_leaf():
-		portions = node.name.split('_')
-		experiment = None
-		subject = None
-		session = None
-		name_alias = []
-		if not portions[0] in ['subj','ses']:
-			start_ind = 1
-			experiment = portions[0]
-		else:
-			start_ind = 0
-		for key,val in zip(portions[start_ind::2],portions[start_ind+1::2]):
-			if key=='subj':
-				subject = val
-			elif key=='ses':
-				session = val
-		if not experiment is None:
-			bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[experiment]
-			fgcolor = {'2AFC':'#000000','Auditivo':'#000000','Luminancia':'#000000'}[experiment]
-		else:
-			bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[session]
-			fgcolor = {'1':'#000000','2':'#000000','3':'#000000'}[session]
-		if experiment:
-			name_alias.append({'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}[experiment])
-		if subject:
-			name_alias.append('Subj {0}'.format(subject))
-		if session:
-			name_alias.append('Ses {0}'.format(session))
-		name_alias = ' '.join(name_alias)
-		style['vt_line_color'] = bgcolor
-		style['hz_line_color'] = bgcolor
-		style['size'] = 3
-		style['fgcolor'] = bgcolor
-		face = ete3.TextFace(name_alias,fgcolor=fgcolor)
-		#~ face.rotation = -15
-		node.add_face(face, column=0, position="aligned")
-	else:
-		child_leaf_color = None
-		equal_leaf_types = True
-		for child_leaf in (n for n in node.iter_descendants("postorder") if n.is_leaf()):
-			portions = child_leaf.name.split('_')
-			try:
-				bgcolor = {'2AFC':'#FF0000','Auditivo':'#008000','Luminancia':'#0000FF'}[portions[0]]
-			except:
-				bgcolor = {'1':'#FF0000','2':'#008000','3':'#0000FF'}[portions[-1]]
-			if child_leaf_color is None:
-				child_leaf_color = bgcolor
-			elif child_leaf_color!=bgcolor:
-				equal_leaf_types = False
-				break
-		if equal_leaf_types:
-			style['vt_line_color'] = child_leaf_color
-			style['hz_line_color'] = child_leaf_color
-	node.set_style(style)
-
-def default_tree_style(mode='r',title=None):
-	"""
-	default_tree_style(mode='r')
-	
-	mode can be 'r' or 'c'. Returns an ete3.TreeStyle instance with a
-	rectangular or circular display depending on the supplied mode
-	"""
-	tree_style = ete3.TreeStyle()
-	tree_style.layout_fn = default_tree_layout
-	tree_style.show_leaf_name = False
-	tree_style.show_scale = False
-	if not title is None:
-		tree_style.title.add_face(ete3.TextFace(title, fsize=18), column=0)
-	if mode=='r':
-		tree_style.rotation = 90
-		tree_style.branch_vertical_margin = 10
-	else:
-		tree_style.mode = 'c'
-		tree_style.arc_start = 0 # 0 degrees = 3 o'clock
-		tree_style.arc_span = 180
-	return tree_style
-
 def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
@@ -673,7 +675,120 @@ def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', overr
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		plt.show(True)
 
+def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', override=False,\
+				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
+				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
+	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	parameters,parameter_names,names,sessions,experiments = \
+		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+													  'confidence_map_slope':'all',\
+													  'cost':'all',\
+													  'high_confidence_threshold':'all',\
+													  'dead_time':'all',\
+													  'dead_time_sigma':'all',\
+													  'phase_out_prob':'all'})
+	
+	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
+	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
+	sort_array = np.array(sort_array,dtype=dtype)
+	sort_array.sort(order=['experiment', 'session','name'])
+	parameters = np.array([p.astype(np.float) for p in sort_array['parameters']]).reshape(8,-1,7)
+	names = sort_array['name'].reshape(8,-1)
+	sessions = sort_array['session'].reshape(8,-1)
+	experiments = sort_array['experiment'].reshape(8,-1)
+	
+	gs1 = gridspec.GridSpec(2, 3, left=0.1, right=1)
+	#~ gs2 = gridspec.GridSpec(1, 1, left=0.92, right=0.95)
+	axs = []
+	for i,used_parameters in enumerate(['all','decision','confidence']):
+		if used_parameters=='all':
+			#~ used_parameter_names = parameter_names
+			used_parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope']
+		elif used_parameters=='decision':
+			used_parameter_names = ['cost','internal_var','phase_out_prob']
+		elif used_parameters=='confidence':
+			used_parameter_names = ['high_confidence_threshold','confidence_map_slope']
+		#~ parameter_inds = np.array([p in used_parameter_names for p in parameter_names])
+		parameter_inds = np.array([parameter_names.index(p) for p in used_parameter_names])
+		temp = parameters[:,:,parameter_inds]
+		#~ print(parameters[:2,:2,parameter_inds[0]],temp[:2,:2,0])
+		
+		
+		# Test pearson correlation treating each subject's parameter as an independent observation
+		
+		p1 = temp.reshape((8,-1))
+		valid = np.all(np.logical_not(np.isnan(p1)),axis=0)
+		p1 = p1[:,valid]
+		c1 = np.corrcoef(p1)
+		np.fill_diagonal(c1, np.nan)
+		# Test pearson correlation treating the parameters as categories
+		p2 = temp.reshape((-1,temp.shape[-1])).T
+		valid = np.all(np.logical_not(np.isnan(p2)),axis=0)
+		print(np.sum(valid.astype(np.int)))
+		p2 = p2[:,valid]
+		c2 = np.nan*np.ones((len(p2),len(p2)))
+		pval2 = np.nan*np.ones_like(c2)
+		ps = []
+		for j,pj in enumerate(p2):
+			for k,pk in enumerate(p2[j+1:]):
+				pval = stats.pearsonr(pj,pk)
+				ps.append(pval[1])
+				c2[j,j+k+1] = pval[0]
+				c2[j+k+1,j] = pval[0]
+				pval2[j,j+k+1] = pval[1]
+				pval2[j+k+1,j] = pval[1]
+				
+		ps = utils.holm_bonferroni(np.array(ps))
+		counter = 0
+		for j,pj in enumerate(p2):
+			for k,pk in enumerate(p2[j+1:]):
+				pval2[j,j+k+1] = ps[counter]
+				pval2[j+k+1,j] = ps[counter]
+				counter+=1
+		c2[pval2>0.05] = np.nan
+		
+		exp_alias = {'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}
+		par_alias = {'cost':r'$c$',\
+					'internal_var':r'$\sigma^{2}$',\
+					'phase_out_prob':r'$p_{po}$',\
+					'high_confidence_threshold':r'$C_{H}$',\
+					'confidence_map_slope':r'$\alpha$',\
+					'dead_time':r'$\tau_{c}$',\
+					'dead_time_sigma':r'$\sigma_{c}$'}
+		
+		#~ ax = plt.subplot(gs1[i])
+		ax = plt.subplot(3,3,i+1)
+		plt.imshow(c1,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(p1),0,len(p1)])#,vmin=0,vmax=1)
+		plt.xticks(np.arange(len(p1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])],rotation='vertical')
+		plt.yticks(np.arange(len(p1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])][::-1])
+		plt.title('Pars = '+used_parameters)
+		plt.colorbar()
+		
+		axs.append(ax)
+		
+		#~ ax = plt.subplot(gs1[i+3])
+		ax = plt.subplot(3,3,i+4)
+		plt.imshow(c2,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(p2),0,len(p2)])#,vmin=0,vmax=1)
+		plt.xticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names],rotation='vertical')
+		plt.yticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names][::-1])
+		plt.colorbar()
+		axs.append(ax)
+		
+		#~ ax = plt.subplot(gs1[i+6])
+		ax = plt.subplot(3,3,i+7)
+		plt.imshow(pval2,aspect='auto',cmap='gray',interpolation='none',extent=[0,len(p2),0,len(p2)])
+		plt.xticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names],rotation='vertical')
+		plt.yticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names][::-1])
+		plt.colorbar()
+		axs.append(ax)
+	#~ print(axs)
+	#~ plt.colorbar(ax=axs)
+	plt.show(True)
+
 def test():
+	parameter_correlation()
+	return
+	
 	a = Analyzer()
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
 	#~ tree = a.cluster(merge='names')

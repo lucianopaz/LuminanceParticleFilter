@@ -203,3 +203,46 @@ def average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float):
 				b[index]/=sum_weight
 	b = np.swapaxes(b,0,axis)
 	return b
+
+def holm_bonferroni(p_in,alpha=None):
+	"""
+	holm_bonferroni(p_in,alpha=None)
+	Correct the p values for multiple tests using holm-bonferroni criteria
+
+	Inputs:
+	 p_in:  a 1D numpy array with the original p values
+	 alpha: Optional input. Default is None. If not None, it must be a float
+			that specifies the admisibility for the test given by the
+			corrected p values.
+
+	Outputs:
+	 p2: The corrected p values
+	 h:  If alpha is not None, the output is a tuple formed by (p2,h) where
+		 h is an array of bools that is true or false indicating if the
+		 corrected p value is lower than the supplied alpha or not
+	"""
+	p = p_in.flatten()
+	sort_inds = np.argsort(p)
+	reverse_sort_inds = np.zeros_like(sort_inds)
+	for i,si in enumerate(sort_inds):
+		reverse_sort_inds[si] = i
+	p = p[sort_inds]
+	
+	p2 = np.zeros_like(p)
+	for i in range(len(p)):
+		temp = (len(p)-np.arange(i+1))*p[:i+1]
+		temp[temp>1] = 1.
+		p2[i] = np.max(temp)
+	p2 = p2[reverse_sort_inds]
+	if alpha:
+		alpha = float(alpha)
+		comparison = p > (alpha/(len(p)-np.arange(len(p))));
+		if np.all(comparison):
+			h = np.zeros_like(p,dtype=np.bool)
+		else:
+			h = np.ones_like(p,dtype=np.bool)
+			k = comparison.nonzero()[0][0]
+			h[k:] = False
+		return p2,h
+	else:
+		return p2
