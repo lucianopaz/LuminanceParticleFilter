@@ -213,7 +213,7 @@ class Analyzer():
 		
 		auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
 		
-		key = 'experiment_'+fitter.experiment+'subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
+		key = 'experiment_'+fitter.experiment+'_subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
 		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'full_merit':full_merit,\
 					'full_confidence_merit':full_confidence_merit,'confidence_only_merit':confidence_only_merit,\
 					'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),\
@@ -680,13 +680,15 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
 	parameters,parameter_names,names,sessions,experiments = \
-		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
-													  'confidence_map_slope':'all',\
-													  'cost':'all',\
-													  'high_confidence_threshold':'all',\
-													  'dead_time':'all',\
-													  'dead_time_sigma':'all',\
-													  'phase_out_prob':'all'})
+		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
+	#~ parameters,parameter_names,names,sessions,experiments = \
+		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+													  #~ 'confidence_map_slope':'all',\
+													  #~ 'cost':'all',\
+													  #~ 'high_confidence_threshold':'all',\
+													  #~ 'dead_time':'all',\
+													  #~ 'dead_time_sigma':'all',\
+													  #~ 'phase_out_prob':'all'})
 	
 	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
 	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
@@ -697,97 +699,252 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 	sessions = sort_array['session'].reshape(8,-1)
 	experiments = sort_array['experiment'].reshape(8,-1)
 	
-	gs1 = gridspec.GridSpec(2, 3, left=0.1, right=1)
-	#~ gs2 = gridspec.GridSpec(1, 1, left=0.92, right=0.95)
-	axs = []
+	gs1 = gridspec.GridSpec(2, 3, left=0.05, right=0.85)
+	gs2 = gridspec.GridSpec(2, 1, left=0.88, right=0.90)
+	c1s = []
+	c2s = []
+	used_parameter_names_dict = {\
+			'all': copy.copy(parameter_names),\
+			#~ 'all': ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],\
+			'decision': ['cost','internal_var','phase_out_prob'],\
+			'confidence': ['high_confidence_threshold','confidence_map_slope']}
 	for i,used_parameters in enumerate(['all','decision','confidence']):
-		if used_parameters=='all':
-			#~ used_parameter_names = parameter_names
-			used_parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope']
-		elif used_parameters=='decision':
-			used_parameter_names = ['cost','internal_var','phase_out_prob']
-		elif used_parameters=='confidence':
-			used_parameter_names = ['high_confidence_threshold','confidence_map_slope']
-		#~ parameter_inds = np.array([p in used_parameter_names for p in parameter_names])
+		used_parameter_names = used_parameter_names_dict[used_parameters]
 		parameter_inds = np.array([parameter_names.index(p) for p in used_parameter_names])
 		temp = parameters[:,:,parameter_inds]
-		#~ print(parameters[:2,:2,parameter_inds[0]],temp[:2,:2,0])
-		
 		
 		# Test pearson correlation treating each subject's parameter as an independent observation
-		
 		p1 = temp.reshape((8,-1))
-		valid = np.all(np.logical_not(np.isnan(p1)),axis=0)
-		p1 = p1[:,valid]
-		c1 = np.corrcoef(p1)
-		np.fill_diagonal(c1, np.nan)
+		c1,pval1 = utils.corrcoef(p1,method='pearson')
+		#~ np.fill_diagonal(c1, np.nan)
+		#~ np.fill_diagonal(pval1, np.nan)
+		correct_rho_pval(pval1)
+		c1[pval1>0.05] = np.nan
+		c1s.append(c1)
+		
 		# Test pearson correlation treating the parameters as categories
 		p2 = temp.reshape((-1,temp.shape[-1])).T
-		valid = np.all(np.logical_not(np.isnan(p2)),axis=0)
-		print(np.sum(valid.astype(np.int)))
-		p2 = p2[:,valid]
-		c2 = np.nan*np.ones((len(p2),len(p2)))
-		pval2 = np.nan*np.ones_like(c2)
-		ps = []
-		for j,pj in enumerate(p2):
-			for k,pk in enumerate(p2[j+1:]):
-				pval = stats.pearsonr(pj,pk)
-				ps.append(pval[1])
-				c2[j,j+k+1] = pval[0]
-				c2[j+k+1,j] = pval[0]
-				pval2[j,j+k+1] = pval[1]
-				pval2[j+k+1,j] = pval[1]
-				
-		ps = utils.holm_bonferroni(np.array(ps))
-		counter = 0
-		for j,pj in enumerate(p2):
-			for k,pk in enumerate(p2[j+1:]):
-				pval2[j,j+k+1] = ps[counter]
-				pval2[j+k+1,j] = ps[counter]
-				counter+=1
+		c2,pval2 = utils.corrcoef(p2,method='pearson')
+		#~ np.fill_diagonal(c2, np.nan)
+		#~ np.fill_diagonal(pval2, np.nan)
+		correct_rho_pval(pval2)
 		c2[pval2>0.05] = np.nan
+		c2s.append(c2)
 		
-		exp_alias = {'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}
-		par_alias = {'cost':r'$c$',\
-					'internal_var':r'$\sigma^{2}$',\
-					'phase_out_prob':r'$p_{po}$',\
-					'high_confidence_threshold':r'$C_{H}$',\
-					'confidence_map_slope':r'$\alpha$',\
-					'dead_time':r'$\tau_{c}$',\
-					'dead_time_sigma':r'$\sigma_{c}$'}
+	exp_alias = {'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}
+	par_alias = {'cost':r'$c$',\
+				'internal_var':r'$\sigma^{2}$',\
+				'phase_out_prob':r'$p_{po}$',\
+				'high_confidence_threshold':r'$C_{H}$',\
+				'confidence_map_slope':r'$\alpha$',\
+				'dead_time':r'$\tau_{c}$',\
+				'dead_time_sigma':r'$\sigma_{c}$'}
+	
+	vmin1 = np.nanmin(np.array([np.nanmin(c) for c in c1s]))
+	vmin2 = np.nanmin(np.array([np.nanmin(c) for c in c2s]))
+	vmax1 = np.nanmax(np.array([np.nanmax(c) for c in c1s]))
+	vmax2 = np.nanmax(np.array([np.nanmax(c) for c in c2s]))
+	plt.figure(figsize=(14,10))
+	for i,used_parameters in enumerate(['all','decision','confidence']):
+		used_parameter_names = used_parameter_names_dict[used_parameters]
 		
-		#~ ax = plt.subplot(gs1[i])
-		ax = plt.subplot(3,3,i+1)
-		plt.imshow(c1,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(p1),0,len(p1)])#,vmin=0,vmax=1)
-		plt.xticks(np.arange(len(p1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])],rotation='vertical')
-		plt.yticks(np.arange(len(p1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])][::-1])
+		c1 = c1s[i]
+		c2 = c2s[i]
+		ax = plt.subplot(gs1[i])
+		#~ ax = plt.subplot(2,3,i+1)
+		plt.imshow(c1,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(c1),0,len(c1)],vmin=vmin1,vmax=vmax1)
+		plt.xticks(np.arange(len(c1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])],rotation=60)
+		plt.yticks(np.arange(len(c1))+0.5,[exp_alias[str(e)]+' '+str(s) for e,s in zip(experiments[:,0],sessions[:,0])][::-1])
 		plt.title('Pars = '+used_parameters)
-		plt.colorbar()
+		if i==0:
+			plt.colorbar(cax=plt.subplot(gs2[0]))
 		
-		axs.append(ax)
+		ax = plt.subplot(gs1[i+3])
+		#~ ax = plt.subplot(2,3,i+4)
+		plt.imshow(c2,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(c2),0,len(c2)],vmin=vmin2,vmax=vmax2)
+		plt.xticks(np.arange(len(c2))+0.5,[par_alias[p] for p in used_parameter_names],rotation=60,fontsize=14)
+		plt.yticks(np.arange(len(c2))+0.5,[par_alias[p] for p in used_parameter_names][::-1],fontsize=14)
+		if i==0:
+			plt.colorbar(cax=plt.subplot(gs2[1]))
+	plt.show(True)
+
+def correct_rho_pval(pvals):
+	ps = []
+	for rowind,row in enumerate(pvals):
+		for pval in pvals[rowind+1:]:
+			ps.append(pval)
+	ps = utils.holm_bonferroni(np.array(ps))
+	counter = 0
+	for j,pj in enumerate(pvals):
+		for k,pk in enumerate(pvals[j+1:]):
+			pvals[j,j+k+1] = ps[counter]
+			pvals[j+k+1,j] = ps[counter]
+			counter+=1
+
+def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
+				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
+				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
+	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	parameters,parameter_names,names,sessions,experiments = \
+		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
+	#~ parameters,parameter_names,names,sessions,experiments = \
+		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+													  #~ 'confidence_map_slope':'all',\
+													  #~ 'cost':'all',\
+													  #~ 'high_confidence_threshold':'all',\
+													  #~ 'dead_time':'all',\
+													  #~ 'dead_time_sigma':'all',\
+													  #~ 'phase_out_prob':'all'})
+	
+	subj_rt = []
+	subj_hit_rt = []
+	subj_miss_rt = []
+	subj_perf = []
+	subj_conf = []
+	subj_hit_conf = []
+	subj_miss_conf = []
+	subj_median_conf = []
+	model_rt = []
+	model_hit_rt = []
+	model_miss_rt = []
+	model_perf = []
+	model_conf = []
+	model_hit_conf = []
+	model_miss_conf = []
+	model_median_conf = []
+	experiments = []
+	sessions = []
+	names = []
+	summary = a.summary
+	subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	for k in summary['theoretical'].keys():
+		vals = summary['theoretical'][k]
+		subj_key = '_'.join(['experiment_'+vals['experiment'],'subject_'+str(vals['name']),'session_'+str(vals['session'])])
+		subj_vals = summary['experimental'][subj_key]
+		try:
+			names.append(int(vals['name']))
+		except:
+			names.append(vals['name'])
+		try:
+			sessions.append(int(vals['session']))
+		except:
+			sessions.append(vals['session'])
+		experiments.append(vals['experiment'])
+		subj_rt.append(np.array([subj_vals['means']['rt'],subj_vals['stds']['rt']]))
+		subj_hit_rt.append(np.array([subj_vals['means']['hit_rt'],subj_vals['stds']['hit_rt']]))
+		subj_miss_rt.append(np.array([subj_vals['means']['miss_rt'],subj_vals['stds']['miss_rt']]))
+		subj_perf.append(np.array([subj_vals['means']['performance'],subj_vals['stds']['performance']]))
+		subj_conf.append(np.array([subj_vals['means']['confidence'],subj_vals['stds']['confidence']]))
+		subj_hit_conf.append(np.array([subj_vals['means']['hit_confidence'],subj_vals['stds']['hit_confidence']]))
+		subj_miss_conf.append(np.array([subj_vals['means']['miss_confidence'],subj_vals['stds']['miss_confidence']]))
+		model_rt.append(vals['rt'])
+		model_hit_rt.append(vals['hit_rt'])
+		model_miss_rt.append(vals['miss_rt'])
+		model_perf.append(vals['performance'])
+		model_conf.append(vals['confidence'])
+		model_hit_conf.append(vals['hit_confidence'])
+		model_miss_conf.append(vals['miss_confidence'])
 		
-		#~ ax = plt.subplot(gs1[i+3])
-		ax = plt.subplot(3,3,i+4)
-		plt.imshow(c2,aspect='auto',cmap='jet',interpolation='none',extent=[0,len(p2),0,len(p2)])#,vmin=0,vmax=1)
-		plt.xticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names],rotation='vertical')
-		plt.yticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names][::-1])
-		plt.colorbar()
-		axs.append(ax)
-		
-		#~ ax = plt.subplot(gs1[i+6])
-		ax = plt.subplot(3,3,i+7)
-		plt.imshow(pval2,aspect='auto',cmap='gray',interpolation='none',extent=[0,len(p2),0,len(p2)])
-		plt.xticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names],rotation='vertical')
-		plt.yticks(np.arange(len(p2))+0.5,[par_alias[p] for p in used_parameter_names][::-1])
-		plt.colorbar()
-		axs.append(ax)
-	#~ print(axs)
-	#~ plt.colorbar(ax=axs)
+		subject = [s for s in subjects if s.experiment==vals['experiment'] and s.get_name()==str(vals['name']) and s.get_session()==str(vals['session'])][0]
+		data = subject.load_data()
+		subj_median_conf.append(np.median(data[:,3]))
+		model_median_conf.append(vals['parameters']['high_confidence_threshold'])
+	subj_rt = np.array(subj_rt)
+	subj_hit_rt = np.array(subj_hit_rt)
+	subj_miss_rt = np.array(subj_miss_rt)
+	subj_conf = np.array(subj_conf)
+	subj_hit_conf = np.array(subj_hit_conf)
+	subj_miss_conf = np.array(subj_miss_conf)
+	subj_perf = np.array(subj_perf)
+	plt.figure(figsize=(14,10))
+	plt.subplot(241)
+	plt.errorbar(model_rt,subj_rt[:,0],subj_rt[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = list(plt.gca().get_ylim())
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.ylabel('Subject')
+	plt.title('Mean RT')
+	
+	plt.subplot(242)
+	plt.errorbar(model_hit_rt,subj_hit_rt[:,0],subj_hit_rt[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.title('Mean hit RT')
+	
+	plt.subplot(243)
+	plt.errorbar(model_miss_rt,subj_miss_rt[:,0],subj_miss_rt[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.title('Mean miss RT')
+	
+	plt.subplot(244)
+	plt.errorbar(model_perf,subj_perf[:,0],subj_perf[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.title('Mean performance')
+	
+	plt.subplot(234)
+	plt.errorbar(model_conf,subj_conf[:,0],subj_conf[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.ylabel('Subject')
+	plt.xlabel('Model')
+	plt.title('Mean Confidence')
+	
+	plt.subplot(235)
+	plt.errorbar(model_hit_conf,subj_hit_conf[:,0],subj_hit_conf[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.title('Mean hit Confidence')
+	plt.xlabel('Model')
+	
+	plt.subplot(236)
+	plt.errorbar(model_miss_conf,subj_miss_conf[:,0],subj_miss_conf[:,1],marker='.',linestyle='')
+	xlim = list(plt.gca().get_xlim())
+	ylim = plt.gca().get_ylim()
+	xlim[0] = min([xlim[0],ylim[0]])
+	xlim[1] = max([xlim[1],ylim[1]])
+	plt.plot(xlim,xlim,'--r')
+	plt.gca().set_xlim(xlim)
+	plt.gca().set_ylim(xlim)
+	plt.title('Mean miss Confidence')
+	plt.xlabel('Model')
+	
 	plt.show(True)
 
 def test():
-	parameter_correlation()
+	binary_confidence_analysis()
 	return
+	parameter_correlation()
 	
 	a = Analyzer()
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})

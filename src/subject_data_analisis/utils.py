@@ -4,6 +4,7 @@
 from __future__ import division
 import numpy as np
 from scipy import optimize
+from scipy import stats
 import math
 
 
@@ -229,14 +230,15 @@ def holm_bonferroni(p_in,alpha=None):
 	p = p[sort_inds]
 	
 	p2 = np.zeros_like(p)
-	for i in range(len(p)):
-		temp = (len(p)-np.arange(i+1))*p[:i+1]
+	m = np.sum(np.logical_not(np.isnan(p)).astype(np.int))
+	for i in range(m):
+		temp = (m-np.arange(i+1))*p[:i+1]
 		temp[temp>1] = 1.
 		p2[i] = np.max(temp)
 	p2 = p2[reverse_sort_inds]
 	if alpha:
 		alpha = float(alpha)
-		comparison = p > (alpha/(len(p)-np.arange(len(p))));
+		comparison = p > (alpha/(m-np.arange(m)));
 		if np.all(comparison):
 			h = np.zeros_like(p,dtype=np.bool)
 		else:
@@ -246,3 +248,82 @@ def holm_bonferroni(p_in,alpha=None):
 		return p2,h
 	else:
 		return p2
+
+def corrcoef(a,b=None,axis=0,method='pearson',nanhandling='pairwise'):
+	"""
+	corrcoef(a,b=None,axis=0,method='pearson',nanhandling='pairwise')
+	
+	Input:
+	 a:           Mandatory input array. Can be a 1D or 2D numpy ndarray.
+	              The different dimensions of 'a' represent the observed
+	              data sample, and each of the variables. This representation
+	              depends on the supplied axis
+	 b:           Optional input array. If 'b' is None, it is ignored. If
+	              it is not None, 'b' is treated as an additional variable
+	              of the array 'a'.
+	 axis:        Default is 0. axis determines which dimension holds the
+	              data samples. If axis is 0, the rows are assumed to hold
+	              separate data samples, and the columns are assumed to
+	              represent different variables associated to each sample.
+	              If axis is 1, this assumption is transposed. If axis is
+	              None, 'a' and 'b' are flattened before computing the
+	              correlation coeficient.
+	 method:      A string indicating the method that will be used to
+	              compute the correlation. Can be 'pearson', 'spearman'
+	              or 'kendall'. Refer to the functions pearsonr, spearmanr
+	              and kendalltau defined in scipy.stats for further
+	              details
+	 nanhandling: Determines how nans are handled while computing the
+	              correlation coeficients. Can be None, 'pairwise' or
+	              'complete'. If None, no special handling is done before
+	              attempting to compute the correlation coefficients.
+	              If 'complete', all the data observations that hold at least
+	              one variable which is nan are discarded before computing
+	              the correlation coefficients. If 'pairwise', rho[i,j] is
+	              computed using rows with no NaN values in the variables
+	              i or j.
+	"""
+	if axis is None:
+		a = a.flatten()
+		if not b is None:
+			b = b.flatten()
+		axis=0
+	if a.ndim>2:
+		raise ValueError("a must be a 1D or 2D numpy array")
+	if not b is None:
+		if b.ndim>2:
+			raise ValueError("b must be None or a 1D or 2D numpy array")
+		if axis==0:
+			a = np.hstack((a,b))
+		else:
+			a = np.vstack((a,b)).T
+	try:
+		calculator = {'pearson':stats.pearsonr,'spearman':stats.spearmanr,'kendall':stats.kendalltau}[str(method).lower()]
+	except:
+		raise ValueError('Supplied method must can be "pearson", "spearman" or "kendall". Got {0} instead'.format(method))
+	
+	rho = np.zeros((len(a),len(a)))
+	pval = np.zeros((len(a),len(a)))
+	if nanhandling is None:
+		for i,ai in enumerate(a):
+			rho[i,i],pval[i,i] = calculator(ai,ai)
+			for j,aj in enumerate(a[i+1:]):
+				rho[j+i+1,i],pval[j+i+1,i] = rho[i,j+i+1],pval[i,j+i+1] = calculator(ai,aj)
+	else:
+		nanhandling = str(nanhandling).lower()
+		if nanhandling=='pairwise':
+			for i,ai in enumerate(a):
+				valid = np.logical_not(np.isnan(ai))
+				rho[i,i],pval[i,i] = calculator(ai[valid],ai[valid])
+				for j,aj in enumerate(a[i+1:]):
+					valid = np.logical_not(np.logical_or(np.isnan(ai),np.isnan(aj)))
+					rho[j+i+1,i],pval[j+i+1,i] = rho[i,j+i+1],pval[i,j+i+1] = calculator(ai[valid],aj[valid])
+		elif nanhandling=='complete':
+			valid = np.logical_not(np.any(np.isnan(a),axis=0))
+			for i,ai in enumerate(a):
+				rho[i,i],pval[i,i] = calculator(ai,ai)
+				for j,aj in enumerate(a[i+1:]):
+					rho[j+i+1,i],pval[j+i+1,i] = rho[i,j+i+1],pval[i,j+i+1] = calculator(ai[valid],aj[valid])
+		else:
+			raise ValueError("nanhandling must be None, 'complete' or 'pairwise'. Got {0} instead.".format(nanhandling))
+	return rho,pval
