@@ -1,7 +1,7 @@
 function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kernel_std] =...
     kernels(tfluct,dfluct,selection,confidence,is_binary_confidence,locked_on_onset,RT_ind)
 % Compute psychophysical kernels from target and distractor fluctuations.
-% The function allows you to compute then locked to stimulus onset or to
+% The function allows you to compute them locked to stimulus onset or to
 % decision time.
 % 
 % Sintax:
@@ -18,7 +18,11 @@ function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kerne
 %       indicating low (1) or high (2) confidence, or be a real value
 %       probability of high confidence reports.
 %   is_binary_confidence: Boolean indicating if the confidence input is a
-%       binary confidence value or not (default true)
+%       binary confidence value or not (default true). WARNING! This
+%       function is experimental for non binary confidence reports. For
+%       continuous confidence reports, it assumes that each value
+%       represents the probability of responding high confidence, which can
+%       be a wrong interpretation of the data.
 %   locked_on_onset: Boolean indicating if the kernels are to be computed
 %       locked on stimulus onset (taken to be the first time step). Default
 %       if true.
@@ -36,6 +40,8 @@ function [decision_kernel,confidence_kernel,decision_kernel_std,confidence_kerne
 %    confidence_kernel, confidence_kernel_std: 2xM vectors analogous to the
 %       decision_kernel but containg the information on the confidence
 %       kernel.
+%
+% Author: Luciano Paz (July 2015)
 
     % Default input values
     if nargin<6

@@ -758,6 +758,7 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 		plt.title('Pars = '+used_parameters)
 		if i==0:
 			plt.colorbar(cax=plt.subplot(gs2[0]))
+			plt.ylabel('Task correlation')
 		
 		ax = plt.subplot(gs1[i+3])
 		#~ ax = plt.subplot(2,3,i+4)
@@ -766,6 +767,7 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 		plt.yticks(np.arange(len(c2))+0.5,[par_alias[p] for p in used_parameter_names][::-1],fontsize=14)
 		if i==0:
 			plt.colorbar(cax=plt.subplot(gs2[1]))
+			plt.ylabel('Parameter correlation')
 	plt.show(True)
 
 def correct_rho_pval(pvals):
@@ -942,9 +944,9 @@ def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix
 	plt.show(True)
 
 def test():
-	binary_confidence_analysis()
-	return
 	parameter_correlation()
+	return
+	binary_confidence_analysis()
 	
 	a = Analyzer()
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
