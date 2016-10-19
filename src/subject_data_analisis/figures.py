@@ -826,7 +826,7 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	xytext_cont = [fitter.dp.t[np.argmin(np.abs(cont_map[0]-0.2))+2],0.2]
 	
 	fpt = fitter.dp.rt(0,fitter.dp.xbounds())
-	bin_pdf = fitter.confidence_mapping_pdf_matrix(fpt,parameters,bin_map)
+	bin_pdf = fitter.rt_confidence_pdf(fpt,parameters,bin_map)
 	t = np.arange(0,bin_pdf.shape[-1],dtype=np.float)*fitter.dp.dt
 	
 	gs = gridspec.GridSpec(2, 1,left=0.54, right=0.94,hspace=0.25)
@@ -840,7 +840,7 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	
 	vmin = 1e-5
 	
-	cont_pdf = fitter.confidence_mapping_pdf_matrix(fpt,parameters,cont_map)
+	cont_pdf = fitter.rt_confidence_pdf(fpt,parameters,cont_map)
 	ax3 = plt.subplot(gs[1])
 	if not vmin is None:
 		cont_pdf[cont_pdf<vmin] = vmin

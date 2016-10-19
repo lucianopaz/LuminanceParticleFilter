@@ -25,8 +25,16 @@ all_model_rt_low = {'2AFC':{'t':[],'pdf':[]},'Auditivo':{'t':[],'pdf':[]},'Lumin
 n = {'2AFC':0,'Auditivo':0,'Luminancia':0}
 edges = {'2AFC':np.linspace(0,6,51),'Auditivo':np.linspace(0,6,51),'Luminancia':np.linspace(0,1,51)}
 for s in subjects:
-	fitter_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
-				session=s.get_session(),optimizer='cma',suffix='')
+	#~ if s.get_name()!='12':
+		#~ continue
+	#~ fitter_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
+				#~ session=s.get_session(),optimizer='cma',suffix='')
+	#~ fitter_fname = fits.Fitter_filename(experiment=s.experiment,method='full_binary_confidence',name=s.get_name(),
+				#~ session=s.get_session(),optimizer='Nelder-Mead',suffix='')
+	fitter_fname = fits.Fitter_filename(experiment=s.experiment,method='full_binary_confidence',name=s.get_name(),
+				session=s.get_session(),optimizer='basinhopping',suffix='',confidence_map_method='belief')
+	#~ fitter_fname = fits.Fitter_filename(experiment=s.experiment,method='binary_confidence_only',name=s.get_name(),
+				#~ session=s.get_session(),optimizer='basinhopping',suffix='',confidence_map_method='belief')
 	f = open(fitter_fname,'r')
 	fitter = pickle.load(f)
 	f.close()
@@ -59,6 +67,11 @@ for s in subjects:
 	all_model_rt_high[s.experiment]['pdf'].append(binary_confidence_pdf[1]*float(len(perf)))
 	all_model_rt_low[s.experiment]['pdf'].append(binary_confidence_pdf[0]*float(len(perf)))
 	n[s.experiment]+= float(len(perf))
+	#~ plt.step(edges[s.experiment],np.hstack((rt_high/normalization,(rt_high/normalization)[-1])),'forestgreen',label='Subject high',where='post')
+	#~ plt.step(edges[s.experiment],np.hstack((rt_low/normalization,(rt_low/normalization)[-1])),'mediumpurple',label='Subject low',where='post')
+	#~ plt.plot(t,binary_confidence_pdf[1],'forestgreen',linewidth=3,label='Theoretical high')
+	#~ plt.plot(t,binary_confidence_pdf[0],'mediumpurple',linewidth=3,label='Theoretical low')
+	#~ plt.show(True)
 
 plt.figure()
 experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
@@ -78,11 +91,11 @@ for i,k in enumerate(all_rt_high.keys()):
 		model_low[:len(l)]+=l
 	
 	rt_centers = np.array([0.5*(e1+e0) for e1,e0 in zip(edges[k][1:],edges[k][:-1])])
-	ax = plt.subplot(plot_gs[row_index[k]-1])
-	all_rt_high[k] = np.array(all_rt_high[k])
-	all_rt_low[k] = np.array(all_rt_low[k])
-	plt.step(rt_centers,np.nansum(all_rt_high[k]/n[k],axis=0),'forestgreen',label='Subject high')
-	plt.step(rt_centers,np.nansum(all_rt_low[k]/n[k],axis=0),'mediumpurple',label='Subject low')
+	ax = plt.subplot(plot_gs[row_index[k]-1,0])
+	all_rt_high[k] = np.nansum(np.array(all_rt_high[k])/n[k],axis=0)
+	all_rt_low[k] = np.nansum(np.array(all_rt_low[k])/n[k],axis=0)
+	plt.step(edges[k],np.hstack((all_rt_high[k],all_rt_high[k][-1])),'forestgreen',label='Subject high',where='post')
+	plt.step(edges[k],np.hstack((all_rt_low[k],all_rt_low[k][-1])),'mediumpurple',label='Subject low',where='post')
 	plt.plot(t,model_high/n[k],'forestgreen',linewidth=3,label='Theoretical high')
 	plt.plot(t,model_low/n[k],'mediumpurple',linewidth=3,label='Theoretical low')
 	ax.set_xlim(xlim[k])
@@ -90,6 +103,19 @@ for i,k in enumerate(all_rt_high.keys()):
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	elif row_index[k]==3:
 		plt.xlabel('RT [s]')
+	
+	#~ ax = plt.subplot(plot_gs[row_index[k]-1,1])
+	#~ high_ratio = all_rt_high[k]/(all_rt_high[k]+all_rt_low[k])
+	#~ high_ratio_std = np.sqrt(high_ratio*(1-high_ratio)/(all_rt_high[k]+all_rt_low[k])/n[k])
+	#~ high_ratio_std[high_ratio_std<1e-2] = 1e-2
+	#~ plt.plot(rt_centers,high_ratio,color='b',label='Subject high')
+	#~ plt.fill_between(rt_centers,high_ratio+high_ratio_std,high_ratio-high_ratio_std,color='b',alpha=0.4,label='Subject high ratio')
+	#~ plt.plot(t,model_high/(model_high+model_low),'r',linewidth=2,label='Theoretical high ratio')
+	#~ ax.set_xlim(xlim[k])
+	#~ if row_index[k]==1:
+		#~ plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	#~ elif row_index[k]==3:
+		#~ plt.xlabel('RT [s]')
 	
 	aximg = plt.subplot(exp_scheme_gs[row_index[k]-1])
 	exp_scheme = mpimg.imread('../../figs/'+k+'.png')

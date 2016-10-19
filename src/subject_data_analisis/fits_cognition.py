@@ -121,6 +121,12 @@ def confidence_likelihood(confidence_pdf,confidence):
 	return prob
 
 def load_Fitter_from_file(fname):
+	"""
+	load_Fitter_from_file(fname)
+	
+	Return the Fitter instance that is stored in the file with name fname.
+	
+	"""
 	f = open(fname,'r')
 	fitter = pickle.load(f)
 	f.close()
@@ -140,6 +146,48 @@ class Fitter:
 	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
 				high_confidence_mapping_method='log_odds'):
+		"""
+		Fitter(subjectSession,time_units='seconds',method='full',optimizer='cma',\
+				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
+				high_confidence_mapping_method='log_odds')
+		
+		Construct a Fitter instance that interfaces the fitting procedure
+		of the model's likelihood of the observed subjectSession data.
+		Input:
+			subjectSession: A SubjectSession instance from data_io_cognition
+				package
+			time_units: Can be 'seconds' or 'milliseconds' and specifies
+				the time units to use for the model fits
+			method: Specifies the merit function to use for the fits. Can
+				be 'full' (likelihood of the join RT and performance data),
+				'confidence_only' (likelihood of the confidence),
+				'full_confidence' (likelihood of the joint RT, performance
+				and confidence data), 'binary_confidence_only' (likelihood
+				of joint RT and confidence above or below the median confidence)
+				or 'full_binary_confidence' (likelihood of joint RT,
+				performance and confidence above or below the median confidence).
+			optimizer: The optimizer used for the fitting procedure.
+				Available optimizers are 'cma', scipy.optimize.basinhopping
+				and scipy.optimize methods called from minimize and
+				minimize_scalar.
+			decisionPolicyKwArgs: A dict of kwargs to use for the construction
+				of the used DecisionPolicy instance
+			suffix: A string suffix to append to the saved filenames
+			rt_cutoff: A float or None that is used in set_rt_cutoff
+			confidence_partition: The number of bins used to compute the
+				confidence histograms
+			high_confidence_mapping_method: A string that identifies the
+				high confidence mapping method. Available values are
+				'log_odds' and 'belief'. If 'log_odds' the confidence
+				mapping is the composition of the log odds of the decision
+				bounds in g space (see cost_time DecisionPolicy decision
+				bounds) with a sigmoid. If 'belief', the confidence mapping
+				is a linear mapping of the rescaled decision bounds in g
+				space (the rescaling makes high confidence values (1 for
+				hits and 0 for misses) equal to 1 and g=0.5 equal to 0).
+				This linear mapping is also clipped to the interval [0,1].
+		
+		"""
 		logging.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
 						experiment=subjectSession.experiment,name=subjectSession.name,session=subjectSession.session))
 		self.raw_data_dir = raw_data_dir
@@ -161,6 +209,11 @@ class Fitter:
 	
 	# Setters
 	def set_experiment(self,experiment):
+		"""
+		self.set_experiment(self)
+		
+		Set the Fitter's experiment
+		"""
 		self.experiment = str(experiment)
 		if self.experiment=='Luminancia':
 			self._distractor = 50.
@@ -173,6 +226,15 @@ class Fitter:
 		logging.debug('Setted Fitter experiment = %s',self.experiment)
 	
 	def set_time_units(self,time_units='seconds'):
+		"""
+		self.set_time_units(self,time_units='seconds')
+		
+		This function sets the Fitter instance's time units. The input
+		time_units can only be 'seconds' or 'milliseconds'. This function
+		also sets the time variables tp, ISI, T, iti and dt that are
+		experiment dependent.
+		
+		"""
 		if time_units not in ('seconds','milliseconds'):
 			raise ValueError("Invalid time units '{0}'. Available units are seconds and milliseconds".format(units))
 		self.time_units = time_units
@@ -238,6 +300,15 @@ class Fitter:
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
 	
 	def set_rt_cutoff(self,rt_cutoff=None):
+		"""
+		self.set_rt_cutoff(self)
+		
+		Set a cutoff for too long response times. If rt_cutoff is None,
+		it is set to 14 seconds. If the experiment is Luminancia and the
+		cutoff is larger than 1 second, then rt_cutoff is chopped down
+		to 1 second. The trials with RT larger than rt_cutoff are ignored.
+		
+		"""
 		if rt_cutoff is None:
 			rt_cutoff = 14.
 		else:
@@ -250,6 +321,17 @@ class Fitter:
 		logging.debug('Setted rt_cutoff = %f',self.rt_cutoff)
 	
 	def set_subjectSession_data(self,subjectSession):
+		"""
+		self.set_subjectSession_data(subjectSession)
+		
+		This function loads the data from the subjectSession and stores
+		the relevant information for the fitting process, whice are the:
+		response times, performance, confidence and observed contrasts.
+		This function also extracts the prior contrast distribution
+		variance, the min RT and the max RT that are used during the
+		fitting process.
+		
+		"""
 		self.subjectSession = subjectSession
 		self._subjectSession_state = subjectSession.__getstate__()
 		logging.debug('Setted Fitter _subjectSession_state')
@@ -294,13 +376,32 @@ class Fitter:
 		self._prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
 		logging.debug('Setted Fitter _prior_mu_var = %f',self._prior_mu_var)
 	
-	def set_decisionPolicyKwArgs(self,decisionPolicyKwArgs):
+	def set_decisionPolicyKwArgs(self,decisionPolicyKwArgs={}):
+		"""
+		self.set_decisionPolicyKwArgs(decisionPolicyKwArgs={})
+		
+		Set the cost_time package's DecisionPolicy instance kwargs by
+		merging the supplied decisionPolicyKwArgs dict with the
+		default_decisionPolicyKwArgs.
+		
+		Input:
+			decisionPolicyKwArgs: A dict with DecisionPolicy kwargs used
+				to init a DecisionPolicy instance.
+		"""
 		defaults = self.default_decisionPolicyKwArgs()
 		defaults.update(decisionPolicyKwArgs)
 		self.decisionPolicyKwArgs = defaults
 		logging.debug('Setted Fitter decisionPolicyKwArgs = %s',self.decisionPolicyKwArgs)
 	
 	def __setstate__(self,state):
+		"""
+		self.__setstate__(state)
+		
+		Only used when loading from a pickle file to init the Fitter
+		instance. Could also be used to copy one Fitter instance to
+		another one.
+		
+		"""
 		self.set_experiment(state['experiment'])
 		self.set_time_units(state['time_units'])
 		self.set_rt_cutoff(state['rt_cutoff'])
@@ -327,18 +428,33 @@ class Fitter:
 		if '_fixed_parameters' in state.keys():
 			self._fixed_parameters = state['_fixed_parameters']
 		if 'fit_arguments' in state.keys():
-			self.fixed_parameters = state['fit_arguments']['fixed_parameters']
-			self.fitted_parameters = state['fit_arguments']['fitted_parameters']
-			self._fit_arguments = state['fit_arguments']
+			self.set_fit_arguments(state['fit_arguments'])
 		if 'fit_output' in state.keys():
 			self._fit_output = state['fit_output']
-		if 'high_confidence_mapping_method' is state.keys():
+			# Bug fix for old version Fitter instances in which the fit_output tuple was constructed incorrectly for the cma method
+			if isinstance(self._fit_output[1],tuple):
+				self._fit_output = (self._fit_output[0],)+self._fit_output[1]
+		if 'high_confidence_mapping_method' in state.keys():
 			self.high_confidence_mapping_method = state['high_confidence_mapping_method']
 		else:
 			self.high_confidence_mapping_method = 'log_odds'
 		self.__fit_internals__ = None
 	
 	def set_fixed_parameters(self,fixed_parameters={}):
+		"""
+		self.set_fixed_parameters(fixed_parameters={})
+		
+		Set the fixed_parameters by merging the supplied fixed_parameters
+		input dict with the default fixed_parameters. Note that these
+		fixed_parameters need to be sanitized before being used to init
+		the minimizer. Also note that this method sets the unsanitized fitted
+		parameters as the complement of the fixed_parameters keys.
+		
+		Input:
+			fixed_parameters: A dict whose keys are the parameter names and
+				the values are the corresponding parameter fixed values
+		
+		"""
 		defaults = self.default_fixed_parameters()
 		defaults.update(fixed_parameters)
 		fittable_parameters = self.get_fittable_parameters()
@@ -351,41 +467,122 @@ class Fitter:
 		logging.debug('Setted Fitter fitted_parameters = %s',self._fitted_parameters)
 	
 	def set_start_point(self,start_point={}):
+		"""
+		self.set_start_point(start_point={})
+		
+		Set the start_point by merging the supplied start_point input dict with
+		the default start_point. Note that this start_point need to be sanitized
+		before being used to init the minimizer.
+		
+		Input:
+			start_point: A dict whose keys are the parameter names and
+				the values are the corresponding parameter starting value
+		
+		"""
 		defaults = self.default_start_point()
 		defaults.update(start_point)
 		self._start_point = defaults
 		logging.debug('Setted Fitter start_point = %s',self._start_point)
 	
 	def set_bounds(self,bounds={}):
+		"""
+		self.set_bounds(bounds={})
+		
+		Set the bounds by merging the supplied bounds input dict with
+		the default bounds. Note that these bounds need to be sanitized
+		before being used to init the minimizer.
+		
+		Input:
+			bounds: A dict whose keys are the parameter names and
+				the values are a list with the [low_bound,up_bound] values.
+		
+		"""
 		defaults = self.default_bounds()
 		defaults.update(bounds)
 		self._bounds = defaults
 		logging.debug('Setted Fitter bounds = %s',self._bounds)
 	
 	def set_optimizer_kwargs(self,optimizer_kwargs={}):
+		"""
+		self.set_optimizer_kwargs(optimizer_kwargs={})
+		
+		Set the optimizer_kwargs by merging the supplied optimizer_kwargs
+		input dict with the default optimizer_kwargs. Note that these
+		kwargs do not need any further sanitation that could depend on
+		the Fitter's method.
+		
+		"""
 		defaults = self.default_optimizer_kwargs()
 		defaults.update(optimizer_kwargs)
 		self.optimizer_kwargs = defaults
 		logging.debug('Setted Fitter optimizer_kwargs = %s',self.optimizer_kwargs)
 	
+	def set_fit_arguments(self,fit_arguments):
+		"""
+		self.set_fit_arguments(fit_arguments)
+		
+		Set the instance's fit_arguments and sanitized: start point, bounds
+		optimizer_kwargs, fitted parameters and fixed parameters.
+		
+		Input:
+		fit_argument: A dict with keys: start_point, bounds, optimizer_kwargs
+			fitted_parameters and fixed_parameters
+		
+		"""
+		self._fit_arguments = fit_arguments
+		self.start_point = fit_arguments['start_point']
+		self.bounds = fit_arguments['bounds']
+		self.optimizer_kwargs = fit_arguments['optimizer_kwargs']
+		self.fitted_parameters = fit_arguments['fitted_parameters']
+		self.fixed_parameters = fit_arguments['fixed_parameters']
+	
 	# Getters
 	def get_parameters_dict(self):
+		"""
+		self.get_parameters_dict():
+		
+		Get a dict with all the model's parameter names as keys. The
+		the values of the fixed parameters are taken from 
+		self.get_fixed_parameters() and the rest of the parameter values
+		are taken from the self.get_start_point() method.
+		
+		"""
 		parameters = self.get_fixed_parameters().copy()
-		try:
-			start_point = self.get_start_point()
-		except:
-			start_point = self.default_start_point()
+		start_point = self.get_start_point()
 		for fp in self.get_fitted_parameters():
 			parameters[fp] = start_point[fp]
 		return parameters
 	
 	def get_parameters_dict_from_array(self,x):
+		"""
+		self.get_parameters_dict_from_array(x):
+		
+		Get a dict with all the model's parameter names as keys. The
+		the values of the fixed parameters are taken from the 
+		sanitized fixed parameters and the fitted parameters' values
+		are taken from the supplied array. The array elements must have
+		the same order as the sanitized fitted parameters.
+		
+		"""
 		parameters = self.fixed_parameters.copy()
-		for index,key in enumerate(self.fitted_parameters):
-			parameters[key] = x[index]
+		try:
+			for index,key in enumerate(self.fitted_parameters):
+				parameters[key] = x[index]
+		except IndexError:
+			parameters[self.fitted_parameters[0]] = x
 		return parameters
 	
 	def get_parameters_dict_from_fit_output(self,fit_output=None):
+		"""
+		self.get_parameters_dict_from_fit_output(fit_output=None):
+		
+		Get a dict with all the model's parameter names as keys. The
+		the values of the fixed parameters are taken from the 
+		sanitized fixed parameters and the fitted parameters' values
+		are taken from the fit_output. If fit_output is None, the
+		instance's fit_output is used instead.
+		
+		"""
 		if fit_output is None:
 			fit_output = self._fit_output
 		parameters = self.fixed_parameters.copy()
@@ -393,6 +590,18 @@ class Fitter:
 		return parameters
 	
 	def get_fixed_parameters(self):
+		"""
+		self.get_fixed_parameters()
+		
+		This function first attempts to return the sanitized fixed parameters.
+		If this fails (most likely because the fixed parameters were not sanitized)
+		it attempts to return the setted fixed parameters.
+		If this fails, because the fixed parameters were not set, it returns the
+		default fixed parameters.
+		This function always returns a dict that has the parameter names
+		as keys and as values floats with the parameter's fixed value.
+		
+		"""
 		try:
 			return self.fixed_parameters
 		except:
@@ -402,6 +611,17 @@ class Fitter:
 				return self.default_fixed_parameters()
 	
 	def get_fitted_parameters(self):
+		"""
+		self.get_fitted_parameters()
+		
+		This function first attempts to return the sanitized fitted parameters.
+		If this fails (most likely because the fitted parameters were not sanitized)
+		it attempts to return the setted fitted parameters.
+		If this fails, because the fitted parameters were not set, it returns the
+		default fitted parameters.
+		This function always returns a list of parameter names.
+		
+		"""
 		try:
 			return self.fitted_parameters
 		except:
@@ -411,12 +631,56 @@ class Fitter:
 				return [p for p in self.get_fittable_parameters() if p not in self.default_fixed_parameters().keys()]
 	
 	def get_start_point(self):
-		return self._start_point
+		"""
+		self.get_start_point()
+		
+		This function first attempts to return the sanitized start point, which
+		is an array of shape (2,len(self.fitted_parameters)).
+		If this fails (most likely because the start point was not sanitized)
+		it attempts to return the setted parameter start point dictionary.
+		This dict has the parameter names as keys and as values floats
+		with the parameter's value.
+		If this fails, because the start point was not set, it returns the
+		default start point.
+		
+		"""
+		try:
+			return self.start_point
+		except:
+			try:
+				return self._start_point
+			except:
+				return self.default_start_point()
 	
 	def get_bounds(self):
-		return self._bounds
+		"""
+		self.get_bounds()
+		
+		This function first attempts to return the sanitized bounds, which
+		is an array of shape (2,len(self.fitted_parameters)).
+		If this fails (most likely because the bounds were not sanitized)
+		it attempts to return the setted parameter bound dictionary.
+		This dict has the parameter names as keys and as values lists
+		with [low_bound,high_bound] values.
+		If this fails, because the bounds were not set, it returns the
+		default bounds.
+		
+		"""
+		try:
+			return self.bounds
+		except:
+			try:
+				return self._bounds
+			except:
+				return self.default_bounds()
 	
 	def __getstate__(self):
+		"""
+		self.__getstate__()
+		
+		Get the Fitter instance's state dictionary. This function is used
+		when pickling the Fitter.
+		"""
 		state = {'experiment':self.experiment,
 				 'time_units':self.time_units,
 				 'rt_cutoff':self.rt_cutoff,
@@ -443,15 +707,51 @@ class Fitter:
 		return state
 	
 	def get_fittable_parameters(self):
+		"""
+		self.get_fittable_parameters()
+		
+		Returns self.get_decision_parameters()+self.get_confidence_parameters()
+		"""
 		return self.get_decision_parameters()+self.get_confidence_parameters()
 	
 	def get_decision_parameters(self):
+		"""
+		self.get_decision_parameters()
+		
+		Returns a list of the model's decision parameters. In the current version:
+		['cost','dead_time','dead_time_sigma','phase_out_prob','internal_var']
+		
+		"""
 		return ['cost','dead_time','dead_time_sigma','phase_out_prob','internal_var']
 	
 	def get_confidence_parameters(self):
+		"""
+		self.get_confidence_parameters()
+		
+		Returns a list of the model's confidence parameters. In the current version:
+		['high_confidence_threshold','confidence_map_slope']
+		
+		"""
 		return ['high_confidence_threshold','confidence_map_slope']
 	
 	def get_dead_time_convolver(self,parameters):
+		"""
+		self.get_dead_time_convolver(parameters):
+		
+		This function returns the dead time (aka non-decision time) distribution,
+		which is convolved with the first passage time probability
+		density to get the real response time distribution.
+		
+		Input:
+			parameters: A dict with keys 'dead_time' and 'dead_time_sigma'
+				that hold the values of said parameters
+		
+		Output:
+			(conv_val,conv_x)
+			conv_val is an array with the values of the dead time
+			distribution for the times that are in conv_x.
+		
+		"""
 		must_downsample = True
 		if self.time_units=='seconds' and self.dp.dt>1e-3:
 			_dt = 1e-3
@@ -491,6 +791,18 @@ class Fitter:
 		return conv_val,conv_x
 	
 	def get_key(self,merge=None):
+		"""
+		self.get_key(merge=None)
+		
+		This function returns a string that can be used as a Fitter_plot_handler's
+		key.
+		The returned key depends on the merge input as follows.
+		If merge=None: key={self.experiment}_subject_{self.subjectSession.get_name()}_session_{self.subjectSession.get_session()}
+		If merge='subjects': key={self.experiment}_session_{self.subjectSession.get_session()}
+		If merge='sessions': key={self.experiment}_subject_{self.subjectSession.get_name()}
+		If merge='all': key={self.experiment}
+		
+		"""
 		experiment = self.experiment
 		subject = self.subjectSession.get_name()
 		session = self.subjectSession.get_session()
@@ -503,9 +815,36 @@ class Fitter:
 			key = "{experiment}_subject_{subject}".format(experiment=experiment,subject=subject)
 		elif merge=='all':
 			key = "{experiment}".format(experiment=experiment)
+		else:
+			raise ValueError('Unknown merge option {0}. Available values are None, "subjects", "sessions" and "all"'.format(merge))
 		return key
 	
 	def get_fitter_plot_handler(self,edges=None,merge=None,fit_output=None):
+		"""
+		self.get_fitter_plot_handler(edges=None,merge=None,fit_output=None)
+		
+		This function returns a Fitter_plot_handler instance that is
+		constructed using the Fitter instance's subjectSession
+		performance, response time and confidence data, and the
+		output of self.theoretical_rt_confidence_distribution(fit_output)
+		
+		Input:
+			edges: A numpy array of edges used to construct the
+				subjectSession's response time histogram. If it is None,
+				edges = np.linspace(0,self.rt_cutoff,51)
+			merge: Can be None or a str in ['all','sessions','subjects'].
+				This is used to set the Fitter_plot_handler's key so
+				that when it is added to another Fitter_plot_handler
+				instance the data with the same key is properly merged.
+				Refer to self.get_key() for more details on the used key.
+			fit_output: Can be None or a tuple like the one returned by
+				self.sanitize_fmin_output. It is used in the call to
+				self.theoretical_rt_confidence_distribution and can be
+				used to specify another set of parameters to use to
+				compute the theoretical distribution. If it is None,
+				then the Fitter instance's _fit_output attribute is used.
+		
+		"""
 		if edges is None:
 			edges = np.linspace(0,self.rt_cutoff,51)
 		rt_edges = edges
@@ -526,7 +865,11 @@ class Fitter:
 		
 		self.set_fixed_parameters()
 		model,t = self.theoretical_rt_confidence_distribution(fit_output)
-		c = np.linspace(0,1,self.confidence_partition)
+		binary_confidence = self.method=='binary_confidence_only' or self.method=='full_binary_confidence'
+		if binary_confidence:
+			c = np.array([0,1])
+		else:
+			c = np.linspace(0,1,self.confidence_partition)
 		model*=len(self.performance)
 		model_hit_histogram2d = model[0]
 		model_miss_histogram2d = model[1]
@@ -534,23 +877,79 @@ class Fitter:
 		model_confidence = np.sum(model,axis=2)*self.dp.dt
 		
 		key = self.get_key(merge)
-		output = {key:{'experimental':{'hit_histogram':{'x':rt_centers,'y':c_centers,'z':subject_hit_histogram2d},
-									   'miss_histogram':{'x':rt_centers,'y':c_centers,'z':subject_miss_histogram2d},
-									   'rt':{'x':rt_centers,'y':subject_rt},
-									   'confidence':{'x':c_centers,'y':subject_confidence}},
-						'theoretical':{'hit_histogram':{'x':t,'y':c,'z':model_hit_histogram2d},
-									   'miss_histogram':{'x':t,'y':c,'z':model_miss_histogram2d},
-									   'rt':{'x':t,'y':model_rt},
-									   'confidence':{'x':c,'y':model_confidence}}}}
+		output = {key:{'experimental':{'hit_histogram':subject_hit_histogram2d,
+									   'miss_histogram':subject_miss_histogram2d,
+									   'rt':subject_rt,
+									   'confidence':subject_confidence,
+									   't_array':rt_edges,
+									   'c_array':c_edges},
+						'theoretical':{'hit_histogram':model_hit_histogram2d,
+									   'miss_histogram':model_miss_histogram2d,
+									   'rt':model_rt,
+									   'confidence':model_confidence,
+									   't_array':t,
+									   'c_array':c}}}
 		return Fitter_plot_handler(output,self.time_units)
 	
 	def get_save_file_name(self):
+		"""
+		self.get_save_file_name()
+		
+		An alias for the package's function Fitter_filename. This method
+		simply returns the output of the call:
+		Fitter_filename(experiment=self.experiment,method=self.method,
+				name=self.subjectSession.get_name(),
+				session=self.subjectSession.get_session(),
+				optimizer=self.optimizer,suffix=self.suffix,
+				confidence_map_method=self.high_confidence_mapping_method)
+		
+		"""
 		return Fitter_filename(experiment=self.experiment,method=self.method,name=self.subjectSession.get_name(),
 				session=self.subjectSession.get_session(),optimizer=self.optimizer,suffix=self.suffix,
 				confidence_map_method=self.high_confidence_mapping_method)
 	
+	def get_jacobian_dx(self):
+		"""
+		self.get_jacobian_dx()
+		
+		This function returns a dict where the keys are fittable parameter
+		names and the values are the parameter displacements that should
+		be used to compute the numerical jacobian.
+		Regretably, we cannot compute an analytical form of the derivative
+		of the first passage time probability density in cost_time.DecisionPolicy.rt
+		and this forces us to use a numerical approximation of the
+		jacobian. The values returned by this function are only used
+		with the scipy's optimize methods: CG, BFGS, Newton-CG, L-BFGS-B,
+		TNC, SLSQP, dogleg and trust-ncg.
+		
+		"""
+		jac_dx = {'cost':1e-5,
+				  'internal_var':1e-4,
+				  'dead_time':1e-6,
+				  'dead_time_sigma':1e-6,
+				  'phase_out_prob':1e-6,
+				  'high_confidence_threshold':8e-4,
+				  'confidence_map_slope':1e-4}
+		if self.time_units=='milliseconds':
+			jac_dx['dead_time']*=1e3
+			jac_dx['dead_time_sigma']*=1e3
+			jac_dx['internal_var']*=1e-3
+			jac_dx['cost']*=1e-3
+		return jac_dx
+	
 	# Defaults
 	def default_decisionPolicyKwArgs(self):
+		"""
+		self.default_decisionPolicyKwArgs()
+		
+		Returns the default decisionPolicy kwargs for the constructing
+		of the Fitter instance's DecisionPolicy instance attribute, self.dp.
+		This function returns a dict of kwargs that is used as
+		cost_time.DecisionPolicy(**kwargs)
+		The default parameters depend on the Fitter instance's experiment,
+		time_units and the subjectSession's observed prior evidence distribution.
+		
+		"""
 		defaults = {'n':101,'prior_mu_var':self._prior_mu_var,'reward':1,'penalty':0}
 		if hasattr(self,'_dt'):
 			defaults['dt'] = self._dt
@@ -603,9 +1002,27 @@ class Fitter:
 		return defaults
 	
 	def default_fixed_parameters(self):
+		"""
+		self.default_fixed_parameters()
+		
+		Returns the default parameter fixed_parameters. By default no
+		parameter is fixed so it simply returns an empty dict.
+		
+		"""
 		return {}
 	
 	def default_start_point(self,forceCompute=False):
+		"""
+		self.default_start_point()
+		
+		Returns the default parameter start_point that depend on the time_units
+		attribute, the subjectSession's response time distribution and
+		performance. This function is very fine tuned to get a good
+		starting point for every parameter automatically.
+		This function returns a dict with the parameter names as keys and
+		the corresponding start_point floating point as values.
+		
+		"""
 		try:
 			if forceCompute:
 				logging.debug('Forcing default start point recompute')
@@ -669,9 +1086,13 @@ class Fitter:
 				
 				rt_mode_ind = np.argmax(first_passage_pdf[0])
 				rt_mode_ind+= 4 if self.dp.nT-rt_mode_ind>4 else 0
-				log_odds = self.dp.log_odds()
 				if not 'high_confidence_threshold' in self.__default_start_point__.keys() or self.__default_start_point__['high_confidence_threshold'] is None:
-					self.__default_start_point__['high_confidence_threshold'] = log_odds[0][rt_mode_ind]
+					if self.high_confidence_mapping_method=='log_odds':
+						log_odds = self.dp.log_odds()
+						self.__default_start_point__['high_confidence_threshold'] = log_odds[0][rt_mode_ind]
+					elif self.high_confidence_mapping_method=='belief':
+						bounds = self.dp.bounds
+						self.__default_start_point__['high_confidence_threshold'] = 2*self.dp.bounds[0][rt_mode_ind]-1
 			else:
 				if not 'high_confidence_threshold' in self.__default_start_point__.keys() or self.__default_start_point__['high_confidence_threshold'] is None:
 					self.__default_start_point__['high_confidence_threshold'] = 0.3
@@ -679,52 +1100,99 @@ class Fitter:
 			return self.__default_start_point__
 	
 	def default_bounds(self):
+		"""
+		self.default_bounds()
+		
+		Returns the default parameter bounds that depend on the time_units
+		attribute and whether or the decision bounds are invariant or not.
+		This function returns a dict with the parameter names as keys and
+		the corresponding [lower_bound, upper_bound] list as values.
+		
+		"""
 		if self.time_units=='seconds':
 			defaults = {'cost':[0.,0.4],'dead_time':[0.,1.5],'dead_time_sigma':[0.001,6.]}
 		else:
 			defaults = {'cost':[0.,0.0004],'dead_time':[0.,1500.],'dead_time_sigma':[1.,6000.]}
 		defaults['phase_out_prob'] = [0.,0.2]
+		default_sp = self.default_start_point()
+		defaults['internal_var'] = [default_sp['internal_var']*0.2,default_sp['internal_var']*1.8]
+		invariant_decision_bounds = ('cost' in self.get_fixed_parameters().keys() and 'internal_var' in self.get_fixed_parameters().keys()) or \
+									self.method in ['confidence_only','binary_confidence_only']
 		if self.high_confidence_mapping_method=='log_odds':
-			defaults['high_confidence_threshold'] = [0.,np.log(self.dp.g[-1]/(1.-self.dp.g[-1]))]
+			if invariant_decision_bounds:
+				try:
+					log_odds = self.dp.log_odds()
+					mb = np.min(log_odds)
+					Mb = np.max(log_odds)
+					defaults['high_confidence_threshold'] = [mb,Mb]
+				except:
+					defaults['high_confidence_threshold'] = [0.,np.log(self.dp.g[-1]/(1.-self.dp.g[-1]))]
+			else:
+				defaults['high_confidence_threshold'] = [0.,np.log(self.dp.g[-1]/(1.-self.dp.g[-1]))]
 		elif self.high_confidence_mapping_method=='belief':
-			defaults['high_confidence_threshold'] = [0.,1.]
+			if invariant_decision_bounds:
+				try:
+					mb = min([2*np.min(self.dp.bounds[0])-1,1-2*np.min(self.dp.bounds[1])])
+					Mb = max([2*np.max(self.dp.bounds[0])-1,1-2*np.max(self.dp.bounds[1])])
+					defaults['high_confidence_threshold'] = [mb,Mb]
+				except:
+					defaults['high_confidence_threshold'] = [0.,1.]
+			else:
+				defaults['high_confidence_threshold'] = [0.,1.]
 		else:
 			raise ValueError('Unknown high_confidence_mapping_method: {0}'.format(self.high_confidence_mapping_method))
 		defaults['confidence_map_slope'] = [0.,100.]
-		default_sp = self.default_start_point()
-		defaults['internal_var'] = [default_sp['internal_var']*0.2,default_sp['internal_var']*1.8]
 		if default_sp['high_confidence_threshold']>defaults['high_confidence_threshold'][1]:
 			defaults['high_confidence_threshold'][1] = 2*default_sp['high_confidence_threshold']
 		return defaults
 	
 	def default_optimizer_kwargs(self):
+		"""
+		self.default_optimizer_kwargs()
+		
+		Returns the default optimizer_kwargs that depend on the optimizer
+		attribute
+		
+		"""
 		if self.optimizer=='cma':
 			return {'restarts':1,'restart_from_best':'False'}
 		elif self.optimizer=='basinhopping':
-			return {'stepsize':0.25, 'minimizer_kwargs':{'method':'L-BFGS-B'}, take_step=None, accept_test=None, callback=None, interval=50, disp=False, niter_success=None}
-		else:
+			return {'stepsize':0.25, 'minimizer_kwargs':{'method':'Nelder-Mead'},'T':10.,'niter':100,'interval':10}
+		elif self.optimizer in ['Brent','Bounded','Golden']: # Scalar minimize
+			return {'disp': False, 'maxiter': 1000, 'repetitions': 10}
+		else: # Multivariate minimize
 			return {'disp': False, 'maxiter': 1000, 'maxfev': 10000, 'repetitions': 10}
 	
 	# Main fit method
 	def fit(self,fixed_parameters={},start_point={},bounds={},optimizer_kwargs={},fit_arguments=None):
+		"""
+		self.fit(fixed_parameters={},start_point={},bounds={},optimizer_kwargs={},fit_arguments=None)
+		
+		Main Fitter function that executes the optimization procedure
+		specified by the Fitter instance's optimizer attribute.
+		This methods sets the fixed_parameters, start_point, bounds and
+		optimizer_kwargs using the ones supplied in the input or using
+		another Fitter instance's fit_arguments attribute.
+		This method also sanitizes the fixed_parameters depending on
+		the selected fitting method, init's the minimizer and returns
+		the sanitized minimization output.
+		
+		For the detailed output form refer to the method sanitize_fmin_output
+		
+		"""
 		if fit_arguments is None:
 			self.set_fixed_parameters(fixed_parameters)
 			self.set_start_point(start_point)
 			self.set_bounds(bounds)
-			self.fixed_parameters,self.fitted_parameters,start_point,bounds = self.sanitize_parameters_x0_bounds()
+			self.fixed_parameters,self.fitted_parameters,self.start_point,self.bounds = self.sanitize_parameters_x0_bounds()
 			
 			self.set_optimizer_kwargs(optimizer_kwargs)
 			self._fit_arguments = {'fixed_parameters':self.fixed_parameters,'fitted_parameters':self.fitted_parameters,\
-								   'start_point':start_point,'bounds':bounds,'optimizer_kwargs':self.optimizer_kwargs}
+								   'start_point':self.start_point,'bounds':self.bounds,'optimizer_kwargs':self.optimizer_kwargs}
 		else:
-			start_point = fit_arguments['start_point']
-			bounds = fit_arguments['bounds']
-			self.optimizer_kwargs = fit_arguments['optimizer_kwargs']
-			self.fitted_parameters = fit_arguments['fitted_parameters']
-			self.fixed_parameters = fit_arguments['fixed_parameters']
-			self._fit_arguments = fit_arguments
+			self.set_fit_arguments(fit_arguments)
 		
-		minimizer = self.init_minimizer(start_point,bounds,self.optimizer_kwargs)
+		minimizer = self.init_minimizer(self.start_point,self.bounds,self.optimizer_kwargs)
 		if self.experiment=='Luminancia':
 			if self.method=='full':
 				merit_function = self.full_merit
@@ -773,6 +1241,14 @@ class Fitter:
 	
 	# Savers
 	def save(self):
+		"""
+		self.save()
+		
+		Dumps the Fitter instances state to a pkl file.
+		The Fitter's state is return by method self.__getstate__().
+		The used pkl's file name is given by self.get_save_file_name().
+		
+		"""
 		logging.debug('Fitter state that will be saved = "%s"',self.__getstate__())
 		if not hasattr(self,'_fit_output'):
 			raise ValueError('The Fitter instance has not performed any fit and still has no _fit_output attribute set')
@@ -858,8 +1334,10 @@ class Fitter:
 		if len(fitted_parameters)==1 and self.optimizer=='cma':
 			warnings.warn('CMA is unsuited for optimization of single dimensional parameter spaces. Optimizer was changed to Nelder-Mead')
 			self.optimizer = 'Nelder-Mead'
+		elif len(fitted_parameters)>1 and self.optimizer in ['Brent','Bounded','Golden']:
+			raise ValueError('Brent, Bounded and Golden optimizers are only available for scalar functions. However, {0} parameters are being fitted. Please review the optimizer'.format(len(fitted_parameters)))
 		
-		if self.optimizer!='cma':
+		if not (self.optimizer=='cma' or self.optimizer=='basinhopping'):
 			sanitized_bounds = [(lb,ub) for lb,ub in zip(sanitized_bounds[0],sanitized_bounds[1])]
 		logging.debug('Sanitized fixed parameters = %s',fixed_parameters)
 		logging.debug('Sanitized fitted parameters = %s',fitted_parameters)
@@ -889,42 +1367,106 @@ class Fitter:
 		"""
 		logging.debug('Sanitizing minizer output with package: {0}'.format(package))
 		logging.debug('Output to sanitize: {0}'.format(output))
+		print(output)
 		if package=='cma':
 			fitted_x = {}
 			for index,par in enumerate(self.fitted_parameters):
 				fitted_x[par] = output[0][index]
-			return (fitted_x,output[1:7])
+				if fitted_x[par]<self._bounds[par][0]:
+					fitted_x[par] = self._bounds[par][0]
+				elif fitted_x[par]>self._bounds[par][1]:
+					fitted_x[par] = self._bounds[par][1]
+			return (fitted_x,)+output[1:7]
 		elif package=='scipy':
 			fitted_x = {}
 			for index,par in enumerate(self.fitted_parameters):
+				fitted_x[par] = output.x[index]
+				if fitted_x[par]<self._bounds[par][0]:
+					fitted_x[par] = self._bounds[par][0]
+				elif fitted_x[par]>self._bounds[par][1]:
+					fitted_x[par] = self._bounds[par][1]
+			return (fitted_x,output.fun,output.nfev,output.nfev,output.nit,output.x,np.nan*np.ones_like(output.x))
+		elif package=='repeat_minimize':
+			fitted_x = {}
+			for index,par in enumerate(self.fitted_parameters):
 				fitted_x[par] = output['xbest'][index]
+				if fitted_x[par]<self._bounds[par][0]:
+					fitted_x[par] = self._bounds[par][0]
+				elif fitted_x[par]>self._bounds[par][1]:
+					fitted_x[par] = self._bounds[par][1]
 			return (fitted_x,output['funbest'],output['nfev'],output['nfev'],output['nit'],output['xmean'],output['xstd'])
 		else:
 			raise ValueError('Unknown package used for optimization. Unable to sanitize the fmin output')
 	
 	# Minimizer related methods
 	def init_minimizer(self,start_point,bounds,optimizer_kwargs):
+		"""
+		self.init_minimizer(start_point,bounds,optimizer_kwargs)
+		
+		This method returns a callable to the minimization procedure.
+		Said callable takes a single input argument, the minimization
+		objective function, and returns a tuple with the sanitized
+		minimization output. For more details on the output of the callable
+		refer to the method sanitize_fmin_output
+		
+		Input:
+		start_point: An array with the start point for the fitted parameters
+		bounds: An array of shape (2,len(start_point)) that holds the
+		        lower and upper bounds for each fitted parameter. Please
+		        note that some of scipy's optimization methods ignore
+		        the parameter bounds.
+		optimizer_kwargs: A dict of options passed to each optimizer.
+		                  Refer to the script's help for details.
+		
+		"""
 		logging.debug('init_minimizer args: start_point=%(start_point)s, bounds=%(bounds)s, optimizer_kwargs=%(optimizer_kwargs)s',{'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs})
 		if self.optimizer=='cma':
 			scaling_factor = bounds[1]-bounds[0]
 			logging.debug('scaling_factor = %s',scaling_factor)
-			options = {'bounds':bounds,'CMA_stds':scaling_factor}
+			options = {'bounds':bounds,'CMA_stds':scaling_factor,'verbose':1 if optimizer_kwargs['disp'] else -1}
 			options.update(optimizer_kwargs)
 			restarts = options['restarts']
 			del options['restarts']
 			restart_from_best = options['restart_from_best']
 			del options['restart_from_best']
+			del options['disp']
 			options = cma.CMAOptions(options)
 			minimizer = lambda x: self.sanitize_fmin_output(cma.fmin(x,start_point,1./3.,options,restarts=restarts,restart_from_best=restart_from_best),package='cma')
 			#~ minimizer = lambda x: self.sanitize_fmin_output((start_point,None,None,None,None,None,None,None),'cma')
 		elif self.optimizer=='basinhopping':
 			options = optimizer_kwargs.copy()
-			for k in options:
+			for k in options.keys():
 				if k not in ['niter','T','stepsize','minimizer_kwargs','take_step','accept_test','callback','interval','disp','niter_success']:
 					del options[k]
-				#~ elif k=='stepsize':
-					#~ options[k] = options[k]*(bounds[1]-bounds[0])
-			lambda x: self.sanitize_fmin_output(scipy.basinhopping(x, start_point, **options),package='scipy')
+				elif k in ['take_step', 'accept_test', 'callback']:
+					options[k] = eval(options[k])
+			if 'take_step' not in options.keys():
+				class Step_taker:
+					def __init__(self,stepsize=options['stepsize']):
+						self.stepsize = stepsize
+						self.scaling_factor = bounds[1]-bounds[0]
+					def __call__(self,x):
+						x+= np.random.randn(*x.shape)*self.scaling_factor*self.stepsize
+						return x
+				options['take_step'] = Step_taker()
+			if 'accept_test' not in options.keys():
+				class Test_accepter:
+					def __init__(self,bounds=bounds):
+						self.bounds = bounds
+					def __call__(self,**kwargs):
+						return bool(np.all(np.logical_and(kwargs["x_new"]>=self.bounds[0],kwargs["x_new"]<=self.bounds[1])))
+				options['accept_test'] = Test_accepter()
+			if options['minimizer_kwargs']['method'] in ['CG', 'BFGS', 'Newton-CG', 'L-BFGS-B', 'TNC', 'SLSQP', 'dogleg', 'trust-ncg']:
+				jac_dx = self.get_jacobian_dx()
+				epsilon = []
+				for par in self.fitted_parameters:
+					epsilon.append(jac_dx[par])
+				def aux_function(f):
+					options['minimizer_kwargs']['jac'] = lambda x: scipy.optimize.approx_fprime(x, f, epsilon)
+					return self.sanitize_fmin_output(scipy.optimize.basinhopping(f, start_point, **options),package='scipy')
+				minimizer = aux_function
+			else:
+				minimizer = lambda x: self.sanitize_fmin_output(scipy.optimize.basinhopping(x, start_point, **options),package='scipy')
 		else:
 			repetitions = optimizer_kwargs['repetitions']
 			_start_points = [start_point]
@@ -935,27 +1477,78 @@ class Fitter:
 				_start_points.append(np.array(temp))
 			logging.debug('Array of start_points = {0}',_start_points)
 			start_point_generator = iter(_start_points)
-			minimizer = lambda x: self.sanitize_fmin_output(self.repeat_minimize(x,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='scipy')
-			#~ minimizer = lambda x: self.sanitize_fmin_output({'xbest':start_point,'funbest':None,'nfev':None,'nit':None,'xmean':None,'xstd':None},'scipy')
-		
+			if self.optimizer in ['CG', 'BFGS', 'Newton-CG', 'L-BFGS-B', 'TNC', 'SLSQP', 'dogleg', 'trust-ncg']:
+				jac_dx = self.get_jacobian_dx()
+				epsilon = []
+				for par in self.fitted_parameters:
+					epsilon.append(jac_dx[par])
+				jac = lambda x,f: scipy.optimize.approx_fprime(x, f, epsilon)
+				minimizer = lambda f: self.sanitize_fmin_output(self.repeat_minimize(f,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs,jac=lambda x:jac(x,f)),package='repeat_minimize')
+			else:
+				minimizer = lambda f: self.sanitize_fmin_output(self.repeat_minimize(f,start_point_generator,bounds=bounds,optimizer_kwargs=optimizer_kwargs),package='repeat_minimize')
 		return minimizer
 	
-	def repeat_minimize(self,merit,start_point_generator,bounds,optimizer_kwargs):
+	def repeat_minimize(self,merit,start_point_generator,bounds,optimizer_kwargs,jac=None):
+		"""
+		self.repeat_minimize(merit,start_point_generator,bounds,optimizer_kwargs,jac=None)
+		
+		A wrapper to repeat various rounds of minimization with the
+		scipy.optimize.minimize or minimize_scalar method specified.
+		
+		Input:
+			merit: The objective function used for the fits
+			start_point_generator: A generator or iterable with the
+				starting points that should be used for each fitting
+				round
+			bounds: The sanitized parameter bounds
+			optimizer_kwargs: Additional kwargs to pass to the variable
+				options of scipy.optimize.minimize or minimize_scalar
+			jac: Can be None or a callable that computes the jacobian
+				of the merit function
+		
+		Output:
+			A dictionary with keys:
+			xbest: Best solution
+			funbest: Best solution function value
+			nfev: Total number of function evaluations
+			nit: Total number of iterations
+			xs: The list of solutions for each round
+			funs: The list of solutions' function values for each round
+			xmean: The mean of the solutions across rounds
+			xstd: The std of the solutions across rounds
+			funmean: The mean of the solutions' function values across rounds
+			funstd: The std of the solutions' function values across rounds
+		
+		"""
 		output = {'xs':[],'funs':[],'nfev':0,'nit':0,'xbest':None,'funbest':None,'xmean':None,'xstd':None,'funmean':None,'funstd':None}
 		repetitions = 0
 		for start_point in start_point_generator:
 			repetitions+=1
 			logging.debug('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
-			res = scipy.optimize.minimize(merit,start_point, method=self.optimizer,bounds=bounds,options=optimizer_kwargs)
+			if self.optimizer in ['Brent','Bounded','Golden']:
+				res = scipy.optimize.minimize_scalar(merit,start_point,method=self.optimizer,\
+								bounds=bounds[0], options=optimizer_kwargs)
+			else:
+				res = scipy.optimize.minimize(merit,start_point, method=self.optimizer,bounds=bounds,\
+								options=optimizer_kwargs,jac=jac)
 			logging.debug('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
 			logging.debug('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
-			output['xs'].append(res.x)
+			logging.debug('OptimizeResult: {0}'.format(res))
+			try:
+				nit = res.rit
+			except:
+				nit = 1
+			if isinstance(res.x,float):
+				x = np.array([res.x])
+			else:
+				x = res.x
+			output['xs'].append(x)
 			output['funs'].append(res.fun)
 			output['nfev']+=res.nfev
-			output['nit']+=res.nit
+			output['nit']+=nit
 			if output['funbest'] is None or res.fun<output['funbest']:
 				output['funbest'] = res.fun
-				output['xbest'] = res.x
+				output['xbest'] = x
 			logging.debug('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
 		arr_xs = np.array(output['xs'])
 		arr_funs = np.array(output['funs'])
@@ -967,6 +1560,15 @@ class Fitter:
 	
 	# Auxiliary method
 	def high_confidence_mapping(self,high_confidence_threshold,confidence_map_slope):
+		"""
+		self.high_confidence_mapping(high_confidence_threshold,confidence_map_slope)
+		
+		Get the high confidence mapping as a function of time.
+		Returns a numpy array of shape (2,self.dp.nT)
+		The output[0] is the mapping for hits and output[1] is the
+		mapping for misses.
+		
+		"""
 		if self.high_confidence_mapping_method=='log_odds':
 			return self.high_confidence_mapping_log_odds(high_confidence_threshold,confidence_map_slope)
 		elif self.high_confidence_mapping_method=='belief':
@@ -975,6 +1577,13 @@ class Fitter:
 			raise ValueError('Undefined high confidence mapping method: {0}'.format(self.high_confidence_mapping_method))
 	
 	def high_confidence_mapping_log_odds(self,high_confidence_threshold,confidence_map_slope):
+		"""
+		self.high_confidence_mapping_log_odds(high_confidence_threshold,confidence_map_slope)
+		
+		Backend of self.high_confidence_mapping that implements the log_odds
+		mapping. Returns the same type as self.high_confidence_mapping.
+		
+		"""
 		if self.time_units=='seconds' and self.dp.dt>1e-3:
 			_dt = 1e-3
 		elif self.time_units=='milliseconds' and self.dp.dt>1.:
@@ -1014,6 +1623,13 @@ class Fitter:
 		return phigh
 	
 	def high_confidence_mapping_belief(self,high_confidence_threshold,confidence_map_slope):
+		"""
+		self.high_confidence_mapping_belief(high_confidence_threshold,confidence_map_slope)
+		
+		Backend of self.high_confidence_mapping that implements the belief
+		mapping. Returns the same type as self.high_confidence_mapping.
+		
+		"""
 		if self.time_units=='seconds' and self.dp.dt>1e-3:
 			_dt = 1e-3
 		elif self.time_units=='milliseconds' and self.dp.dt>1.:
@@ -1036,9 +1652,9 @@ class Fitter:
 		with warnings.catch_warnings():
 			warnings.simplefilter("ignore")
 			phigh = confidence_map_slope*(belief-high_confidence_threshold)
-		phigh[phigh>1] = 1
-		plow[plow<0] = 0
-		phigh[high_confidence_threshold==belief] = 0.5
+			phigh[phigh>1] = 1
+			phigh[phigh<0] = 0
+			phigh[high_confidence_threshold==belief] = 0.5
 		
 		if _dt:
 			if _nT%self.dp.nT==0:
@@ -1054,7 +1670,45 @@ class Fitter:
 			phigh = np.nanmean(padded_phigh,axis=2)
 		return phigh
 	
-	def confidence_mapping_pdf_matrix(self,first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False,dead_time_convolver=None):
+	def rt_confidence_pdf(self,first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False,dead_time_convolver=None):
+		"""
+		self.rt_confidence_pdf(first_passage_pdfs,parameters,mapped_confidences=None,return_unconvoluted_matrix=False,dead_time_convolver=None)
+		
+		This method computes the joint probability of a given response time,
+		confidence and performance for the supplied model parameters and
+		first passage probability density.
+		
+		Input:
+			first_passage_pdfs: First passage probability density. A numpy
+				array of shape (2,self.dp.nT) that can be the output of
+				cost_time.DecisionPolicy.rt()
+			parameters: A dict with parameters as the one returned by
+				self.get_parameters_from_array(x)
+			mapped_confidences: Can be None or the output from
+				self.high_confidence_mapping(...)
+			return_unconvoluted_matrix: Bool, is only necesary for debugging
+				purposes.  Returns the same matrix but before it is
+				convoluted with the dead time (aka non-decision time)
+				distribution.
+			dead_time_convolver: Can be None or the output from
+				self.get_dead_time_convolver(...)
+		
+		Output:
+			(pdf,unconv_matrix)
+			pdf: The joint probability density. A numpy array with of shape
+				(2,self.confidence_partition,self.dp.nT+len(dead_time_convolver)-1).
+				The first axis represents hits [0] or misses [1].
+				The second axis represents the confidence as indeces to
+				numpy.linspace(0,1,self.confidence_partition)
+				The third array represents time as indeces to
+				numpy.arange(0,pdf.shape[2],dtype=np.float)*self.dp.dt
+			unconv_matrix: Is optional and only returned if
+				return_unconvoluted_matrix is True. Returns the same as
+				above but before the convolution with the dead time
+				distribution. Thus the shape of this array is
+				(2,self.confidence_partition,self.dp.nT).
+		
+		"""
 		indeces = np.arange(0,self.confidence_partition,dtype=np.float)
 		confidence_array = np.linspace(0,1,self.confidence_partition)
 		nT = self.dp.nT
@@ -1132,16 +1786,67 @@ class Fitter:
 		return output
 	
 	def decision_pdf(self,first_passage_pdfs,parameters,dead_time_convolver=None):
+		"""
+		self.decision_pdf(first_passage_pdfs,parameters,dead_time_convolver=None)
+		
+		This method computes the joint probability of a given response time
+		and performance for the supplied model parameters and the
+		first passage probability density.
+		
+		Input:
+			first_passage_pdfs: First passage probability density. A numpy
+				array of shape (2,self.dp.nT) that can be the output of
+				cost_time.DecisionPolicy.rt()
+			parameters: A dict with parameters as the one returned by
+				self.get_parameters_from_array(x)
+			dead_time_convolver: Can be None or the output from
+				self.get_dead_time_convolver(...)
+		
+		Output:
+			pdf: The joint probability density. A numpy array with of shape
+				(2,self.dp.nT+len(dead_time_convolver)-1).
+				The first axis represents hits [0] or misses [1].
+				The second array represents time as indeces to
+				numpy.arange(0,pdf.shape[1],dtype=np.float)*self.dp.dt
+		
+		"""
 		try:
 			conv_val,conv_x = dead_time_convolver
 		except:
 			conv_val,conv_x = self.get_dead_time_convolver(parameters)
 		decision_pdfs = scipy.signal.fftconvolve(first_passage_pdfs,conv_val.reshape((1,-1)),mode='full')
-		decision_pdfs[confidence_pdfs<0] = 0.
+		decision_pdfs[decision_pdfs<0] = 0.
 		decision_pdfs/=(np.sum(decision_pdfs)*self.dp.dt)
 		return decision_pdfs
 	
 	def binary_confidence_pdf(self,first_passage_pdfs,parameters,phigh_low=None,dead_time_convolver=None):
+		"""
+		self.binary_confidence_pdf(first_passage_pdfs,parameters,phigh_low=None,dead_time_convolver=None)
+		
+		This method computes the joint probability of a given response time,
+		binary confidence and performance for the supplied model parameters and
+		first passage probability density.
+		
+		Input:
+			first_passage_pdfs: First passage probability density. A numpy
+				array of shape (2,self.dp.nT) that can be the output of
+				cost_time.DecisionPolicy.rt()
+			parameters: A dict with parameters as the one returned by
+				self.get_parameters_from_array(x)
+			phigh_low: Can be None or a tuple (phigh,1.-phigh) where
+				phigh is the output from self.high_confidence_mapping(...)
+			dead_time_convolver: Can be None or the output from
+				self.get_dead_time_convolver(...)
+		
+		Output:
+			pdf: The joint probability density. A numpy array with of shape
+				(2,2,self.dp.nT+len(dead_time_convolver)-1).
+				The first axis represents hits [0] or misses [1].
+				The second axis represents low [0] and high [1] confidence
+				The third array represents time as indeces to
+				numpy.arange(0,pdf.shape[2],dtype=np.float)*self.dp.dt
+		
+		"""
 		if phigh_low is None:
 			phigh = self.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
 			plow = 1.-phigh
@@ -1160,6 +1865,21 @@ class Fitter:
 	
 	# Method dependent merits
 	def full_merit(self,x):
+		"""
+		self.full_merit(x)
+		
+		Returns the dataset's negative log likelihood (nLL) of jointly
+		observing a given response time and performance for the supplied
+		array of parameters x.
+		
+		Input:
+			x: A numpy array that is converted to the parameter dict with
+				a call to self.get_parameters_dict_from_array(x)
+		
+		Output:
+			the nLL as a floating point
+		
+		"""
 		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
@@ -1207,6 +1927,20 @@ class Fitter:
 		return nlog_likelihood
 	
 	def confidence_only_merit(self,x):
+		"""
+		self.confidence_only_merit(x)
+		
+		Returns the dataset's negative log likelihood (nLL) of observing
+		a given confidence for the supplied array of parameters x.
+		
+		Input:
+			x: A numpy array that is converted to the parameter dict with
+				a call to self.get_parameters_dict_from_array(x)
+		
+		Output:
+			the nLL as a floating point
+		
+		"""
 		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
@@ -1228,13 +1962,28 @@ class Fitter:
 				self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
+			conf_lik_pdf = np.sum(self.rt_confidence_pdf(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def full_confidence_merit(self,x):
+		"""
+		self.confidence_only_merit(x)
+		
+		Returns the dataset's negative log likelihood (nLL) of jointly
+		observing a given response time, confidence and performance for
+		the supplied array of parameters x.
+		
+		Input:
+			x: A numpy array that is converted to the parameter dict with
+				a call to self.get_parameters_dict_from_array(x)
+		
+		Output:
+			the nLL as a floating point
+		
+		"""
 		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
@@ -1275,7 +2024,7 @@ class Fitter:
 					self.__fit_internals__['first_passage_times'][drift] = gs
 			else:
 				gs = self.__fit_internals__['first_passage_times'][drift]
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
+			rt_conf_lik_matrix = self.rt_confidence_pdf(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1283,6 +2032,21 @@ class Fitter:
 		return nlog_likelihood
 	
 	def full_binary_confidence_merit(self,x):
+		"""
+		self.confidence_only_merit(x)
+		
+		Returns the negative log likelihood (nLL) of jointly observing a given
+		response time, performance and confidence below or above the
+		median for the supplied array of parameters 'x'.
+		
+		Input:
+			x: A numpy array that is converted to the parameter dict with
+				a call to self.get_parameters_dict_from_array(x)
+		
+		Output:
+			the nLL as a floating point
+		
+		"""
 		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if 'cost' in self.get_fitted_parameters() or 'internal_var' in self.get_fitted_parameters():
@@ -1334,6 +2098,21 @@ class Fitter:
 		return nlog_likelihood
 	
 	def binary_confidence_only_merit(self,x):
+		"""
+		self.confidence_only_merit(x)
+		
+		Returns the negative log likelihood (nLL) of jointly observing a given
+		response time and confidence below or above the median for the
+		supplied array of parameters 'x'.
+		
+		Input:
+			x: A numpy array that is converted to the parameter dict with
+				a call to self.get_parameters_dict_from_array(x)
+		
+		Output:
+			the nLL as a floating point
+		
+		"""
 		parameters = self.get_parameters_dict_from_array(x)
 		nlog_likelihood = 0.
 		if self.__fit_internals__ is None:
@@ -1363,10 +2142,18 @@ class Fitter:
 			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
 				binary_conf = 0 if conf<median_confidence else 1
 				nlog_likelihood-=np.log(rt_likelihood(t,binary_confidence_pdf[binary_conf],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
+		print(nlog_likelihood,x)
 		return nlog_likelihood
 	
 	# Force to compute merit functions on an arbitrary parameter dict
 	def forced_compute_full_merit(self,parameters):
+		"""
+		self.forced_compute_full_merit(parameters)
+		
+		The same as self.full_merit but on a parameter dict instead of a
+		parameter array.
+		
+		"""
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1382,6 +2169,13 @@ class Fitter:
 		return nlog_likelihood
 	
 	def forced_compute_confidence_only_merit(self,parameters):
+		"""
+		self.forced_compute_confidence_only_merit(parameters)
+		
+		The same as self.confidence_only_merit but on a parameter dict
+		instead of a parameter array.
+		
+		"""
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1392,13 +2186,20 @@ class Fitter:
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			conf_lik_pdf = np.sum(self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
+			conf_lik_pdf = np.sum(self.rt_confidence_pdf(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver),axis=2)
 			indeces = self.mu_indeces==index
 			for perf,conf in zip(self.performance[indeces],self.confidence[indeces]):
 				nlog_likelihood-=np.log(confidence_likelihood(conf_lik_pdf[1-int(perf)],conf)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
 	def forced_compute_full_confidence_merit(self,parameters):
+		"""
+		self.forced_compute_full_confidence_merit(parameters)
+		
+		The same as self.full_confidence_merit but on a parameter dict
+		instead of a parameter array.
+		
+		"""
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1409,7 +2210,7 @@ class Fitter:
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
-			rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
+			rt_conf_lik_matrix = self.rt_confidence_pdf(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
 			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
@@ -1417,6 +2218,13 @@ class Fitter:
 		return nlog_likelihood
 	
 	def forced_compute_full_binary_confidence_merit(self,parameters):
+		"""
+		self.forced_compute_full_binary_confidence_merit(parameters)
+		
+		The same as self.full_binary_confidence_merit but on a parameter dict
+		instead of a parameter array.
+		
+		"""
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1437,6 +2245,13 @@ class Fitter:
 		return nlog_likelihood
 	
 	def forced_compute_binary_confidence_only_merit(self,parameters):
+		"""
+		self.forced_compute_binary_confidence_only_merit(parameters)
+		
+		The same as self.binary_confidence_only_merit but on a parameter dict
+		instead of a parameter array.
+		
+		"""
 		nlog_likelihood = 0.
 		self.dp.set_cost(parameters['cost'])
 		self.dp.set_internal_var(parameters['internal_var'])
@@ -1459,6 +2274,28 @@ class Fitter:
 	
 	# Theoretical predictions
 	def theoretical_rt_confidence_distribution(self,fit_output=None,binary_confidence=None):
+		"""
+		self.theoretical_rt_confidence_distribution(fit_output=None,binary_confidence=None)
+		
+		Returns the theoretically predicted joint probability density of
+		RT, performance and confidence.
+		
+		Input:
+			fit_output: If None, it uses the instances fit_output. It is
+				used to extract the model parameters for the computation
+			binary_confidence: None or a Bool used to indicate whether to
+				force binary confidence pdf or not. If None, it returns
+				binary or not depending on the Fitter's method attribute
+		
+		Output:
+			(pdf,t)
+			pdf: A numpy array that can be like the output from a call
+				to self.rt_confidence_pdf(...) or
+				self.binary_confidence_pdf(...) depending on the
+				binary_confidence input.
+			t: The time array over which the pdf is computed
+		
+		"""
 		if binary_confidence is None:
 			binary_confidence = self.method=='binary_confidence_only' or self.method=='full_binary_confidence'
 		parameters = self.get_parameters_dict_from_fit_output(fit_output)
@@ -1473,14 +2310,14 @@ class Fitter:
 			plow = 1.-phigh
 		else:
 			mapped_confidences = self.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
-		
+		dead_time_convolver = self.get_dead_time_convolver(parameters)
 		output = None
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
 			if binary_confidence:
-				rt_conf_lik_matrix = self.binary_confidence_pdf(gs,parameters,phigh_low=(phigh,plow))
+				rt_conf_lik_matrix = self.binary_confidence_pdf(gs,parameters,phigh_low=(phigh,plow),dead_time_convolver=dead_time_convolver)
 			else:
-				rt_conf_lik_matrix = self.confidence_mapping_pdf_matrix(gs,parameters,mapped_confidences=mapped_confidences)
+				rt_conf_lik_matrix = self.rt_confidence_pdf(gs,parameters,mapped_confidences=mapped_confidences,dead_time_convolver=dead_time_convolver)
 			
 			if output is None:
 				output = rt_conf_lik_matrix*self.mu_prob[index]
@@ -1488,21 +2325,10 @@ class Fitter:
 				output+= rt_conf_lik_matrix*self.mu_prob[index]
 		output/=(np.sum(output)*self.dp.dt)
 		t = np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
-		#~ plt.subplot(211)
-		#~ plt.plot(t,output[0,0],label='[0,0] hit low')
-		#~ plt.plot(t,output[0,1],label='[0,1] hit high')
-		#~ plt.plot(t,output[1,0],label='[1,0] miss low')
-		#~ plt.plot(t,output[1,1],label='[1,1] miss high')
-		#~ plt.legend()
-		#~ plt.subplot(212)
-		#~ plt.plot(t,np.sum(output,axis=0)[0],label='sum(..,axis=0)[0] low')
-		#~ plt.plot(t,np.sum(output,axis=0)[1],label='sum(..,axis=0)[1] high')
-		#~ plt.legend()
-		#~ plt.show(True)
 		random_rt_likelihood = np.ones_like(output)
 		random_rt_likelihood[:,:,np.logical_or(t<self.min_RT,t>self.max_RT)] = 0.
 		random_rt_likelihood/=(np.sum(random_rt_likelihood)*self.dp.dt)
-		return output*(1.-parameters['phase_out_prob'])+parameters['phase_out_prob']*random_rt_likelihood, np.arange(0,output.shape[2],dtype=np.float)*self.dp.dt
+		return output*(1.-parameters['phase_out_prob'])+parameters['phase_out_prob']*random_rt_likelihood, t
 	
 	# Plotter
 	def plot_fit(self,fit_output=None,saver=None,show=True):
@@ -1510,6 +2336,75 @@ class Fitter:
 			raise ImportError('Could not import matplotlib package and it is imposible to plot fit')
 		
 		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,show=show)
+	
+	def stats(self,return_mean_rt=False,return_mean_confidence=False,return_median_rt=False,
+				return_median_confidence=False,return_std_rt=False,return_std_confidence=False,
+				return_auc=False):
+		pdf,t = self.theoretical_rt_confidence_distribution()
+		binary_confidence = self.method=='binary_confidence_only' or self.method=='full_binary_confidence'
+		dt = self.dp.dt
+		if self.experiment=='Luminancia':
+			tmax = 1.
+			valid = t<=tmax
+			t = t[valid]
+			pdf = pdf[:,:,valid]
+			pdf/=(np.sum(pdf)*dt)
+		c = np.linspace(0,1,pdf.shape[1])
+		dc = c[1]-c[0]
+		performance = np.sum(pdf[0]*dt)
+		performance_conditioned = np.sum(pdf[0],axis=2)*dt
+		if return_mean_rt or return_std_rt:
+			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
+			mean_rt = np.sum(any_perf_conf_pdf*t*dt)
+			mean_rt_conditioned = np.sum(pdf*t,axis=2)/np.sum(pdf,axis=2)
+			if return_std_rt:
+				std_rt = np.sqrt(np.sum(any_perf_conf_pdf*(t-mean_rt)**2*dt))
+				std_rt_conditioned = np.sqrt(np.sum(pdf*(t[None,None,:]-mean_rt_conditioned[:,:,None])**2,axis=2)/np.sum(pdf,axis=2))
+		if return_median_rt:
+			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
+			median_rt = np.interp(0.5,np.cumsum(any_perf_conf_pdf)*dt,t)
+			median_rt_conditioned = np.interp(0.5,np.cumsum(pdf,axis=2)/np.sum(pdf,axis=2),t)
+		if return_mean_confidence or return_std_confidence:
+			any_rt_pdf = np.sum(pdf,axis=2)*dt
+			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
+			mean_confidence = np.sum(any_perf_rt_pdf*c*dc)
+			mean_confidence_conditioned = np.sum(any_rt_pdf*c,axis=1)/np.sum(any_rt_pdf,axis=1)
+			if return_std_confidence:
+				std_confidence = np.sqrt(np.sum(any_perf_rt_pdf*(c-mean_confidence)**2*dc))
+				std_confidence_conditioned = np.sqrt(np.sum(any_rt_pdf*(c[None,:]-mean_confidence_conditioned[:,None])**2,axis=1)/np.sum(any_rt_pdf,axis=1))
+		if return_median_confidence:
+			any_rt_pdf = np.sum(pdf,axis=2)*dt
+			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
+			median_confidence = np.interp(0.5,np.cumsum(any_perf_rt_pdf)*dc,c)
+			median_confidence_conditioned = np.interp(0.5,np.cumsum(any_rt_pdf,axis=1)/np.sum(any_rt_pdf,axis=1),c)
+		if return_auc:
+			import scipy.integrate
+			pconf_hit = np.hstack((np.zeros(1),np.cumsum(np.sum(pdf[0],axis=1)*dt)))
+			pconf_hit/=pconf_hit[-1]
+			pconf_miss = np.hstack((np.zeros(1),np.cumsum(np.sum(pdf[1],axis=1)*dt)))
+			pconf_miss/=pconf_miss[-1]
+			auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
+		output = {'performance':performance,'performance_conditioned':performance_conditioned}
+		if return_mean_rt:
+			output['mean_rt'] = mean_rt
+			output['mean_rt_conditioned'] = mean_rt_conditioned
+		if return_mean_confidence:
+			output['mean_confidence'] = mean_confidence
+			output['mean_confidence_conditioned'] = mean_confidence_conditioned
+		if return_median_rt:
+			output['median_rt'] = median_rt
+			output['median_rt_conditioned'] = median_rt_conditioned
+		if return_median_confidence:
+			output['median_confidence'] = median_confidence
+			output['median_confidence_conditioned'] = median_confidence_conditioned
+		if return_std_rt:
+			output['std_rt'] = std_rt
+			output['std_rt_conditioned'] = std_rt_conditioned
+		if return_std_confidence:
+			output['std_confidence'] = std_confidence
+			output['std_confidence_conditioned'] = std_confidence_conditioned
+		if return_auc:
+			output['auc'] = auc
 
 class Fitter_plot_handler():
 	def __init__(self,obj,time_units):
@@ -1626,11 +2521,18 @@ class Fitter_plot_handler():
 			logging.debug('Created gridspecs')
 			axrt = plt.subplot(gs1[0])
 			logging.debug('Created rt axes')
-			plt.step(subj['t_array'],subj['rt'][0],'b',label='Subject hit')
-			#~ plt.step(subj['t_array'],-subj['rt'][1],'r',label='Subject miss')
-			plt.step(subj['t_array'],subj['rt'][1],'r',label='Subject miss')
+			if len(subj['t_array'])>len(subj['rt'][0]):
+				dt = subj['t_array'][1]-subj['t_array'][0]
+				t_extent = [subj['t_array'][0]-0.5*dt,subj['t_array'][-1]+0.5*dt]
+				subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+				subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+			else:
+				t_extent = [subj['t_array'][0],subj['t_array'][-1]]
+				subj_rt = subj['rt']
+				subj_confidence = subj['confidence']
+			plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
+			plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
 			plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
-			#~ plt.plot(model['t_array'],-model['rt'][1],'r',label='Model miss',linewidth=3)
 			plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted rt axes')
 			if xlim_rt_cutoff:
@@ -1641,16 +2543,18 @@ class Fitter_plot_handler():
 			logging.debug('Completed rt axes plot, legend and labels')
 			axconf = plt.subplot(gs1[1])
 			logging.debug('Created confidence axes')
-			plt.step(subj['c_array'],subj['confidence'][0],'b',label='Subject hit')
+			plt.step(subj['c_array'],subj_confidence[0],'b',label='Subject hit')
+			if model['confidence'].shape[1]==2:
+				model['c_array'] = np.array([0,1])
 			plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
 			if logscale:
-				plt.step(subj['c_array'],subj['confidence'][1],'r',label='Subject miss')
+				plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
 				plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
 				axconf.set_yscale('log')
 			else:
-				#~ plt.step(subj['c_array'],-subj['confidence'][1],'r',label='Subject miss')
+				#~ plt.step(subj['c_array'],-subj_confidence[1],'r',label='Subject miss')
 				#~ plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
-				plt.step(subj['c_array'],subj['confidence'][1],'r',label='Subject miss')
+				plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
 				plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
 			logging.debug('Plotted confidence axes')
 			plt.xlabel('Confidence')
@@ -1674,7 +2578,7 @@ class Fitter_plot_handler():
 			ax00 = plt.subplot(gs2[0,0])
 			logging.debug('Created subject hit axes')
 			plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=norm)
+						extent=[t_extent[0],t_extent[1],0,1],norm=norm)
 			plt.ylabel('Confidence')
 			plt.title('Hit')
 			logging.debug('Populated subject hit axes')
@@ -1689,7 +2593,7 @@ class Fitter_plot_handler():
 			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
 			logging.debug('Created subject miss axes')
 			plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[subj['t_array'][0],subj['t_array'][-1],0,1],norm=norm)
+						extent=[t_extent[0],t_extent[1],0,1],norm=norm)
 			plt.title('Miss')
 			logging.debug('Populated subject miss axes')
 			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
@@ -1724,6 +2628,7 @@ class Fitter_plot_handler():
 			if show:
 				logging.debug('Showing figure')
 				plt.show(True)
+				fig = None
 	
 	def save(self,fname):
 		logging.debug('Fitter_plot_handler state that will be saved = "%s"',self.__getstate__())
@@ -1768,10 +2673,16 @@ def parse_input():
                      confidence_only, full_confidence, binary_confidence_only
                      and full_binary_confidence. [Default full]
  '-o' or '--optimizer': String that identifies the optimizer used for fitting.
-                        Available values are 'cma' and all the scipy.optimize.minimize methods.
+                        Available values are 'cma', scipy's 'basinhopping',
+                        all the scipy.optimize.minimize and 
+                        scipy.optimizer.minimize_scalar methods.
                         WARNING, cma is suited for problems with more than one dimensional
                         parameter spaces. If the optimization is performed on a single
-                        dimension, the optimizer is changed to 'Nelder-Mead'. [Default cma]
+                        dimension, the optimizer is changed to 'Nelder-Mead' before
+                        processing the supplied optimizer_kwargs.
+                        If one of the minimize_scalar methods is supplied
+                        but more than one parameter is being fitted, a ValueError
+                        is raised. [Default cma]
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--save_plot_handler': This flag takes no value. If present, the plot_handler is saved.
  '--load_plot_handler': This flag takes no value. If present, the plot_handler is loaded from the disk.
@@ -1899,12 +2810,30 @@ def parse_input():
                        posible cma options. The additional option in this case is only
                        'restarts':INTEGER that sets the number of restarts used in the cmaes fmin
                        function.
-                       If a scipy optimizer is selected, refer to scipy minimize for
+                       If 'basinhopping' is selected, refer to scipy.optimize.basinhopping for
+                       a detailed list of all the available options.
+                       If another scipy optimizer is selected, refer to scipy minimize for
                        posible fmin options. The additional option in this case is
                        the 'repetitions':INTEGER that sets the number of independent
                        repetitions used by repeat_minize to find the minimum.
                        [Default depends on the optimizer. If 'cma', '{"restarts":1}'.
-                       If not 'cma', '{"disp": False, "maxiter": 1000, "maxfev": 10000, "repetitions": 10}'
+                       If 'basinhopping', '{"stepsize":0.25,"minimizer_kwargs":{"method":"Nelder-Mead"},"T":10.,"niter":100,"interval":10}.
+                       If not 'cma' or 'basinhopping', '{"disp": False, "maxiter": 1000, "maxfev": 10000, "repetitions": 10}']
+                       Note that the basinhopping can also accept options 'take_step', 'accept_test'
+                       and 'callback' which must be callable. To achieve this functionality
+                       you must pass the callable's full string definition with proper
+                       indentation. This string will be evaled and the returned value
+                       will be used to set the callable. Keep in mind that at the moment
+                       the string is evaled, 4 variables will be available:
+                       self: the Fitter instance
+                       start_point: a numpy array with the starting points for the fitted parameters,
+                       bounds: a 2D numpy array of shape (2,len(start_point)). bounds[0]
+                               is the lower bound and bounds[1] is the upper bound.
+                       optimizer_kwargs: a dict with the optimizer keyword arguments
+                       A default take_step and accept_test method is used. The latter
+                       only checks if the basinhopping's solution is within the bounds.
+                       The former makes normally distributed steps with standard
+                       deviation equal to stepsize*(bounds[1]-bounds[0]).
  
  '-f' or '--start_point_from_fit_output': A flag that tells the script to set the unspecified start_points
                        equal to the results of a previously saved fitting round. After the flag
@@ -2051,8 +2980,8 @@ def parse_input():
 	
 	if not options['start_point_from_fit_output'] is None:
 		keys = options['start_point_from_fit_output'].keys()
-		if (not 'method' in keys) or (not 'optimizer' in keys) or (not 'suffix' in keys):
-			raise ValueError("The supplied dictionary for 'start_point_from_fit_output' does not contain the all the required keys: 'method', 'optimizer' and 'suffix'")
+		if (not 'method' in keys) or (not 'optimizer' in keys) or (not 'suffix' in keys) or (not 'cmapmeth' in keys):
+			raise ValueError("The supplied dictionary for 'start_point_from_fit_output' does not contain the all the required keys: 'method', 'optimizer', 'suffix' and 'cmapmeth'")
 	
 	if options['high_confidence_mapping_method'].lower() not in ['log_odds','belief']:
 		raise ValueError("The supplied high_confidence_mapping_method is unknown. Available values are 'log_odds' and 'belief'. Got {0} instead.".format(options['high_confidence_mapping_method']))
@@ -2221,10 +3150,13 @@ if __name__=="__main__":
 	# Parse input from sys.argv
 	options = parse_input()
 	if options['debug']:
+		options['optimizer_kwargs']['disp'] = True
 		logging.basicConfig(level=logging.DEBUG)
 	elif options['verbose']:
+		options['optimizer_kwargs']['disp'] = True
 		logging.basicConfig(level=logging.INFO)
 	else:
+		options['optimizer_kwargs']['disp'] = False
 		logging.basicConfig(level=logging.WARNING)
 	task = options['task']
 	ntasks = options['ntasks']
@@ -2259,9 +3191,10 @@ if __name__=="__main__":
 						loaded_method = options['start_point_from_fit_output']['method']
 						loaded_optimizer = options['start_point_from_fit_output']['optimizer']
 						loaded_suffix = options['start_point_from_fit_output']['suffix']
+						loaded_cmapmeth = options['start_point_from_fit_output']['cmapmeth']
 						fname = Fitter_filename(experiment=s.experiment,method=loaded_method,name=s.get_name(),\
 												session=s.get_session(),optimizer=loaded_optimizer,suffix=loaded_suffix,\
-												confidence_map_method=options['high_confidence_mapping_method'])
+												confidence_map_method=loaded_cmapmeth)
 						logging.debug('Will load parameters from file: {0}'.format(fname))
 						fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
 					else:

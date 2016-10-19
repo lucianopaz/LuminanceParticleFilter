@@ -192,26 +192,25 @@ class Analyzer():
 		full_confidence_merit = fitter.forced_compute_full_confidence_merit(parameters)
 		full_merit = fitter.forced_compute_full_merit(parameters)
 		confidence_only_merit = fitter.forced_compute_confidence_only_merit(parameters)
-		model_prediction,t_array = fitter.theoretical_rt_confidence_distribution()
-		dt = fitter.dp.dt
+		fitter_stats = fitter.stats(return_mean_rt=True,return_mean_confidence=True,return_median_rt=True,
+				return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
+				return_auc=True)
+		
 		c_array = np.linspace(0,1,fitter.confidence_partition)
 		norm = np.sum(model_prediction)
 		norm0 = np.sum(model_prediction[0])
 		norm1 = np.sum(model_prediction[1])
-		performance = norm0/norm
-		confidence = np.sum(np.sum(model_prediction,axis=0)*c_array[:,None])/norm
-		hit_confidence = np.sum(model_prediction[0]*c_array[:,None])/norm0
-		miss_confidence = np.sum(model_prediction[1]*c_array[:,None])/norm1
-		rt = np.sum(np.sum(model_prediction,axis=0)*t_array[None,:])/norm
-		hit_rt = np.sum(model_prediction[0]*t_array[None,:])/norm0
-		miss_rt = np.sum(model_prediction[1]*t_array[None,:])/norm1
+		performance = fitter_stats['performance']
+		performance_conditioned = fitter_stats['performance_conditioned']
+		confidence = fitter_stats['mean_confidence']
+		hit_confidence = fitter_stats['mean_confidence_conditioned'][0]
+		miss_confidence = fitter_stats['mean_confidence_conditioned'][1]
+		rt = fitter_stats['mean_rt']
+		rt_conditioned = np.sum(fitter_stats['mean_rt_conditioned']*performance_conditioned,axis=1)
+		hit_rt = rt_conditioned[0]
+		miss_rt = rt_conditioned[1]
 		
-		pconf_hit = np.hstack((np.zeros(1),np.cumsum(np.sum(model_prediction[0],axis=1)*dt)))
-		pconf_hit/=pconf_hit[-1]
-		pconf_miss = np.hstack((np.zeros(1),np.cumsum(np.sum(model_prediction[1],axis=1)*dt)))
-		pconf_miss/=pconf_miss[-1]
-		
-		auc = scipy.integrate.trapz(pconf_miss,pconf_hit)
+		auc = fitter_stats['auc']
 		
 		key = 'experiment_'+fitter.experiment+'_subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
 		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'full_merit':full_merit,\
@@ -679,16 +678,16 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
-	parameters,parameter_names,names,sessions,experiments = \
-		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	#~ parameters,parameter_names,names,sessions,experiments = \
-		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
-													  #~ 'confidence_map_slope':'all',\
-													  #~ 'cost':'all',\
-													  #~ 'high_confidence_threshold':'all',\
-													  #~ 'dead_time':'all',\
-													  #~ 'dead_time_sigma':'all',\
-													  #~ 'phase_out_prob':'all'})
+		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
+	parameters,parameter_names,names,sessions,experiments = \
+		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+													  'confidence_map_slope':'all',\
+													  'cost':'all',\
+													  'high_confidence_threshold':'all',\
+													  'dead_time':'all',\
+													  'dead_time_sigma':'all',\
+													  'phase_out_prob':'all'})
 	
 	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
 	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
