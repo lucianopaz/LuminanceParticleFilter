@@ -9,6 +9,36 @@ import os, itertools, sys, random, re, scipy.integrate
 
 class SubjectSession:
 	def __init__(self,name,session,experiment,data_dir):
+		"""
+		SubjectSession(self,name,session,experiment,data_dir)
+		
+		This class is an interface to flexible load the data from
+		Ais et al 2016 of all 3 2AFC tasks. Upon creation, a list of
+		subject names, a list of sessions and a single experiment name
+		is provided along with a list of directory paths where the
+		corresponding data experimental data is located.
+		This class can then be used to load the data of the different
+		experiments into a standarized numpy array format.
+		
+		Input:
+			'name': A string or a list of strings that represent subject
+				names. These names can be arbitrary and unrelated to
+				the real name of the subject. In fact, the package
+				data_io_cognition provides a function to anonimize the
+				subjects
+			'session': An int or list of ints with the sessions that
+				should be loaded by the created SubjectSession instance.
+			'experiment': One of the two alternative forced choice
+				stardarized experiment names. The contrast task is named
+				'2AFC', the auditory task is named 'Auditivo' and the
+				luminance task is named 'Luminancia'. All experiment
+				names are case sensitive.
+			'data_dir': A string or list of strings that are paths to
+				the directories where to look for each of the subject's
+				names data files. If 'data_dir' is a list, 'name' must
+				also be a list of the same len.
+		
+		"""
 		try:
 			self.session = int(session)
 			self._single_session = True
@@ -19,17 +49,28 @@ class SubjectSession:
 		if isinstance(data_dir,list):
 			self.name = [str(n) for n in name]
 			self.data_dir = [str(d) for d in data_dir]
+			if len(self.name)!=len(self.data_dir):
+				raise ValueError('The data_dir and name lists must have the same number of elements')
 			self._single_data_dir = False
 			self._map_data_dir_name = {}
 			for n,d in zip(self.name,self.data_dir):
 				self._map_data_dir_name[d] = n
 		else:
+			if isinstance(name,list):
+				raise TypeError('The name input cannot be a list if the supplied data_dir is string')
 			self.name = str(name)
 			self.data_dir = str(data_dir)
 			self._map_data_dir_name = {self.data_dir:self.name}
 			self._single_data_dir = True
 	
 	def get_name(self):
+		"""
+		self.get_name()
+		
+		Returns a string with the subjectSession name properly converted
+		to a string.
+		
+		"""
 		if self._single_data_dir:
 			name = str(self.name)
 		else:
@@ -37,6 +78,13 @@ class SubjectSession:
 		return name
 	
 	def get_session(self):
+		"""
+		self.get_session()
+		
+		Returns a string with the subjectSession session properly
+		converted to a string.
+		
+		"""
 		if self._single_session:
 			session = str(self.session)
 		else:
@@ -44,19 +92,52 @@ class SubjectSession:
 		return session
 	
 	def get_key(self):
+		"""
+		self.get_key()
+		
+		Returns a string with the subjectSession key:
+		{experiment}_name={name}_session={session}
+		where {name} is taken from self.get_name() and {session} is
+		taken from self.get_session()
+		
+		"""
 		return '{experiment}_name={name}_session={session}'.format(experiment=self.experiment,name=self.get_name(),session=self.get_session())
 	
 	def get_name_from_data_dir(self,data_dir,override_raw_data_dir=None):
+		"""
+		self.get_name_from_data_dir(data_dir,override_raw_data_dir=None)
+		
+		Returns the name string that corresponds to the supplied data_dir.
+		
+		Optional input override_raw_data_dir:
+		Because sometimes the subjectSessions are constructed in other
+		systems and the data_dir may be different in the running system
+		it is posible to provide an override to the data_dir.
+		If override_raw_data_dir is not None, then it must be a dict
+		with keys 'replacement' and 'original'. The data dir is then
+		replaced as follows:
+		data_dir.replace(override_raw_data_dir['replacement'],override_raw_data_dir['original'])
+		
+		"""
 		if override_raw_data_dir is None:
 			return self._map_data_dir_name[data_dir]
 		else:
 			return self._map_data_dir_name[data_dir.replace(override_raw_data_dir['replacement'],override_raw_data_dir['original'])]
 	
 	def change_name(self,new_name,orig=None):
+		"""
+		self.change_name(new_name,orig=None)
+		
+		Change the subjectSession name with the supplied new_name string.
+		If the subjectSession has a list of names associated to it, it
+		is mandatory to supply the original name which is going to be
+		replaced in the input 'orig'.
+		
+		"""
 		if not self._single_data_dir:
 			if orig is None:
 				raise ValueError('Must supply the original name value when the SubjectSession has more than one data_dir')
-			changed_index = [index for index,n in self.name if n==orig][0]
+			changed_index = self.name.index(orig)
 			self.name[changed_index] = new_name
 			self._map_data_dir_name[self.data_dir[changed_index]] = new_name
 		else:
@@ -64,6 +145,19 @@ class SubjectSession:
 			self._map_data_dir_name[self.data_dir] = new_name
 	
 	def list_data_files(self,override_raw_data_dir=None):
+		"""
+		self.list_data_files(override_raw_data_dir=None)
+		
+		Returns a list of the data files in the data_dir paths.
+		The override_raw_data_dir can be used to replace portions of the
+		data_dir path. This feature is included for situations where
+		the subjectSession was created in a different path structure.
+		To do this, override_raw_data_dir must be a dict with keys
+		'original' and 'replacement'. Each of the data_dirs is replaced
+		as follows:
+		data_dir.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
+		
+		"""
 		if self._single_data_dir:
 			if override_raw_data_dir:
 				data_dir = self.data_dir.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
@@ -79,6 +173,23 @@ class SubjectSession:
 			return list(set(listdirs))
 	
 	def iter_data(self,override_raw_data_dir=None):
+		"""
+		self.iter_data(override_raw_data_dir=None)
+		
+		Iterate over the experimental data in the data files listed in
+		the data_dirs. override_raw_data_dir is provided for situations
+		where the subjectSession was created in a different path
+		structure. To do this, override_raw_data_dir must be a dict with
+		keys 'original' and 'replacement'. Each of the data_dirs is
+		replaced as follows:
+		data_dir.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
+		
+		Output:
+			Each yielded value is a 1D numpy.ndarray. Refer to
+			self.column_description to get a description of the data
+			contained at each index.
+		
+		"""
 		if self.experiment=='Luminancia':
 			if self._single_session:
 				data_files = [f for f in self.list_data_files(override_raw_data_dir) if ((int(re.search('(?<=_B)[0-9]+(?=_)',f).group())-1)//4+1)==self.session and f.endswith('.mat')]
@@ -150,16 +261,39 @@ class SubjectSession:
 				yield data_matrix
 	
 	def load_data(self,override_raw_data_dir=None):
-		first_element = True
-		for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir):
-			if first_element:
-				all_data = data_matrix
-				first_element = False
-			else:
-				all_data = np.concatenate((all_data,data_matrix),axis=0)
-		return all_data
+		"""
+		self.load_data(override_raw_data_dir=None)
+		
+		Iterates all the data using a comprehention list of
+		self.iter_data calls. Returns a 2D numpy.ndarray where the
+		axis=0 corresponds to separate trials and axis=1 is described
+		by self.column_description
+		
+		Input:
+			override_raw_data_dir: Refer to iter_data or list_data_files
+				for a detailed description of the functionality of this
+				input parameter.
+		
+		Output: 2D numpy.ndarray
+		
+		"""
+		return np.array([data_matrix for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir)])
+		#~ first_element = True
+		#~ for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir):
+			#~ if first_element:
+				#~ all_data = data_matrix
+				#~ first_element = False
+			#~ else:
+				#~ all_data = np.concatenate((all_data,data_matrix),axis=0)
+		#~ return all_data
 	
 	def column_description(self):
+		"""
+		self.column_description()
+		
+		Returns a list with the description of the data contained in each
+		column of the load_data
+		"""
 		numeric_name = isinstance(self.name,int)
 		if self.experiment=='Luminancia':
 			if numeric_name:
@@ -188,10 +322,12 @@ class SubjectSession:
 def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_session=None):
 	"""
 	subjects = unique_subjects(raw_data_dir,filter_by_experiment=None,filter_by_session=None)
-	 This function explores de data_dir supplied by the user and finds the
-	 unique subjects that participated in the experiment. The output is a
-	 list of subjects.
-	 """
+	
+	This function explores de data_dir supplied by the user and finds the
+	unique subjects that participated in the experiment. The output is a
+	list of anonimized subjectSession objects.
+	
+	"""
 	output = []
 	experiments = [d for d in os.listdir(raw_data_dir) if os.path.isdir(os.path.join(raw_data_dir,d))]
 	for experiment in experiments:
@@ -223,8 +359,10 @@ def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_ses
 def anonimize_subjects(subjectSessions):
 	"""
 	subjectSessions = anonimize_subjects(subjectSessions)
-	 Takes a list of SubjectSession objects and converts their names into
-	 a numerical id that overrides their original names.
+	
+	Takes a list of SubjectSession objects and converts their names into
+	a numerical id that overrides their original names.
+	
 	"""
 	names = []
 	for ss in subjectSessions:
@@ -244,7 +382,24 @@ def anonimize_subjects(subjectSessions):
 				ss.change_name(name_to_id[ss.name],ss.name)
 	return subjectSessions
 
-def filter_subjects_list(subjectSessions,criteria='all_experiments',filter_details=None):
+def filter_subjects_list(subjectSessions,criteria='all_experiments'):
+	"""
+	filter_subjects_list(subjectSessions,criteria='all_experiments')
+	
+	Take a list of subjectSession instances and filter it according to
+	the supplied criteria. Available criterias are:
+	'all_experiments': Remove the subjects that did not perform all of
+		the experiments performed by the rest of the subjects in the
+		supplied list.
+	'all_sessions_by_experiment': Remove the subjects that did not
+		perform the maximum number of sessions for all experiments
+	'experiment_{experiment_name}': Remove all the subjectSessions with
+		an experiment not named as the supplied {experiment_name}.
+	
+	Output: A list of subjectSessions that satisfy the criteria.
+	
+	"""
+	criteria = str(criteria).lower()
 	output = []
 	if criteria=='all_experiments':
 		names = [s.get_name() for s in subjectSessions]

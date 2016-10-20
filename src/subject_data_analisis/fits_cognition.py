@@ -49,14 +49,40 @@ import data_io_cognition as io
 import cost_time as ct
 import cma
 
-def rt_confidence_likelihood(confidence_matrix_time,confidence_matrix,RT,confidence):
-	if RT>confidence_matrix_time[-1] or RT<confidence_matrix_time[0]:
+def rt_confidence_likelihood(t,rt_confidence_pdf,RT,confidence):
+	"""
+	rt_confidence_likelihood(t,rt_confidence_pdf,RT,confidence):
+	
+	Static function that computes the joint probability density of a
+	certain real valued response time, RT, and confidence as the linear
+	interpolation of a discrete 2D array of RT-confidence probability
+	densities computed at the discrete set of times held in the input
+	array t and the array numpy.linspace(0,1,rt_confidence_pdf.shape[0])
+	of confidences.
+	
+	Input:
+		t: A numpy array with the times at which the probability density
+			is known
+		rt_confidence_pdf: A 2D numpy array of probability densities for
+			the input array t and the confidences
+			numpy.linspace(0,1,rt_confidence_pdf.shape[0]). The first
+			axis of rt_confidence_pdf corresponds to the confidence index
+			and the second axis corresponds to the time t.
+		RT: The real valued response time of which one wishes to
+			compute the probability density.
+		confidence: The real valued confidence of which one wishes to
+			compute the probability density.
+	
+	Output: A float whos value is the desired probability density
+	
+	"""
+	if RT>t[-1] or RT<t[0]:
 		return 0.
 	if confidence>1 or confidence<0:
 		return 0.
-	nC,nT = confidence_matrix.shape
+	nC,nT = rt_confidence_pdf.shape
 	confidence_array = np.linspace(0,1,nC)
-	t_ind = np.interp(RT,confidence_matrix_time,np.arange(0,nT,dtype=np.float))
+	t_ind = np.interp(RT,t,np.arange(0,nT,dtype=np.float))
 	c_ind = np.interp(confidence,confidence_array,np.arange(0,nC,dtype=np.float))
 	
 	floor_t_ind = int(np.floor(t_ind))
@@ -81,13 +107,32 @@ def rt_confidence_likelihood(confidence_matrix_time,confidence_matrix,RT,confide
 	for index,tw in enumerate(t_weight):
 		weight[:,index]*= tw
 	
-	prob = np.sum(confidence_matrix[floor_c_ind:ceil_c_ind+1,floor_t_ind:ceil_t_ind+1]*weight)
+	prob = np.sum(rt_confidence_pdf[floor_c_ind:ceil_c_ind+1,floor_t_ind:ceil_t_ind+1]*weight)
 	return prob
 
-def rt_likelihood(t,decision_pdf,RT):
+def rt_likelihood(t,rt_pdf,RT):
+	"""
+	rt_likelihood(t,rt_pdf,RT)
+	
+	Static function that computes the probability density of a certain
+	real valued response time, RT, as the linear interpolation of a
+	discrete array of RT probability densities computed at the discrete
+	set of times held in the input array t.
+	
+	Input:
+		t: A numpy array with the times at which the probability density
+			is known
+		rt_pdf: A numpy array of probability densities for the
+			input array t.
+		RT: The real valued response time of which one wishes to
+			compute the probability density.
+	
+	Output: A float whos value is the desired probability density
+	
+	"""
 	if RT>t[-1] or RT<t[0]:
 		return 0.
-	nT = decision_pdf.shape[0]
+	nT = rt_pdf.shape[0]
 	t_ind = np.interp(RT,t,np.arange(0,nT,dtype=np.float))
 	
 	floor_t_ind = int(np.floor(t_ind))
@@ -99,10 +144,27 @@ def rt_likelihood(t,decision_pdf,RT):
 	else:
 		weight = np.array([1.-t_ind%1.,t_ind%1.])
 	
-	prob = np.sum(decision_pdf[floor_t_ind:ceil_t_ind+1]*weight)
+	prob = np.sum(rt_pdf[floor_t_ind:ceil_t_ind+1]*weight)
 	return prob
 
 def confidence_likelihood(confidence_pdf,confidence):
+	"""
+	confidence_likelihood(confidence_pdf,confidence)
+	
+	Static function that computes the probability density of a certain
+	real valued confidence as the linear interpolation of a discrete
+	array of confidence probability densities computed at a discrete set
+	of confidence values.
+	
+	Input:
+		confidence_pdf: The array of discrete pdfs for confidences equal
+			to numpy.linspace(0,1,len(confidence_pdf))
+		confidence: The real valued confidence of which one wishes to
+			compute the probability density.
+	
+	Output: A float whos value is the desired probability density
+	
+	"""
 	if confidence>1. or confidence<0.:
 		return 0.
 	nC = confidence_pdf.shape[0]
@@ -133,23 +195,38 @@ def load_Fitter_from_file(fname):
 	return fitter
 
 def Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds'):
+	"""
+	Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds')
+	
+	Returns a string. Returns the formated filename for the supplied
+	experiment, method, name, session, optimizer, suffix and
+	confidence_map_method strings.
+	
+	The output has two formats for backwards compatibility:
+	If confidence_map_method is 'log_odds' the output is
+	'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
+	
+	If confidence_map_method is not 'log_odds' the output is
+	'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl'
+	
+	"""
 	if confidence_map_method=='log_odds':
 		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
 				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix)
 	else:
-		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{cmapmeth}{suffix}.pkl'.format(
-				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix,cmapmeth=confidence_map_method)
+		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl'.format(
+				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix,confidence_map_method=confidence_map_method)
 
 class Fitter:
 	#~ __module__ = os.path.splitext(os.path.basename(__file__))[0]
 	# Initer
-	def __init__(self,subjectSession,time_units='seconds',method='full',optimizer='cma',\
+	def __init__(self,subjectSession,time_units='seconds',method='full_confidence',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
-				high_confidence_mapping_method='log_odds'):
+				high_confidence_mapping_method='log_odds',binary_split_method='median'):
 		"""
-		Fitter(subjectSession,time_units='seconds',method='full',optimizer='cma',\
+		Fitter(subjectSession,time_units='seconds',method='full_confidence',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
-				high_confidence_mapping_method='log_odds')
+				high_confidence_mapping_method='log_odds',binary_split_method='median')
 		
 		Construct a Fitter instance that interfaces the fitting procedure
 		of the model's likelihood of the observed subjectSession data.
@@ -186,6 +263,22 @@ class Fitter:
 				space (the rescaling makes high confidence values (1 for
 				hits and 0 for misses) equal to 1 and g=0.5 equal to 0).
 				This linear mapping is also clipped to the interval [0,1].
+			binary_split_method: A string that identifies the split
+				method to binarize the subjectSession's confidence
+				reports. This is only used when calling the binary
+				confidence merit functions. To find the available split
+				methods refer to self.get_binary_confidence.
+		
+		Output: A Fitter instance that can be used as an interface to
+			fit the model's parameters to the subjectSession data
+		
+		Example assuming that subjectSession is a data_io_cognition.SubjectSession
+		instance:
+		fitter = Fitter(subjectSession)
+		fitter.fit()
+		fitter.save()
+		print(fitter.stats)
+		fitter.plot()
 		
 		"""
 		logging.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
@@ -205,6 +298,7 @@ class Fitter:
 		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
 		self.confidence_partition = int(confidence_partition)
 		self.high_confidence_mapping_method = str(high_confidence_mapping_method).lower()
+		self.binary_split_method = str(binary_split_method).lower()
 		self.__fit_internals__ = None
 	
 	# Setters
@@ -937,6 +1031,35 @@ class Fitter:
 			jac_dx['cost']*=1e-3
 		return jac_dx
 	
+	def get_binary_confidence_reports(self):
+		"""
+		self.get_binary_confidence_reports()
+		
+		Returns the subjectSession's binarized confidence reports
+		according to the binary_split_method attribute. Currently only 3
+		methods are available: 'median', 'half' and 'mean'. These methods
+		determine the split value and every confidence report that is
+		below said split is converted to 0 (low confidence) and those
+		greater or equal are converted to 1 (high confidence).
+		If binary_split_method is median, the split value is the median
+		of the confidence reports.
+		If binary_split_method is half, the split value is 0.5.
+		If binary_split_method is mean, the split value is the mean of
+		the confidence reports.
+		
+		"""
+		if self.binary_split_method=='median':
+			split = np.median(self.confidence)
+		elif self.binary_split_method=='half':
+			split = 0.5
+		elif self.binary_split_method=='mean':
+			split = np.mean(self.confidence)
+		else:
+			raise NotImplementedError("The split method {0} is not implemented".format(split_method))
+		binary_confidence = np.ones_like(self.confidence)
+		binary_confidence[self.confidence<split] = 0
+		return binary_confidence
+	
 	# Defaults
 	def default_decisionPolicyKwArgs(self):
 		"""
@@ -1132,13 +1255,13 @@ class Fitter:
 		elif self.high_confidence_mapping_method=='belief':
 			if invariant_decision_bounds:
 				try:
-					mb = min([2*np.min(self.dp.bounds[0])-1,1-2*np.min(self.dp.bounds[1])])
-					Mb = max([2*np.max(self.dp.bounds[0])-1,1-2*np.max(self.dp.bounds[1])])
+					mb = min([2*np.min(self.dp.bounds[0])-1,1-2*np.min(self.dp.bounds[1])])-1e-3
+					Mb = max([2*np.max(self.dp.bounds[0])-1,1-2*np.max(self.dp.bounds[1])])+1e-3
 					defaults['high_confidence_threshold'] = [mb,Mb]
 				except:
-					defaults['high_confidence_threshold'] = [0.,1.]
+					defaults['high_confidence_threshold'] = [-0.001,1.001]
 			else:
-				defaults['high_confidence_threshold'] = [0.,1.]
+				defaults['high_confidence_threshold'] = [-0.001,1.001]
 		else:
 			raise ValueError('Unknown high_confidence_mapping_method: {0}'.format(self.high_confidence_mapping_method))
 		defaults['confidence_map_slope'] = [0.,100.]
@@ -2081,7 +2204,10 @@ class Fitter:
 				except:
 					dead_time_convolver = self.get_dead_time_convolver(parameters)
 					self.__fit_internals__['dead_time_convolver'] = dead_time_convolver
-		median_confidence = np.median(self.confidence)
+		try:
+			binary_confidence = self.__fit_internals__['binary_confidence']
+		except:
+			binary_confidence = self.__fit_internals__['binary_confidence'] = self.get_binary_confidence_reports()
 		for index,drift in enumerate(self.mu):
 			if must_compute_first_passage_time:
 				gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
@@ -2092,8 +2218,7 @@ class Fitter:
 			binary_confidence_pdf = self.binary_confidence_pdf(gs,parameters,phigh_low=phigh_low,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,binary_confidence_pdf.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				binary_conf = 0 if conf<median_confidence else 1
+			for rt,perf,binary_conf in zip(self.rt[indeces],self.performance[indeces],binary_confidence[indeces]):
 				nlog_likelihood-=np.log(rt_likelihood(t,binary_confidence_pdf[(1-int(perf)),binary_conf],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
@@ -2128,7 +2253,10 @@ class Fitter:
 		phigh = self.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
 		phigh_low = (phigh,1.-phigh)
 		dead_time_convolver = self.__fit_internals__['dead_time_convolver']
-		median_confidence = np.median(self.confidence)
+		try:
+			binary_confidence = self.__fit_internals__['binary_confidence']
+		except:
+			binary_confidence = self.__fit_internals__['binary_confidence'] = self.get_binary_confidence_reports()
 		
 		for index,drift in enumerate(self.mu):
 			if must_compute_first_passage_time:
@@ -2139,10 +2267,8 @@ class Fitter:
 			binary_confidence_pdf = np.sum(self.binary_confidence_pdf(gs,parameters,phigh_low=phigh_low,dead_time_convolver=dead_time_convolver),axis=0)
 			t = np.arange(0,binary_confidence_pdf.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				binary_conf = 0 if conf<median_confidence else 1
+			for rt,binary_conf in zip(self.rt[indeces],binary_confidence[indeces]):
 				nlog_likelihood-=np.log(rt_likelihood(t,binary_confidence_pdf[binary_conf],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
-		print(nlog_likelihood,x)
 		return nlog_likelihood
 	
 	# Force to compute merit functions on an arbitrary parameter dict
@@ -2233,14 +2359,13 @@ class Fitter:
 		phigh = self.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
 		phigh_low = (phigh,1.-phigh)
 		dead_time_convolver = self.get_dead_time_convolver(parameters)
-		median_confidence = np.median(self.confidence)
+		binary_confidence = self.get_binary_confidence_reports()
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
 			binary_confidence_pdf = self.binary_confidence_pdf(gs,parameters,phigh_low=phigh_low,dead_time_convolver=dead_time_convolver)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,perf,conf in zip(self.rt[indeces],self.performance[indeces],self.confidence[indeces]):
-				binary_conf = 0 if conf<median_confidence else 1
+			for rt,perf,binary_conf in zip(self.rt[indeces],self.performance[indeces],binary_confidence[indeces]):
 				nlog_likelihood-=np.log(rt_likelihood(t,binary_confidence_pdf[(1-int(perf)),binary_conf],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
@@ -2260,15 +2385,14 @@ class Fitter:
 		random_rt_likelihood = 0.5*parameters['phase_out_prob']
 		phigh = self.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
 		phigh_low = (phigh,1.-phigh)
-		median_confidence = np.median(self.confidence)
+		binary_confidence = self.get_binary_confidence_reports()
 		
 		for index,drift in enumerate(self.mu):
 			gs = np.array(self.dp.rt(drift,bounds=(xub,xlb)))
 			binary_confidence_pdf = np.sum(self.binary_confidence_pdf(gs,parameters,phigh_low=phigh_low,dead_time_convolver=dead_time_convolver),axis=0)
 			t = np.arange(0,rt_conf_lik_matrix.shape[-1])*self.dp.dt
 			indeces = self.mu_indeces==index
-			for rt,conf in zip(self.rt[indeces],self.confidence[indeces]):
-				binary_conf = 0 if conf<median_confidence else 1
+			for rt,binary_conf in zip(self.rt[indeces],binary_confidence[indeces]):
 				nlog_likelihood-=np.log(rt_likelihood(t,binary_confidence_pdf[binary_conf],rt)*(1-parameters['phase_out_prob'])+random_rt_likelihood)
 		return nlog_likelihood
 	
@@ -2331,16 +2455,100 @@ class Fitter:
 		return output*(1.-parameters['phase_out_prob'])+parameters['phase_out_prob']*random_rt_likelihood, t
 	
 	# Plotter
-	def plot_fit(self,fit_output=None,saver=None,show=True):
+	def plot_fit(self,fit_output=None,saver=None,show=True,is_binary_confidence=None):
+		"""
+		self.plot_fit(fit_output=None,saver=None,show=True)
+		
+		This function actually only performs the following
+		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,show=show,is_binary_confidence=is_binary_confidence)
+		
+		The first part only gets the corresponding Fitter_plot_handler
+		instance and then calls the handler's plot method. For a detailed
+		description of the plot's functionallity refer to
+		Fitter_plot_handler.plot
+		
+		"""
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to plot fit')
 		
-		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,show=show)
+		self.get_fitter_plot_handler(fit_output=fit_output).plot(saver=saver,show=show,is_binary_confidence=is_binary_confidence)
 	
-	def stats(self,return_mean_rt=False,return_mean_confidence=False,return_median_rt=False,
+	def stats(self,fit_output=None,binary_confidence=None,return_mean_rt=False,
+				return_mean_confidence=False,return_median_rt=False,
 				return_median_confidence=False,return_std_rt=False,return_std_confidence=False,
 				return_auc=False):
-		pdf,t = self.theoretical_rt_confidence_distribution()
+		"""
+		self.stats(fit_output=None,binary_confidence=None,return_mean_rt=False,
+				return_mean_confidence=False,return_median_rt=False,
+				return_median_confidence=False,return_std_rt=False,return_std_confidence=False,
+				return_auc=False)
+		
+		This function computes some relevant statistics predicted by the
+		fitted model. The fitted parameters are used if the input
+		fit_output is None, and if it is not None it uses the provided
+		parameters.
+		The input binary_confidence can be provided to override the
+		default confidence behavior. If None, the default confidence
+		behavior is used (continuous or binary). If it is True, then
+		the computations force binary confidence. This means that all
+		the conditioned statistics over confidence will be for low (index
+		0) and high (index 1) confidence values. If it is False, then
+		the computations force continuous confidence values. This means
+		that all the conditioned statistics over confidence will be
+		computed on the array numpy.linspace(0,1,self.confidence_partition).
+		
+		It can compute the following:
+		performance: A float with the model's predicted overall performance.
+		performance_conditioned: A numpy array of floats with the model's
+			performance conditioned to a given confidence report. The
+			confidence values are numpy.linspace(0,1,self.confidence_partition)
+			if the model does not use binary confidence. If the model
+			uses binary confidence, the confidence values are [0,1].
+			The default binary confidence can be overriden with the
+			input binary_confidence.
+		mean_rt: A float with the mean overall response time. Is only
+			returned if return_mean_rt is True.
+		mean_rt_conditioned: A 2D numpy array of floats with the mean
+			response time conditioned to performance (first axis) and
+			confidence values (second axis). Is only
+			returned if return_mean_rt is True.
+		median_rt: A float with the median overall response time. Is only
+			returned if return_median_rt is True.
+		median_rt_conditioned: A 2D numpy array of floats with the median
+			response time conditioned to performance (first axis) and
+			confidence values (second axis). Is only returned if
+			return_median_rt is True.
+		std_rt: A float with the std overall response time. Is only
+			returned if return_std_rt is True.
+		std_rt_conditioned: A 2D numpy array of floats with the std
+			response time conditioned to performance (first axis) and
+			confidence values (second axis). Is only returned if
+			return_std_rt is True.
+		mean_confidence: A float with the mean overall confidence. Is
+			only returned if return_mean_confidence is True.
+		mean_confidence_conditioned: A numpy array of floats with the
+			mean confidence conditioned to performance. Is only returned
+			if return_mean_confidence is True.
+		median_confidence: A float with the median overall confidence.
+			Is only returned if return_median_confidence is True.
+		median_confidence_conditioned: A numpy array of floats with the
+			median confidence conditioned to performance. Is only
+			returned if return_median_confidence is True.
+		std_confidence: A float with the std overall confidence. Is only
+			returned if return_std_confidence is True.
+		std_confidence_conditioned: A numpy array of floats with the std
+			confidence conditioned to performance. Is only returned if
+			return_std_confidence is True.
+		auc: A float with the area under the Receiver Operating
+			Characteristic (ROC) curve. Is only returned if return_auc
+			is True.
+		
+		Output:
+			A dictionary with keys equal to the above mentioned statistic
+			names.
+		
+		"""
+		pdf,t = self.theoretical_rt_confidence_distribution(fit_output=fit_output)
 		binary_confidence = self.method=='binary_confidence_only' or self.method=='full_binary_confidence'
 		dt = self.dp.dt
 		if self.experiment=='Luminancia':
@@ -2408,6 +2616,79 @@ class Fitter:
 
 class Fitter_plot_handler():
 	def __init__(self,obj,time_units):
+		"""
+		Fitter_plot_handler(dictionary,time_units)
+		
+		This class implements a flexible way to handle data ploting for
+		separate subjectSessions and their corresponding fitted models
+		encoded by a Fitter class instance. However, the most important
+		feature of the Fitter_plot_handler is that it is easy to
+		merge several different subjectSessions data and Fitter
+		theoretical predictions. This is done by holding an internal
+		dictionary that holds the experimental and theoretical probability
+		densities for response times, confidence, and joint RT-confidence
+		distributions for hit and miss trials. It also holds the array
+		of times over which the RT distribution were computed and the
+		array of confidence values over which the confidence distribution
+		were computed. This is done for keys that represent the experiment,
+		session and subject name. These keys can be aliased and merged
+		easily. Then the data can be plotted with the plot method.
+		
+		Input:
+			dictionary: a dict with the following hierarchy
+				{key:{'experimental':{'t_array':numpy.ndarray,
+									  'c_array':numpy.ndarray,
+									  'rt':numpy.ndarray,
+									  'confidence':numpy.ndarray,
+									  'hit_histogram':numpy.ndarray,
+									  'miss_histogram':numpy.ndarray},
+					  'theoretical':{'t_array':numpy.ndarray,
+									  'c_array':numpy.ndarray,
+									  'rt':numpy.ndarray,
+									  'confidence':numpy.ndarray,
+									  'hit_histogram':numpy.ndarray,
+									  'miss_histogram':numpy.ndarray}}}
+				The base key must have the following format
+				{experiment}_subject_{name}_session_{session}.
+				When merging the data of every subject or session, or
+				both, the keys fields _subject_{name} and/or _session_{session}
+				are removed and the inner 't_array', 'rt', 'confidence',
+				'hit_histogram' and 'miss_histogram's are merged.
+				
+				The 'experimental' key holds the subjectSession's data.
+				The 'theoretical' key holds the theoretical predictions.
+				The 't_array' is the array of times on which the
+				probability densities were computed (in the theoretical)
+				or the edges of the histogram with which the 'experimental'
+				'rt' probabilities were computed.
+				The 'c_array' is the same as the 't_array' but for
+				confidence.
+				The 'rt' holds the response time histogram (experimental)
+				or the probability density (theoretical).
+				The 'confidence' holds the confidence histogram (experimental)
+				or the  probability density (theoretical).
+				The 'hit_histogram' and 'miss_histogram' are 2D numpy
+				arrays that hold the 2D histograms (experimental)
+				or probability densities (theoretical) of the confidence
+				and response time. The first index corresponds to
+				confidence and the second to time.
+			'time_units': Can be 'seconds' or 'milliseconds', and specify
+				the time units in which the supplied dictionary is
+				encoded.
+		
+		In order to merge to different Fitter_plot_handler instances 'a'
+		and 'b', it is only necessary to do sum them. Assume that 'a' has
+		a single key 'ka' and 'b' has a single key 'kb'
+		
+		c = a+b
+		
+		The c instance will have a single key if 'ka'=='kb' and two keys
+		if 'ka'!='kb'. These keys can then be merged with the desired
+		rule by doing:
+		
+		c = c.merge(merge='all')
+		
+		"""
 		self._time_units = time_units
 		self.required_data = ['hit_histogram','miss_histogram','rt','confidence','t_array','c_array']
 		# For backward compatibility
@@ -2435,6 +2716,13 @@ class Fitter_plot_handler():
 			raise RuntimeError('Invalid object used to init Fitter_plot_handler')
 	
 	def time_units(self):
+		"""
+		self.time_units()
+		
+		Returns the time unit's alias for inserting into the plots
+		xlabels.
+		
+		"""
 		return {'seconds':'s','milliseconds':'ms'}[self._time_units]
 	
 	def keys(self):
@@ -2484,26 +2772,93 @@ class Fitter_plot_handler():
 		output+=other
 		return output
 	
-	def normalize(self):
-		for key in self.keys():
+	def normalize(self,in_place=True):
+		"""
+		self.normalize(in_place=True)
+		
+		For every key and 'theoretical' and 'experimental' inner
+		categories, normalize the 'rt', 'confidence', 'hit_histogram' and
+		'miss_histogram' distributions.
+		
+		If in_place is True, the normalization is done on the
+		Fitter_plot_handler caller instance. Be aware that this means
+		that it will not be safe to add it with other unnormalized
+		Fitter_plot_handler instances. If in_place is False, it returns a
+		new normalized Fitter_plot_handler instance.
+		
+		"""
+		logging.debug('Normalizing Fitter_plot_handler in place? {0}'.format(in_place))
+		if in_place:
+			out = self
+		else:
+			out = Fitter_plot_handler(self,self._time_units)
+		for key in out.keys():
 			for category in self.categories:
-				dt = self[key][category]['t_array'][1]-self[key][category]['t_array'][0]
-				for required_data in self.required_data:
-					if not required_data in ['t_array','c_array']:
-						if required_data!='confidence':
-							self[key][category][required_data]/= (np.sum(self[key][category][required_data])*dt)
-						else:
-							self[key][category][required_data]/= np.sum(self[key][category][required_data])
+				dt = out[key][category]['t_array'][1]-out[key][category]['t_array'][0]
+				out[key][category]['rt']/=(np.sum(out[key][category]['rt'])*dt)
+				out[key][category]['confidence']/=np.sum(out[key][category]['confidence'])
+				out[key][category]['hit_histogram']/=(np.sum(out[key][category]['hit_histogram'])*dt)
+				out[key][category]['miss_histogram']/=(np.sum(out[key][category]['miss_histogram'])*dt)
+		return out
 	
-	def plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True):
+	def plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,is_binary_confidence=None):
+		"""
+		plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,is_binary_confidence=None)
+		
+		Main plotting routine has two completely different output forms
+		that depend on the parameter is_binary_confidence. If
+		is_binary_confidence is True (or if it is None but the
+		Fitter_plot_handler caller was constructed from a binary
+		confidence Fitter instance) then this function produces a figure
+		with 4 axes distributed as a subplot(22i).
+		subplot(221) will hold the rt distribution of hits and misses
+		subplot(222) will hold the rt distribution of high and low
+		confidence reports
+		subplot(223) will hold the rt distribution of high and low hit
+		confidence reports
+		subplot(224) will hold the rt distribution of high and low miss
+		confidence reports
+		
+		If is_binary_confidence is False (or if it is None but the
+		Fitter_plot_handler caller was constructed from a continuous
+		confidence Fitter instance) then this function produces a figure
+		with 6 axes distributed as a subplot(32i).
+		subplot(321) will hold the rt distribution of hits and misses
+		subplot(322) will hold the confidence distribution of hits and
+		misses. This plot can be in logscale if the input logscale is
+		True.
+		subplot(323) and subplot(324) will hold the experimental joint
+		rt-confidence distributions of hits and misses respectively.
+		subplot(325) and subplot(326) will hold the theoretical joint
+		rt-confidence distributions of hits and misses respectively.
+		All four of the above mentioned graph are affected by the
+		logscale input parameter. If True, the colorscale is logarithmic.
+		
+		Other input arguments:
+		xlim_rt_cutoff: A bool that indicates whether to set the
+			theoretical graphs xlim equal to experimental xlim for all
+			plots that involve response times.
+		show: A bool indicating whether to show the figure after it has
+			been created and freezing the execution until it is closed.
+		saver: If it is not None, saver must be a string or an object
+			that implements the savefig method similar to
+			matplotlib.pyplot.savefig. If it is a string it will be used
+			to save the figure as:
+			matplotlib.pyplot.savefig(saver,,bbox_inches='tight')
+		
+		"""
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to produce any plot')
-		self.normalize()
+		handler = self.normalize(in_place=False)
 		
-		for key in sorted(self.keys()):
+		for key in sorted(handler.keys()):
 			logging.info('Preparing to plot key {0}'.format(key))
-			subj = self.dictionary[key]['experimental']
-			model = self.dictionary[key]['theoretical']
+			subj = handler.dictionary[key]['experimental']
+			model = handler.dictionary[key]['theoretical']
+			
+			if is_binary_confidence is None:
+				is_binary_confidence = len(model['c_array'])==2
+			logging.debug('Is binary confidence? {0}'.format(is_binary_confidence))
 			
 			rt_cutoff = subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])
 			
@@ -2515,110 +2870,193 @@ class Fitter_plot_handler():
 				fig.clf()
 				plt.figure(fig.number)
 				logging.debug('Cleared figure instance {0} and setted it as the current figure'.format(fig.number))
-			gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, top=0.95,bottom=0.70)
-			gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
-			gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
-			logging.debug('Created gridspecs')
-			axrt = plt.subplot(gs1[0])
-			logging.debug('Created rt axes')
-			if len(subj['t_array'])>len(subj['rt'][0]):
+			if not is_binary_confidence:
+				gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, top=0.95,bottom=0.70)
+				gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
+				gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
+				logging.debug('Created gridspecs')
+				axrt = plt.subplot(gs1[0])
+				logging.debug('Created rt axes')
+				if len(subj['t_array'])>len(subj['rt'][0]):
+					dt = subj['t_array'][1]-subj['t_array'][0]
+					t_extent = [subj['t_array'][0]-0.5*dt,subj['t_array'][-1]+0.5*dt]
+					subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+					subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+				else:
+					t_extent = [subj['t_array'][0],subj['t_array'][-1]]
+					subj_rt = subj['rt']
+					subj_confidence = subj['confidence']
+				plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
+				plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
+				plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
+				plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+				logging.debug('Plotted rt axes')
+				if xlim_rt_cutoff:
+					axrt.set_xlim([0,rt_cutoff])
+				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+				plt.ylabel('Prob density')
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				logging.debug('Completed rt axes plot, legend and labels')
+				axconf = plt.subplot(gs1[1])
+				logging.debug('Created confidence axes')
+				plt.step(subj['c_array'],subj_confidence[0],'b',label='Subject hit')
+				if model['confidence'].shape[1]==2:
+					model['c_array'] = np.array([0,1])
+				plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
+				if logscale:
+					plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
+					plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
+					axconf.set_yscale('log')
+				else:
+					#~ plt.step(subj['c_array'],-subj_confidence[1],'r',label='Subject miss')
+					#~ plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
+					plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
+					plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
+				logging.debug('Plotted confidence axes')
+				plt.xlabel('Confidence')
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				#~ gs1.tight_layout(fig,rect=(0.10, 0.70, 0.90, 0.95), pad=0, w_pad=0.03)
+				logging.debug('Completed confidence axes plot, legend and labels')
+				
+				if logscale:
+					vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
+								   np.min(subj['miss_histogram'][(subj['miss_histogram']>0).nonzero()])])
+					norm = LogNorm()
+				else:
+					vmin = np.min([np.min(subj['hit_histogram']),
+								   np.min(subj['miss_histogram']),
+								   np.min(model['hit_histogram']),
+								   np.min(model['miss_histogram'])])
+					norm = None
+				vmax = np.max([np.max([subj['hit_histogram'],subj['miss_histogram']]),
+							   np.max([model['hit_histogram'],model['miss_histogram']])])
+				
+				ax00 = plt.subplot(gs2[0,0])
+				logging.debug('Created subject hit axes')
+				plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+							extent=[t_extent[0],t_extent[1],0,1],norm=norm)
+				plt.ylabel('Confidence')
+				plt.title('Hit')
+				logging.debug('Populated subject hit axes')
+				ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
+				logging.debug('Created model hit axes')
+				plt.imshow(model['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+							extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
+				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+				plt.ylabel('Confidence')
+				logging.debug('Populated model hit axes')
+				
+				ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
+				logging.debug('Created subject miss axes')
+				plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+							extent=[t_extent[0],t_extent[1],0,1],norm=norm)
+				plt.title('Miss')
+				logging.debug('Populated subject miss axes')
+				ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
+				logging.debug('Created model miss axes')
+				im = plt.imshow(model['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
+							extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
+				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+				if xlim_rt_cutoff:
+					ax00.set_xlim([0,rt_cutoff])
+				logging.debug('Populated model miss axes')
+				
+				ax00.tick_params(labelleft=True, labelbottom=False)
+				ax01.tick_params(labelleft=False, labelbottom=False)
+				ax10.tick_params(labelleft=True, labelbottom=True)
+				ax11.tick_params(labelleft=False, labelbottom=True)
+				logging.debug('Completed histogram axes')
+				
+				cbar_ax = plt.subplot(gs3[0])
+				logging.debug('Created colorbar axes')
+				plt.colorbar(im, cax=cbar_ax)
+				plt.ylabel('Prob density')
+				logging.debug('Completed colorbar axes')
+				
+				plt.suptitle(key)
+				logging.debug('Sucessfully completed figure for key {0}'.format(key))
+			else: # binary confidence
+				gs1 = gridspec.GridSpec(2, 2,left=0.10, right=0.90, top=0.95,bottom=0.1)
+				logging.debug('Created gridspecs')
+				axrt = plt.subplot(gs1[0,0])
+				logging.debug('Created rt axes')
 				dt = subj['t_array'][1]-subj['t_array'][0]
-				t_extent = [subj['t_array'][0]-0.5*dt,subj['t_array'][-1]+0.5*dt]
-				subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
-				subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
-			else:
-				t_extent = [subj['t_array'][0],subj['t_array'][-1]]
-				subj_rt = subj['rt']
-				subj_confidence = subj['confidence']
-			plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
-			plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
-			plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
-			plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
-			logging.debug('Plotted rt axes')
-			if xlim_rt_cutoff:
-				axrt.set_xlim([0,rt_cutoff])
-			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
-			plt.ylabel('Prob density')
-			plt.legend(loc='best', fancybox=True, framealpha=0.5)
-			logging.debug('Completed rt axes plot, legend and labels')
-			axconf = plt.subplot(gs1[1])
-			logging.debug('Created confidence axes')
-			plt.step(subj['c_array'],subj_confidence[0],'b',label='Subject hit')
-			if model['confidence'].shape[1]==2:
-				model['c_array'] = np.array([0,1])
-			plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
-			if logscale:
-				plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
-				plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
-				axconf.set_yscale('log')
-			else:
-				#~ plt.step(subj['c_array'],-subj_confidence[1],'r',label='Subject miss')
-				#~ plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
-				plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
-				plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
-			logging.debug('Plotted confidence axes')
-			plt.xlabel('Confidence')
-			plt.legend(loc='best', fancybox=True, framealpha=0.5)
-			#~ gs1.tight_layout(fig,rect=(0.10, 0.70, 0.90, 0.95), pad=0, w_pad=0.03)
-			logging.debug('Completed confidence axes plot, legend and labels')
+				subj_performance = np.sum(subj['rt'][0])*dt
+				subj_median_confidence_ind = (np.cumsum(np.sum(subj['confidence'],axis=0))>=0.5).nonzero()[0][0]
+				subj_lowconf_rt = np.array([np.sum(subj['hit_histogram'][:subj_median_confidence_ind],axis=0)*subj_performance,
+											np.sum(subj['miss_histogram'][:subj_median_confidence_ind],axis=0)*(1-subj_performance)])
+				subj_highconf_rt = np.array([np.sum(subj['hit_histogram'][subj_median_confidence_ind:],axis=0)*subj_performance,
+											np.sum(subj['miss_histogram'][subj_median_confidence_ind:],axis=0)*(1-subj_performance)])
+				model_performance = np.sum(model['rt'][0])*(model['t_array'][1]-model['t_array'][0])
+				if model['confidence'].shape[1]>2:
+					model_median_confidence_ind = (np.cumsum(np.sum(model['confidence'],axis=0))>=0.5).nonzero()[0][0]
+					model_low_rt = np.array([np.sum(model['hit_histogram'][:model_median_confidence_ind],axis=0)*model_performance,
+											np.sum(model['miss_histogram'][:model_median_confidence_ind],axis=0)*(1-model_performance)])
+					model_high_rt = np.array([np.sum(model['hit_histogram'][model_median_confidence_ind:],axis=0)*model_performance,
+											np.sum(model['miss_histogram'][model_median_confidence_ind:],axis=0)*(1-model_performance)])
+				else:
+					model_low_rt = np.array([model['hit_histogram'][0]*model_performance,
+											model['miss_histogram'][0]*(1-model_performance)])
+					model_high_rt = np.array([model['hit_histogram'][1]*model_performance,
+											model['miss_histogram'][1]*(1-model_performance)])
+				if len(subj['t_array'])>len(subj['rt'][0]):
+					subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+					subj_lowconf_rt = np.hstack((subj_lowconf_rt,np.array([subj_lowconf_rt[:,-1]]).T))
+					subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
+				else:
+					subj_rt = subj['rt']
+				
+				plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
+				plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
+				plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
+				plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+				logging.debug('Plotted rt axes')
+				if xlim_rt_cutoff:
+					axrt.set_xlim([0,rt_cutoff])
+				plt.ylabel('Prob density')
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				logging.debug('Completed rt axes plot, legend and labels')
+				
+				axconf = plt.subplot(gs1[0,1])
+				logging.debug('Created confidence axes')
+				plt.step(subj['t_array'],np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject low')
+				plt.step(subj['t_array'],np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject high')
+				plt.plot(model['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model low',linewidth=3)
+				plt.plot(model['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model high',linewidth=3)
+				if xlim_rt_cutoff:
+					axconf.set_xlim([0,rt_cutoff])
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				logging.debug('Plotted confidence axes')
+				
+				axhitconf = plt.subplot(gs1[1,0])
+				logging.debug('Created hit confidence axes')
+				plt.step(subj['t_array'],subj_lowconf_rt[0],'mediumpurple',label='Subject hit low')
+				plt.step(subj['t_array'],subj_highconf_rt[0],'forestgreen',label='Subject hit high')
+				plt.plot(model['t_array'],model_low_rt[0],'mediumpurple',label='Model hit low',linewidth=3)
+				plt.plot(model['t_array'],model_high_rt[0],'forestgreen',label='Model hit high',linewidth=3)
+				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+				plt.ylabel('Prob density')
+				if xlim_rt_cutoff:
+					axhitconf.set_xlim([0,rt_cutoff])
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				logging.debug('Plotted hit confidence axes')
+				
+				axmissconf = plt.subplot(gs1[1,1])
+				logging.debug('Created miss confidence axes')
+				plt.step(subj['t_array'],subj_lowconf_rt[1],'mediumpurple',label='Subject miss low')
+				plt.step(subj['t_array'],subj_highconf_rt[1],'forestgreen',label='Subject miss high')
+				plt.plot(model['t_array'],model_low_rt[1],'mediumpurple',label='Model miss low',linewidth=3)
+				plt.plot(model['t_array'],model_high_rt[1],'forestgreen',label='Model miss high',linewidth=3)
+				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
+				if xlim_rt_cutoff:
+					axmissconf.set_xlim([0,rt_cutoff])
+				plt.legend(loc='best', fancybox=True, framealpha=0.5)
+				logging.debug('Plotted miss confidence axes')
+				logging.debug('Completed confidence axes plot, legend and labels')
+				
+				plt.suptitle(key)
+				logging.debug('Sucessfully completed figure for key {0}'.format(key))
 			
-			if logscale:
-				vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
-							   np.min(subj['miss_histogram'][(subj['miss_histogram']>0).nonzero()])])
-				norm = LogNorm()
-			else:
-				vmin = np.min([np.min(subj['hit_histogram']),
-							   np.min(subj['miss_histogram']),
-							   np.min(model['hit_histogram']),
-							   np.min(model['miss_histogram'])])
-				norm = None
-			vmax = np.max([np.max([subj['hit_histogram'],subj['miss_histogram']]),
-						   np.max([model['hit_histogram'],model['miss_histogram']])])
-			
-			ax00 = plt.subplot(gs2[0,0])
-			logging.debug('Created subject hit axes')
-			plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[t_extent[0],t_extent[1],0,1],norm=norm)
-			plt.ylabel('Confidence')
-			plt.title('Hit')
-			logging.debug('Populated subject hit axes')
-			ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
-			logging.debug('Created model hit axes')
-			plt.imshow(model['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
-			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
-			plt.ylabel('Confidence')
-			logging.debug('Populated model hit axes')
-			
-			ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
-			logging.debug('Created subject miss axes')
-			plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[t_extent[0],t_extent[1],0,1],norm=norm)
-			plt.title('Miss')
-			logging.debug('Populated subject miss axes')
-			ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
-			logging.debug('Created model miss axes')
-			im = plt.imshow(model['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
-						extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
-			plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
-			if xlim_rt_cutoff:
-				ax00.set_xlim([0,rt_cutoff])
-			logging.debug('Populated model miss axes')
-			
-			ax00.tick_params(labelleft=True, labelbottom=False)
-			ax01.tick_params(labelleft=False, labelbottom=False)
-			ax10.tick_params(labelleft=True, labelbottom=True)
-			ax11.tick_params(labelleft=False, labelbottom=True)
-			logging.debug('Completed histogram axes')
-			
-			cbar_ax = plt.subplot(gs3[0])
-			logging.debug('Created colorbar axes')
-			plt.colorbar(im, cax=cbar_ax)
-			plt.ylabel('Prob density')
-			logging.debug('Completed colorbar axes')
-			
-			plt.suptitle(key)
-			logging.debug('Sucessfully completed figure for key {0}'.format(key))
 			if saver:
 				logging.debug('Saving figure')
 				if isinstance(saver,str):
@@ -2644,6 +3082,19 @@ class Fitter_plot_handler():
 		return {'dictionary':self.dictionary,'time_units':self._time_units}
 	
 	def merge(self,merge='all'):
+		"""
+		self.merge(merge='all')
+		
+		Returns a new Fitter_plot_handler instance that merges the keys
+		of the caller instance. The merge input can be 'all', 'subjects'
+		or 'sessions'.
+		If 'all', all the keys with the same experiment are merged together.
+		If 'subjects', the different subjects are merged together yielding
+		keys that only identify the experiment and session.
+		If 'sessions', the different sessions are merged together yielding
+		keys that only identify the experiment and subject name.
+		
+		"""
 		if merge=='subjects':
 			key_aliaser = lambda key: re.sub('_subject_[\[\]\-0-9]+','',key)
 		elif merge=='sessions':
@@ -2710,6 +3161,13 @@ def parse_input():
                              loaded from a file in order to get the Fitter_plot_handler,
                              then its rt_cutoff may be different than the value
                              specified in a separate run of the script.]
+ '--plot_binary': Can be None, True or False. It is used to override the
+                  plotting handling of binary or continuous confidence.
+                  If None, the confidence is handled automatically with
+                  the natural binary or continuous confidence depending
+                  on the supplied method. If True, it forces the binary
+                  confidence plot. If False, it forces the continuous
+                  confidence plot. [Default None]
  '--confidence_partition': An Int that specifies the number of bins in which to partition
                            the [0,1] confidence report interval [Default 100]
  '--merge': Can be None, 'all', 'all_sessions' or 'all_subjects'. This parameter
@@ -2766,7 +3224,16 @@ def parse_input():
        The default method is 'log_odds'. Be aware that, the mapping method
        is only added to the saved filename for the methods different than
        'log_odds'.
-          
+ '--binary_split_method': A string to identify the method used to
+                          binarize the subjectSession's confidence
+                          reports. Available methods are 'median',
+                          'half' and 'mean'. If 'median', every report
+                          below the median confidence report is
+                          interpreted as low confidence, and the rest
+                          are high confidence. If 'half', every report
+                          below 0.5 is cast as low confidence. If
+                          'mean', every report below the mean confidence
+                          is cast as low confidence. [Default 'median']
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -2855,7 +3322,8 @@ def parse_input():
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
 				'start_point_from_fit_output':None,'override':False,'plot_handler_rt_cutoff':None,
-				'high_confidence_mapping_method':'log_odds'}
+				'high_confidence_mapping_method':'log_odds','plot_binary':None,
+				'binary_split_method':'median'}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -2942,6 +3410,12 @@ def parse_input():
 			elif arg=='-hcm' or arg=='--high_confidence_mapping_method':
 				key = 'high_confidence_mapping_method'
 				expecting_key = False
+			elif arg=='--plot_binary':
+				key = 'plot_binary'
+				expecting_key = False
+			elif arg=='--binary_split_method':
+				key = 'binary_split_method'
+				expecting_key = False
 			elif arg=='-h' or arg=='--help':
 				print(script_help)
 				sys.exit()
@@ -2956,6 +3430,8 @@ def parse_input():
 			elif json_encoded_key:
 				options[key] = json.loads(arg)
 				json_encoded_key = False
+			elif key in ['plot_binary']:
+				options[key] = eval(arg)
 			else:
 				options[key] = arg
 	if not expecting_key:
@@ -3181,7 +3657,8 @@ if __name__=="__main__":
 					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
 					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
 					   confidence_partition=options['confidence_partition'],\
-					   high_confidence_mapping_method=options['high_confidence_mapping_method'])
+					   high_confidence_mapping_method=options['high_confidence_mapping_method'],
+					   binary_split_method=options['binary_split_method'])
 				fname = fitter.get_save_file_name()
 				if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
 					# Set start point and fixed parameters to the user supplied values
@@ -3290,7 +3767,7 @@ if __name__=="__main__":
 		assert not fitter_plot_handler is None, 'Could not create the Fitter_plot_handler to plot the fitter results'
 		if options['plot_merge'] and options['load_plot_handler']:
 			fitter_plot_handler = fitter_plot_handler.merge(options['plot_merge'])
-		fitter_plot_handler.plot(saver=saver,show=options['show'])
+		fitter_plot_handler.plot(saver=saver,show=options['show'],is_binary_confidence=options['plot_binary'])
 		if options['save']:
 			logging.debug('Closing saver')
 			saver.close()
