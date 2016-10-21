@@ -899,8 +899,18 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 		exp_name = experiment_alias[experiment]
 		
 		axrt = plt.subplot(plot_gs[row-1,0])
-		plt.step(subj['t_array'],subj['rt'][0],'b',label='Subject hit')
-		plt.step(subj['t_array'],subj['rt'][1],'r',label='Subject miss')
+		dt = subj['t_array'][1]-subj['t_array'][0]
+		dc = subj['c_array'][1]-subj['c_array'][0]
+		if len(subj['t_array'])==len(subj['rt'][0]):
+			subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
+			subj_c_array = np.hstack((subj['c_array']-0.5*dc,subj['c_array'][-1:]+0.5*dc))
+		else:
+			subj_t_array = subj['t_array']
+			subj_c_array = subj['c_array']
+		subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+		subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+		plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
+		plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
 		plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
 		plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
 		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
@@ -912,13 +922,125 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 		plt.ylabel('Prob density')
 		
 		axconf = plt.subplot(plot_gs[row-1,1])
-		plt.step(subj['c_array'],subj['confidence'][0],'b',label='Subject hit')
+		plt.step(subj_c_array,subj_confidence[0],'b',label='Subject hit',where='post')
+		plt.step(subj_c_array,subj_confidence[1],'r',label='Subject miss',where='post')
 		plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
-		plt.step(subj['c_array'],subj['confidence'][1],'r',label='Subject miss')
 		plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
 		axconf.set_yscale('log')
 		if row==1:
 			plt.title('Confidence distribution')
+		elif row==3:
+			plt.xlabel('Confidence')
+		
+		aximg = plt.subplot(exp_scheme_gs[row-1])
+		
+		exp_scheme = mpimg.imread('../../figs/'+experiment+'.png')
+		aximg.imshow(exp_scheme)
+		aximg.set_axis_off()
+		plt.title(exp_name)
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+
+def binary_confidence(fname='binary_confidence',suffix='.svg'):
+	fname+=suffix
+	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	fitter_plot_handler = None
+	binary_split_method = 'mean'
+	suffix = '' if binary_split_method=='median' else '_'+binary_split_method+'split'
+	for i,s in enumerate(subjects):
+		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_binary_confidence',
+				name=s.get_name(),session=s.get_session(),optimizer='basinhopping',
+				suffix=suffix,confidence_map_method='belief').replace('.pkl','_plot_handler.pkl')
+		try:
+			f = open(handler_fname,'r')
+			temp = pickle.load(f)
+			f.close()
+		except:
+			continue
+		if fitter_plot_handler is None:
+			fitter_plot_handler = temp
+		else:
+			fitter_plot_handler+= temp
+	fitter_plot_handler = fitter_plot_handler.merge('all')
+	
+	experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
+	row_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
+	plot_gs = gridspec.GridSpec(3, 2,left=0.25, right=0.98,hspace=0.20,wspace=0.18)
+	exp_scheme_gs = gridspec.GridSpec(3, 1,left=0., right=0.16,hspace=0.25)
+	plt.figure(figsize=(12,11))
+	fitter_plot_handler.normalize()
+	for experiment in fitter_plot_handler.keys():
+		subj = fitter_plot_handler[experiment]['experimental']
+		model = fitter_plot_handler[experiment]['theoretical']
+		row = row_index[experiment]
+		exp_name = experiment_alias[experiment]
+		
+		dt = subj['t_array'][1]-subj['t_array'][0]
+		subj_performance = np.sum(subj['rt'][0])*dt
+		if binary_split_method=='median':
+			subj_split_ind = (np.cumsum(np.sum(subj['confidence'],axis=0))>=0.5).nonzero()[0][0]
+			if model['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (np.cumsum(np.sum(model['confidence'],axis=0))>=0.5).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		elif binary_split_method=='half':
+			subj_split_ind = (subj['c_array']>=0.5).nonzero()[0][0]
+			if model['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (model['c_array']>=0.5).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		elif binary_split_method=='mean':
+			if len(subj['c_array'])>(subj['confidence'].shape[1]):
+				c_array = np.array([0.5*(e1+e0) for e1,e0 in zip(subj['c_array'][1:],subj['c_array'][:-1])])
+			else:
+				c_array = subj['c_array']
+			subj_split_ind = (c_array>=np.sum(subj['confidence']*c_array)).nonzero()[0][0]
+			if model['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (model['c_array']>=np.sum(model['confidence']*model['c_array'])).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		subj_lowconf_rt = np.array([np.sum(subj['hit_histogram'][:subj_split_ind],axis=0)*subj_performance,
+									np.sum(subj['miss_histogram'][:subj_split_ind],axis=0)*(1-subj_performance)])
+		subj_highconf_rt = np.array([np.sum(subj['hit_histogram'][subj_split_ind:],axis=0)*subj_performance,
+									np.sum(subj['miss_histogram'][subj_split_ind:],axis=0)*(1-subj_performance)])
+		model_performance = np.sum(model['rt'][0])*(model['t_array'][1]-model['t_array'][0])
+		model_low_rt = np.array([np.sum(model['hit_histogram'][:model_split_ind],axis=0)*model_performance,
+								np.sum(model['miss_histogram'][:model_split_ind],axis=0)*(1-model_performance)])
+		model_high_rt = np.array([np.sum(model['hit_histogram'][model_split_ind:],axis=0)*model_performance,
+								np.sum(model['miss_histogram'][model_split_ind:],axis=0)*(1-model_performance)])
+		if len(subj['t_array'])==len(subj['rt'][0]):
+			subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
+		else:
+			subj_t_array = subj['t_array']
+		subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+		subj_lowconf_rt = np.hstack((subj_lowconf_rt,np.array([subj_lowconf_rt[:,-1]]).T))
+		subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
+		
+		axrt = plt.subplot(plot_gs[row-1,0])
+		plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
+		plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
+		plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
+		plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		plt.ylabel('Prob density')
+		if row==1:
+			plt.title('RT distribution')
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('T [s]')
+		plt.ylabel('Prob density')
+		
+		axconf = plt.subplot(plot_gs[row-1,1])
+		plt.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject low',where='post')
+		plt.step(subj_t_array,np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject high',where='post')
+		plt.plot(model['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model low',linewidth=3)
+		plt.plot(model['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model high',linewidth=3)
+		axconf.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		if row==1:
+			plt.title('Confidence distribution')
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		elif row==3:
 			plt.xlabel('Confidence')
 		
@@ -986,7 +1108,7 @@ def parse_input():
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
 				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,\
-				'confidence_mapping':False,'fits_cognition':False}
+				'confidence_mapping':False,'fits_cognition':False,'binary_confidence':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):

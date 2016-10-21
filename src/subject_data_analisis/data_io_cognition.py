@@ -176,18 +176,18 @@ class SubjectSession:
 		"""
 		self.iter_data(override_raw_data_dir=None)
 		
-		Iterate over the experimental data in the data files listed in
-		the data_dirs. override_raw_data_dir is provided for situations
-		where the subjectSession was created in a different path
-		structure. To do this, override_raw_data_dir must be a dict with
-		keys 'original' and 'replacement'. Each of the data_dirs is
-		replaced as follows:
+		Iterate over the experimental data files listed in the data_dirs.
+		override_raw_data_dir is provided for situations where the
+		subjectSession was created in a different path structure. To do
+		this, override_raw_data_dir must be a dict with keys 'original'
+		and 'replacement'. Each of the data_dirs is replaced as follows:
 		data_dir.replace(override_raw_data_dir['original'],override_raw_data_dir['replacement'])
 		
 		Output:
-			Each yielded value is a 1D numpy.ndarray. Refer to
-			self.column_description to get a description of the data
-			contained at each index.
+			Each yielded value is a 2D numpy.ndarray. axis=0 represent
+			different trials and axis=1 different data for each trial.
+			Refer to self.column_description to get a description of
+			the data contained at each index of axis=1.
 		
 		"""
 		if self.experiment=='Luminancia':
@@ -277,15 +277,14 @@ class SubjectSession:
 		Output: 2D numpy.ndarray
 		
 		"""
-		return np.array([data_matrix for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir)])
-		#~ first_element = True
-		#~ for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir):
-			#~ if first_element:
-				#~ all_data = data_matrix
-				#~ first_element = False
-			#~ else:
-				#~ all_data = np.concatenate((all_data,data_matrix),axis=0)
-		#~ return all_data
+		first_element = True
+		for data_matrix in self.iter_data(override_raw_data_dir=override_raw_data_dir):
+			if first_element:
+				all_data = data_matrix
+				first_element = False
+			else:
+				all_data = np.concatenate((all_data,data_matrix),axis=0)
+		return all_data
 	
 	def column_description(self):
 		"""

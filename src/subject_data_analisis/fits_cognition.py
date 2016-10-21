@@ -1,7 +1,7 @@
 from __future__ import division
 from __future__ import print_function
 
-import enum, os, sys, math, scipy, pickle, warnings, json, logging, copy, re
+import enum, os, sys, math, scipy, pickle, warnings, json, logging, logging.config, copy, re
 import scipy.signal
 import numpy as np
 from utils import normpdf,average_downsample
@@ -48,6 +48,24 @@ except:
 import data_io_cognition as io
 import cost_time as ct
 import cma
+
+#~ dictLogConfig = {
+	#~ "version":1,
+	#~ "handlers":{
+		#~ "console":{
+			#~ "class" : "logging.StreamHandler",
+			#~ "formatter": "myFormatter",
+			#~ "stream"  : "ext://sys.stdout"
+		#~ }
+	#~ },
+	#~ "formatters":{
+		#~ "myFormatter":{
+			#~ "format":"%(levelname)s: %(name)s - %(funcName)s LineNumber %(lineno)d : %(message)s"
+		#~ }
+	#~ }
+#~ }
+#~ logging.config.dictConfig(dictLogConfig)
+package_logger = logging.getLogger("fits_cognition")
 
 def rt_confidence_likelihood(t,rt_confidence_pdf,RT,confidence):
 	"""
@@ -281,19 +299,20 @@ class Fitter:
 		fitter.plot()
 		
 		"""
-		logging.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
+		package_logger.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
 						experiment=subjectSession.experiment,name=subjectSession.name,session=subjectSession.session))
+		self.logger = logging.getLogger("fits_cognition.Fitter")
 		self.raw_data_dir = raw_data_dir
 		self.set_experiment(subjectSession.experiment)
 		self.set_time_units(str(time_units))
 		self.set_rt_cutoff(rt_cutoff)
 		self.set_subjectSession_data(subjectSession)
 		self.method = str(method)
-		logging.debug('Setted Fitter method = %s',self.method)
+		self.logger.debug('Setted Fitter method = %s',self.method)
 		self.optimizer = str(optimizer)
-		logging.debug('Setted Fitter optimizer = %s',self.optimizer)
+		self.logger.debug('Setted Fitter optimizer = %s',self.optimizer)
 		self.suffix = str(suffix)
-		logging.debug('Setted Fitter suffix = %s',self.suffix)
+		self.logger.debug('Setted Fitter suffix = %s',self.suffix)
 		self.set_decisionPolicyKwArgs(decisionPolicyKwArgs)
 		self.dp = ct.DecisionPolicy(**self.decisionPolicyKwArgs)
 		self.confidence_partition = int(confidence_partition)
@@ -317,7 +336,7 @@ class Fitter:
 			self._distractor = 0.
 		else:
 			raise ValueError('Fitter class does not support the experiment "{0}"'.format(experiment))
-		logging.debug('Setted Fitter experiment = %s',self.experiment)
+		self.logger.debug('Setted Fitter experiment = %s',self.experiment)
 	
 	def set_time_units(self,time_units='seconds'):
 		"""
@@ -332,12 +351,12 @@ class Fitter:
 		if time_units not in ('seconds','milliseconds'):
 			raise ValueError("Invalid time units '{0}'. Available units are seconds and milliseconds".format(units))
 		self.time_units = time_units
-		logging.debug('Setted Fitter instance time_units = %s',self.time_units)
+		self.logger.debug('Setted Fitter instance time_units = %s',self.time_units)
 		
 		self._tp = 0.
-		logging.debug('Setted Fitter instance _tp = %f',self._tp)
+		self.logger.debug('Setted Fitter instance _tp = %f',self._tp)
 		if self.experiment=='Luminancia':
-			logging.debug('Luminancia experiment condition')
+			self.logger.debug('Luminancia experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.05
 				self._T = 1.
@@ -353,10 +372,10 @@ class Fitter:
 			self._model_var = 50./self._ISI
 			self._internal_var = self._model_var
 			self._fixed_stim_duration = 0.
-			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+			self.logger.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
 		elif self.experiment=='Auditivo':
-			logging.debug('Auditivo experiment condition')
+			self.logger.debug('Auditivo experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.5
 				self._dt = 0.005
@@ -372,10 +391,10 @@ class Fitter:
 			self._model_var = 1250.
 			self._internal_var = 1250.
 			self._fixed_stim_duration = 0.3
-			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+			self.logger.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
 		elif self.experiment=='2AFC':
-			logging.debug('2AFC experiment condition')
+			self.logger.debug('2AFC experiment condition')
 			if time_units=='seconds':
 				self._ISI = 0.3
 				self._dt = 0.005
@@ -390,7 +409,7 @@ class Fitter:
 			self._model_var = 1250.
 			self._internal_var = 1250.
 			self._fixed_stim_duration = 0.3
-			logging.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
+			self.logger.debug('Setted _ISI = %(_ISI)f\t_T = %(_T)f\t_iti = %(_iti)f\t_model_var = %(_model_var)f\t_internal_var = %(_internal_var)f\tfixed_stim_duration = %(_fixed_stim_duration)f',
 						  {'_ISI':self._ISI,'_T':self._T,'_iti':self._iti,'_model_var':self._model_var,'_internal_var':self._internal_var,'_fixed_stim_duration':self._fixed_stim_duration})
 	
 	def set_rt_cutoff(self,rt_cutoff=None):
@@ -412,7 +431,7 @@ class Fitter:
 		if self.time_units=='milliseconds':
 			rt_cutoff*=1e3
 		self.rt_cutoff = rt_cutoff
-		logging.debug('Setted rt_cutoff = %f',self.rt_cutoff)
+		self.logger.debug('Setted rt_cutoff = %f',self.rt_cutoff)
 	
 	def set_subjectSession_data(self,subjectSession):
 		"""
@@ -428,10 +447,10 @@ class Fitter:
 		"""
 		self.subjectSession = subjectSession
 		self._subjectSession_state = subjectSession.__getstate__()
-		logging.debug('Setted Fitter _subjectSession_state')
-		logging.debug('experiment:%(experiment)s, name:%(name)s, session:%(session)s, data_dir:%(data_dir)s',self._subjectSession_state)
+		self.logger.debug('Setted Fitter _subjectSession_state')
+		self.logger.debug('experiment:%(experiment)s, name:%(name)s, session:%(session)s, data_dir:%(data_dir)s',self._subjectSession_state)
 		dat = subjectSession.load_data(override_raw_data_dir={'original':self.raw_data_dir,'replacement':raw_data_dir})
-		logging.debug('Loading subjectSession data')
+		self.logger.debug('Loading subjectSession data')
 		self.rt = dat[:,1]
 		if self.time_units=='milliseconds':
 			self.rt*=1e3
@@ -455,9 +474,9 @@ class Fitter:
 			self._contrast = self.contrast/self._forced_non_decision_time
 		self.performance = dat[:,2]
 		self.confidence = dat[:,3]
-		logging.debug('Trials loaded = %d',len(self.performance))
+		self.logger.debug('Trials loaded = %d',len(self.performance))
 		self.mu,self.mu_indeces,count = np.unique(self._contrast,return_inverse=True,return_counts=True)
-		logging.debug('Number of different drifts = %d',len(self.mu))
+		self.logger.debug('Number of different drifts = %d',len(self.mu))
 		self.mu_prob = count.astype(np.float64)/np.sum(count.astype(np.float64))
 		if self.mu[0]==0:
 			mus = np.concatenate((-self.mu[-1:0:-1],self.mu))
@@ -468,7 +487,7 @@ class Fitter:
 			p = np.concatenate((self.mu_prob[::-1],self.mu_prob))*0.5
 		
 		self._prior_mu_var = np.sum(p*(mus-np.sum(p*mus))**2)
-		logging.debug('Setted Fitter _prior_mu_var = %f',self._prior_mu_var)
+		self.logger.debug('Setted Fitter _prior_mu_var = %f',self._prior_mu_var)
 	
 	def set_decisionPolicyKwArgs(self,decisionPolicyKwArgs={}):
 		"""
@@ -485,7 +504,7 @@ class Fitter:
 		defaults = self.default_decisionPolicyKwArgs()
 		defaults.update(decisionPolicyKwArgs)
 		self.decisionPolicyKwArgs = defaults
-		logging.debug('Setted Fitter decisionPolicyKwArgs = %s',self.decisionPolicyKwArgs)
+		self.logger.debug('Setted Fitter decisionPolicyKwArgs = %s',self.decisionPolicyKwArgs)
 	
 	def __setstate__(self,state):
 		"""
@@ -496,6 +515,7 @@ class Fitter:
 		another one.
 		
 		"""
+		self.logger = logging.getLogger("fits_cognition.Fitter")
 		self.set_experiment(state['experiment'])
 		self.set_time_units(state['time_units'])
 		self.set_rt_cutoff(state['rt_cutoff'])
@@ -557,8 +577,8 @@ class Fitter:
 		for par in fittable_parameters:
 			if par not in self._fixed_parameters.keys():
 				self._fitted_parameters.append(par)
-		logging.debug('Setted Fitter fixed_parameters = %s',self._fixed_parameters)
-		logging.debug('Setted Fitter fitted_parameters = %s',self._fitted_parameters)
+		self.logger.debug('Setted Fitter fixed_parameters = %s',self._fixed_parameters)
+		self.logger.debug('Setted Fitter fitted_parameters = %s',self._fitted_parameters)
 	
 	def set_start_point(self,start_point={}):
 		"""
@@ -576,7 +596,7 @@ class Fitter:
 		defaults = self.default_start_point()
 		defaults.update(start_point)
 		self._start_point = defaults
-		logging.debug('Setted Fitter start_point = %s',self._start_point)
+		self.logger.debug('Setted Fitter start_point = %s',self._start_point)
 	
 	def set_bounds(self,bounds={}):
 		"""
@@ -594,7 +614,7 @@ class Fitter:
 		defaults = self.default_bounds()
 		defaults.update(bounds)
 		self._bounds = defaults
-		logging.debug('Setted Fitter bounds = %s',self._bounds)
+		self.logger.debug('Setted Fitter bounds = %s',self._bounds)
 	
 	def set_optimizer_kwargs(self,optimizer_kwargs={}):
 		"""
@@ -609,7 +629,7 @@ class Fitter:
 		defaults = self.default_optimizer_kwargs()
 		defaults.update(optimizer_kwargs)
 		self.optimizer_kwargs = defaults
-		logging.debug('Setted Fitter optimizer_kwargs = %s',self.optimizer_kwargs)
+		self.logger.debug('Setted Fitter optimizer_kwargs = %s',self.optimizer_kwargs)
 	
 	def set_fit_arguments(self,fit_arguments):
 		"""
@@ -983,7 +1003,7 @@ class Fitter:
 									   'confidence':model_confidence,
 									   't_array':t,
 									   'c_array':c}}}
-		return Fitter_plot_handler(output,self.time_units)
+		return Fitter_plot_handler(output,self.time_units,self.binary_split_method)
 	
 	def get_save_file_name(self):
 		"""
@@ -1148,7 +1168,7 @@ class Fitter:
 		"""
 		try:
 			if forceCompute:
-				logging.debug('Forcing default start point recompute')
+				self.logger.debug('Forcing default start point recompute')
 				raise Exception('Forcing recompute')
 			return self.__default_start_point__
 		except:
@@ -1167,7 +1187,7 @@ class Fitter:
 						res = minimize(fun,1000.,method='Nelder-Mead')
 					self.__default_start_point__['internal_var'] = res.x[0]**2
 				except Exception, e:
-					logging.warning('Could not fit internal_var from data')
+					self.logger.warning('Could not fit internal_var from data')
 					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
 			if not 'phase_out_prob' in self.__default_start_point__.keys() or self.__default_start_point__['phase_out_prob'] is None:
 				self.__default_start_point__['phase_out_prob'] = 0.05
@@ -1372,10 +1392,10 @@ class Fitter:
 		The used pkl's file name is given by self.get_save_file_name().
 		
 		"""
-		logging.debug('Fitter state that will be saved = "%s"',self.__getstate__())
+		self.logger.debug('Fitter state that will be saved = "%s"',self.__getstate__())
 		if not hasattr(self,'_fit_output'):
 			raise ValueError('The Fitter instance has not performed any fit and still has no _fit_output attribute set')
-		logging.info('Saving Fitter state to file "%s"',self.get_save_file_name())
+		self.logger.info('Saving Fitter state to file "%s"',self.get_save_file_name())
 		f = open(self.get_save_file_name(),'w')
 		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
@@ -1462,10 +1482,10 @@ class Fitter:
 		
 		if not (self.optimizer=='cma' or self.optimizer=='basinhopping'):
 			sanitized_bounds = [(lb,ub) for lb,ub in zip(sanitized_bounds[0],sanitized_bounds[1])]
-		logging.debug('Sanitized fixed parameters = %s',fixed_parameters)
-		logging.debug('Sanitized fitted parameters = %s',fitted_parameters)
-		logging.debug('Sanitized start_point = %s',sanitized_start_point)
-		logging.debug('Sanitized bounds = %s',sanitized_bounds)
+		self.logger.debug('Sanitized fixed parameters = %s',fixed_parameters)
+		self.logger.debug('Sanitized fitted parameters = %s',fitted_parameters)
+		self.logger.debug('Sanitized start_point = %s',sanitized_start_point)
+		self.logger.debug('Sanitized bounds = %s',sanitized_bounds)
 		return (fixed_parameters,fitted_parameters,sanitized_start_point,sanitized_bounds)
 	
 	def sanitize_fmin_output(self,output,package='cma'):
@@ -1488,8 +1508,8 @@ class Fitter:
 		out[6]: Std of the sample of solutions
 		
 		"""
-		logging.debug('Sanitizing minizer output with package: {0}'.format(package))
-		logging.debug('Output to sanitize: {0}'.format(output))
+		self.logger.debug('Sanitizing minizer output with package: {0}'.format(package))
+		self.logger.debug('Output to sanitize: {0}'.format(output))
 		print(output)
 		if package=='cma':
 			fitted_x = {}
@@ -1542,10 +1562,10 @@ class Fitter:
 		                  Refer to the script's help for details.
 		
 		"""
-		logging.debug('init_minimizer args: start_point=%(start_point)s, bounds=%(bounds)s, optimizer_kwargs=%(optimizer_kwargs)s',{'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs})
+		self.logger.debug('init_minimizer args: start_point=%(start_point)s, bounds=%(bounds)s, optimizer_kwargs=%(optimizer_kwargs)s',{'start_point':start_point,'bounds':bounds,'optimizer_kwargs':optimizer_kwargs})
 		if self.optimizer=='cma':
 			scaling_factor = bounds[1]-bounds[0]
-			logging.debug('scaling_factor = %s',scaling_factor)
+			self.logger.debug('scaling_factor = %s',scaling_factor)
 			options = {'bounds':bounds,'CMA_stds':scaling_factor,'verbose':1 if optimizer_kwargs['disp'] else -1}
 			options.update(optimizer_kwargs)
 			restarts = options['restarts']
@@ -1598,7 +1618,7 @@ class Fitter:
 				for val,(lb,ub) in zip(rsp,bounds):
 					temp.append(val*(ub-lb)+lb)
 				_start_points.append(np.array(temp))
-			logging.debug('Array of start_points = {0}',_start_points)
+			self.logger.debug('Array of start_points = {0}',_start_points)
 			start_point_generator = iter(_start_points)
 			if self.optimizer in ['CG', 'BFGS', 'Newton-CG', 'L-BFGS-B', 'TNC', 'SLSQP', 'dogleg', 'trust-ncg']:
 				jac_dx = self.get_jacobian_dx()
@@ -1647,16 +1667,16 @@ class Fitter:
 		repetitions = 0
 		for start_point in start_point_generator:
 			repetitions+=1
-			logging.debug('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
+			self.logger.debug('Round {2} with start_point={0} and bounds={1}'.format(start_point, bounds,repetitions))
 			if self.optimizer in ['Brent','Bounded','Golden']:
 				res = scipy.optimize.minimize_scalar(merit,start_point,method=self.optimizer,\
 								bounds=bounds[0], options=optimizer_kwargs)
 			else:
 				res = scipy.optimize.minimize(merit,start_point, method=self.optimizer,bounds=bounds,\
 								options=optimizer_kwargs,jac=jac)
-			logging.debug('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
-			logging.debug('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
-			logging.debug('OptimizeResult: {0}'.format(res))
+			self.logger.debug('New round with start_point={0} and bounds={0}'.format(start_point, bounds))
+			self.logger.debug('Round {0} ended. Fun val: {1}. x={2}'.format(repetitions,res.fun,res.x))
+			self.logger.debug('OptimizeResult: {0}'.format(res))
 			try:
 				nit = res.rit
 			except:
@@ -1672,7 +1692,7 @@ class Fitter:
 			if output['funbest'] is None or res.fun<output['funbest']:
 				output['funbest'] = res.fun
 				output['xbest'] = x
-			logging.debug('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
+			self.logger.debug('Best so far: {0} at point {1}'.format(output['funbest'],output['xbest']))
 		arr_xs = np.array(output['xs'])
 		arr_funs = np.array(output['funs'])
 		output['xmean'] = np.mean(arr_xs)
@@ -2615,9 +2635,9 @@ class Fitter:
 			output['auc'] = auc
 
 class Fitter_plot_handler():
-	def __init__(self,obj,time_units):
+	def __init__(self,obj,time_units,binary_split_method='median'):
 		"""
-		Fitter_plot_handler(dictionary,time_units)
+		Fitter_plot_handler(dictionary,time_units,binary_split_method='median')
 		
 		This class implements a flexible way to handle data ploting for
 		separate subjectSessions and their corresponding fitted models
@@ -2675,6 +2695,12 @@ class Fitter_plot_handler():
 			'time_units': Can be 'seconds' or 'milliseconds', and specify
 				the time units in which the supplied dictionary is
 				encoded.
+			'binary_split_method': Can be 'median', 'mean' or 'half'.
+				This speficies the way in which the continuous confidence
+				reports will be binarized by default. This can be
+				overriden in the plot method. Refer to
+				Fitter.get_binary_confidence for a detailed description
+				of the three methods. [Default 'median']
 		
 		In order to merge to different Fitter_plot_handler instances 'a'
 		and 'b', it is only necessary to do sum them. Assume that 'a' has
@@ -2688,8 +2714,14 @@ class Fitter_plot_handler():
 		
 		c = c.merge(merge='all')
 		
+		WARNING: When summing two Fitter_plot_handlers, the left instance's
+		binary_split_method will be kept and the other instance's
+		attribute value will be ignored.
+		
 		"""
+		self.logger = logging.getLogger("fits_cognition.Fitter_plot_handler")
 		self._time_units = time_units
+		self.binary_split_method = binary_split_method
 		self.required_data = ['hit_histogram','miss_histogram','rt','confidence','t_array','c_array']
 		# For backward compatibility
 		new_style_required = ['t_array','c_array']
@@ -2768,7 +2800,7 @@ class Fitter_plot_handler():
 		return self.__aliased_iadd__(other)
 	
 	def __add__(self,other):
-		output = Fitter_plot_handler(self)
+		output = Fitter_plot_handler(self,self._time_units,self.binary_split_method)
 		output+=other
 		return output
 	
@@ -2787,7 +2819,7 @@ class Fitter_plot_handler():
 		new normalized Fitter_plot_handler instance.
 		
 		"""
-		logging.debug('Normalizing Fitter_plot_handler in place? {0}'.format(in_place))
+		self.logger.debug('Normalizing Fitter_plot_handler in place? {0}'.format(in_place))
 		if in_place:
 			out = self
 		else:
@@ -2801,9 +2833,11 @@ class Fitter_plot_handler():
 				out[key][category]['miss_histogram']/=(np.sum(out[key][category]['miss_histogram'])*dt)
 		return out
 	
-	def plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,is_binary_confidence=None):
+	def plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,
+			is_binary_confidence=None,binary_split_method=None):
 		"""
-		plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,is_binary_confidence=None)
+		plot(self,saver=None,show=True,xlim_rt_cutoff=True,fig=None,logscale=True,
+			is_binary_confidence=None,binary_split_method=None)
 		
 		Main plotting routine has two completely different output forms
 		that depend on the parameter is_binary_confidence. If
@@ -2845,78 +2879,102 @@ class Fitter_plot_handler():
 			matplotlib.pyplot.savefig. If it is a string it will be used
 			to save the figure as:
 			matplotlib.pyplot.savefig(saver,,bbox_inches='tight')
+		binary_split_method: Override the way in which the continuous
+			confidence reports are binarized. Available methods are
+			None, 'median', 'half' and 'mean'. If None, the
+			Fitter_plot_handler's binary_split_method attribute will be
+			used. If supplied value is not None, the binarization method
+			will be overriden. Be aware that this parameter will affect
+			the subject's data and it will also affect the Fitter's data
+			only if the Fitter's data is encoded in a continuous way.
+			If said data is already binary, the binary_split_method will
+			have no additional effect. These methods are only used
+			when is_binary_confidence is True. For a detailed
+			description of the three methods mentioned above, refer to
+			Fitter.get_binary_confidence.
 		
 		"""
 		if not can_plot:
 			raise ImportError('Could not import matplotlib package and it is imposible to produce any plot')
 		handler = self.normalize(in_place=False)
 		
+		if binary_split_method is None:
+			binary_split_method = self.binary_split_method
+		if binary_split_method is None:
+			self.logger.debug('Fitter_plot_handler was not saved with the binary_split_method attribute. Will assume median split but this may have not been the split method used to generate the handler')
+			binary_split_method = 'median'
+		
 		for key in sorted(handler.keys()):
-			logging.info('Preparing to plot key {0}'.format(key))
+			self.logger.info('Preparing to plot key {0}'.format(key))
 			subj = handler.dictionary[key]['experimental']
 			model = handler.dictionary[key]['theoretical']
 			
 			if is_binary_confidence is None:
 				is_binary_confidence = len(model['c_array'])==2
-			logging.debug('Is binary confidence? {0}'.format(is_binary_confidence))
+			self.logger.debug('Is binary confidence? {0}'.format(is_binary_confidence))
 			
 			rt_cutoff = subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])
 			
 			if fig is None:
 				fig = plt.figure(figsize=(10,12))
-				logging.debug('Created figure instance {0}'.format(fig.number))
+				self.logger.debug('Created figure instance {0}'.format(fig.number))
 			else:
-				logging.debug('Will use figure instance {0}'.format(fig.number))
+				self.logger.debug('Will use figure instance {0}'.format(fig.number))
 				fig.clf()
 				plt.figure(fig.number)
-				logging.debug('Cleared figure instance {0} and setted it as the current figure'.format(fig.number))
+				self.logger.debug('Cleared figure instance {0} and setted it as the current figure'.format(fig.number))
 			if not is_binary_confidence:
+				self.logger.debug('Starting the continuous confidence plotting procedure')
 				gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.90, top=0.95,bottom=0.70)
 				gs2 = gridspec.GridSpec(2, 2,left=0.10, right=0.85, wspace=0.05, hspace=0.05, top=0.62,bottom=0.05)
 				gs3 = gridspec.GridSpec(1, 1,left=0.87, right=0.90, wspace=0.1, top=0.62,bottom=0.05)
-				logging.debug('Created gridspecs')
+				self.logger.debug('Created gridspecs')
 				axrt = plt.subplot(gs1[0])
-				logging.debug('Created rt axes')
-				if len(subj['t_array'])>len(subj['rt'][0]):
-					dt = subj['t_array'][1]-subj['t_array'][0]
-					t_extent = [subj['t_array'][0]-0.5*dt,subj['t_array'][-1]+0.5*dt]
-					subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
-					subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+				self.logger.debug('Created rt axes')
+				dt = subj['t_array'][1]-subj['t_array'][0]
+				dc = subj['c_array'][1]-subj['c_array'][0]
+				if len(subj['t_array'])==len(subj['rt'][0]):
+					self.logger.debug('Subject "t_array" holds the histogram centers. Converting to edges to achieve proper step centering.')
+					subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
+					subj_c_array = np.hstack((subj['c_array']-0.5*dc,subj['c_array'][-1:]+0.5*dc))
 				else:
-					t_extent = [subj['t_array'][0],subj['t_array'][-1]]
-					subj_rt = subj['rt']
-					subj_confidence = subj['confidence']
-				plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
-				plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
+					self.logger.debug('Subject "t_array" holds the histogram edges')
+					subj_t_array = subj['t_array']
+					subj_c_array = subj['c_array']
+				t_extent = [subj['t_array'][0]-0.5*dt,subj['t_array'][-1]+0.5*dt]
+				subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+				subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+				plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
+				plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
 				plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
 				plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
-				logging.debug('Plotted rt axes')
+				self.logger.debug('Plotted rt axes')
 				if xlim_rt_cutoff:
 					axrt.set_xlim([0,rt_cutoff])
 				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 				plt.ylabel('Prob density')
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
-				logging.debug('Completed rt axes plot, legend and labels')
+				self.logger.debug('Completed rt axes plot, legend and labels')
 				axconf = plt.subplot(gs1[1])
-				logging.debug('Created confidence axes')
-				plt.step(subj['c_array'],subj_confidence[0],'b',label='Subject hit')
+				self.logger.debug('Created confidence axes')
+				plt.step(subj_c_array,subj_confidence[0],'b',label='Subject hit',where='post')
 				if model['confidence'].shape[1]==2:
 					model['c_array'] = np.array([0,1])
 				plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
 				if logscale:
-					plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
+					plt.step(subj_c_array,subj_confidence[1],'r',label='Subject miss',where='post')
 					plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
 					axconf.set_yscale('log')
 				else:
 					#~ plt.step(subj['c_array'],-subj_confidence[1],'r',label='Subject miss')
 					#~ plt.plot(model['c_array'],-model['confidence'][1],'r',label='Model miss',linewidth=3)
-					plt.step(subj['c_array'],subj_confidence[1],'r',label='Subject miss')
+					plt.step(subj_c_array,subj_confidence[1],'r',label='Subject miss',where='post')
 					plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
-				logging.debug('Plotted confidence axes')
+				self.logger.debug('Plotted confidence axes')
 				plt.xlabel('Confidence')
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
 				#~ gs1.tight_layout(fig,rect=(0.10, 0.70, 0.90, 0.95), pad=0, w_pad=0.03)
-				logging.debug('Completed confidence axes plot, legend and labels')
+				self.logger.debug('Completed confidence axes plot, legend and labels')
 				
 				if logscale:
 					vmin = np.min([np.min(subj['hit_histogram'][(subj['hit_histogram']>0).nonzero()]),
@@ -2932,106 +2990,130 @@ class Fitter_plot_handler():
 							   np.max([model['hit_histogram'],model['miss_histogram']])])
 				
 				ax00 = plt.subplot(gs2[0,0])
-				logging.debug('Created subject hit axes')
+				self.logger.debug('Created subject hit axes')
 				plt.imshow(subj['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 							extent=[t_extent[0],t_extent[1],0,1],norm=norm)
 				plt.ylabel('Confidence')
 				plt.title('Hit')
-				logging.debug('Populated subject hit axes')
+				self.logger.debug('Populated subject hit axes')
 				ax10 = plt.subplot(gs2[1,0],sharex=ax00,sharey=ax00)
-				logging.debug('Created model hit axes')
+				self.logger.debug('Created model hit axes')
 				plt.imshow(model['hit_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 							extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
 				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 				plt.ylabel('Confidence')
-				logging.debug('Populated model hit axes')
+				self.logger.debug('Populated model hit axes')
 				
 				ax01 = plt.subplot(gs2[0,1],sharex=ax00,sharey=ax00)
-				logging.debug('Created subject miss axes')
+				self.logger.debug('Created subject miss axes')
 				plt.imshow(subj['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 							extent=[t_extent[0],t_extent[1],0,1],norm=norm)
 				plt.title('Miss')
-				logging.debug('Populated subject miss axes')
+				self.logger.debug('Populated subject miss axes')
 				ax11 = plt.subplot(gs2[1,1],sharex=ax00,sharey=ax00)
-				logging.debug('Created model miss axes')
+				self.logger.debug('Created model miss axes')
 				im = plt.imshow(model['miss_histogram'],aspect="auto",interpolation='none',origin='lower',vmin=vmin,vmax=vmax,
 							extent=[model['t_array'][0],model['t_array'][-1],0,1],norm=norm)
 				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 				if xlim_rt_cutoff:
 					ax00.set_xlim([0,rt_cutoff])
-				logging.debug('Populated model miss axes')
+				self.logger.debug('Populated model miss axes')
 				
 				ax00.tick_params(labelleft=True, labelbottom=False)
 				ax01.tick_params(labelleft=False, labelbottom=False)
 				ax10.tick_params(labelleft=True, labelbottom=True)
 				ax11.tick_params(labelleft=False, labelbottom=True)
-				logging.debug('Completed histogram axes')
+				self.logger.debug('Completed histogram axes')
 				
 				cbar_ax = plt.subplot(gs3[0])
-				logging.debug('Created colorbar axes')
+				self.logger.debug('Created colorbar axes')
 				plt.colorbar(im, cax=cbar_ax)
 				plt.ylabel('Prob density')
-				logging.debug('Completed colorbar axes')
+				self.logger.debug('Completed colorbar axes')
 				
 				plt.suptitle(key)
-				logging.debug('Sucessfully completed figure for key {0}'.format(key))
+				self.logger.debug('Sucessfully completed figure for key {0}'.format(key))
 			else: # binary confidence
+				self.logger.debug('Starting the binary confidence plotting procedure')
 				gs1 = gridspec.GridSpec(2, 2,left=0.10, right=0.90, top=0.95,bottom=0.1)
-				logging.debug('Created gridspecs')
+				self.logger.debug('Created gridspecs')
 				axrt = plt.subplot(gs1[0,0])
-				logging.debug('Created rt axes')
+				self.logger.debug('Created rt axes')
 				dt = subj['t_array'][1]-subj['t_array'][0]
 				subj_performance = np.sum(subj['rt'][0])*dt
-				subj_median_confidence_ind = (np.cumsum(np.sum(subj['confidence'],axis=0))>=0.5).nonzero()[0][0]
-				subj_lowconf_rt = np.array([np.sum(subj['hit_histogram'][:subj_median_confidence_ind],axis=0)*subj_performance,
-											np.sum(subj['miss_histogram'][:subj_median_confidence_ind],axis=0)*(1-subj_performance)])
-				subj_highconf_rt = np.array([np.sum(subj['hit_histogram'][subj_median_confidence_ind:],axis=0)*subj_performance,
-											np.sum(subj['miss_histogram'][subj_median_confidence_ind:],axis=0)*(1-subj_performance)])
+				self.logger.debug('Binary confidence split method: {0}'.format(binary_split_method))
+				if binary_split_method=='median':
+					subj_split_ind = (np.cumsum(np.sum(subj['confidence'],axis=0))>=0.5).nonzero()[0][0]
+					if model['confidence'].shape[1]>2:
+						self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+						model_split_ind = (np.cumsum(np.sum(model['confidence'],axis=0))>=0.5).nonzero()[0][0]
+					else:
+						model_split_ind = 1
+				elif binary_split_method=='half':
+					subj_split_ind = (subj['c_array']>=0.5).nonzero()[0][0]
+					if model['confidence'].shape[1]>2:
+						self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+						model_split_ind = (model['c_array']>=0.5).nonzero()[0][0]
+					else:
+						model_split_ind = 1
+				elif binary_split_method=='mean':
+					if len(subj['c_array'])>(subj['confidence'].shape[1]):
+						c_array = np.array([0.5*(e1+e0) for e1,e0 in zip(subj['c_array'][1:],subj['c_array'][:-1])])
+					else:
+						c_array = subj['c_array']
+					subj_split_ind = (c_array>=np.sum(subj['confidence']*c_array)).nonzero()[0][0]
+					if model['confidence'].shape[1]>2:
+						self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+						model_split_ind = (model['c_array']>=np.sum(model['confidence']*model['c_array'])).nonzero()[0][0]
+					else:
+						model_split_ind = 1
+				self.logger.debug('Subject confidence split index: {0}'.format(subj_split_ind))
+				self.logger.debug('Model confidence split index: {0}'.format(model_split_ind))
+				subj_lowconf_rt = np.array([np.sum(subj['hit_histogram'][:subj_split_ind],axis=0)*subj_performance,
+											np.sum(subj['miss_histogram'][:subj_split_ind],axis=0)*(1-subj_performance)])
+				subj_highconf_rt = np.array([np.sum(subj['hit_histogram'][subj_split_ind:],axis=0)*subj_performance,
+											np.sum(subj['miss_histogram'][subj_split_ind:],axis=0)*(1-subj_performance)])
 				model_performance = np.sum(model['rt'][0])*(model['t_array'][1]-model['t_array'][0])
-				if model['confidence'].shape[1]>2:
-					model_median_confidence_ind = (np.cumsum(np.sum(model['confidence'],axis=0))>=0.5).nonzero()[0][0]
-					model_low_rt = np.array([np.sum(model['hit_histogram'][:model_median_confidence_ind],axis=0)*model_performance,
-											np.sum(model['miss_histogram'][:model_median_confidence_ind],axis=0)*(1-model_performance)])
-					model_high_rt = np.array([np.sum(model['hit_histogram'][model_median_confidence_ind:],axis=0)*model_performance,
-											np.sum(model['miss_histogram'][model_median_confidence_ind:],axis=0)*(1-model_performance)])
+				model_low_rt = np.array([np.sum(model['hit_histogram'][:model_split_ind],axis=0)*model_performance,
+										np.sum(model['miss_histogram'][:model_split_ind],axis=0)*(1-model_performance)])
+				model_high_rt = np.array([np.sum(model['hit_histogram'][model_split_ind:],axis=0)*model_performance,
+										np.sum(model['miss_histogram'][model_split_ind:],axis=0)*(1-model_performance)])
+				if len(subj['t_array'])==len(subj['rt'][0]):
+					self.logger.debug('Subject "t_array" holds the histogram centers. Converting to edges to achieve proper step centering.')
+					subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
 				else:
-					model_low_rt = np.array([model['hit_histogram'][0]*model_performance,
-											model['miss_histogram'][0]*(1-model_performance)])
-					model_high_rt = np.array([model['hit_histogram'][1]*model_performance,
-											model['miss_histogram'][1]*(1-model_performance)])
-				if len(subj['t_array'])>len(subj['rt'][0]):
-					subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
-					subj_lowconf_rt = np.hstack((subj_lowconf_rt,np.array([subj_lowconf_rt[:,-1]]).T))
-					subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
-				else:
-					subj_rt = subj['rt']
+					self.logger.debug('Subject "t_array" holds the histogram edges')
+					subj_t_array = subj['t_array']
+				subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+				subj_lowconf_rt = np.hstack((subj_lowconf_rt,np.array([subj_lowconf_rt[:,-1]]).T))
+				subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
 				
-				plt.step(subj['t_array'],subj_rt[0],'b',label='Subject hit')
-				plt.step(subj['t_array'],subj_rt[1],'r',label='Subject miss')
+				plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
+				plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
 				plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
 				plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
-				logging.debug('Plotted rt axes')
+				self.logger.debug('Plotted rt axes')
 				if xlim_rt_cutoff:
 					axrt.set_xlim([0,rt_cutoff])
 				plt.ylabel('Prob density')
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
-				logging.debug('Completed rt axes plot, legend and labels')
+				self.logger.debug('Completed rt axes plot, legend and labels')
 				
 				axconf = plt.subplot(gs1[0,1])
-				logging.debug('Created confidence axes')
-				plt.step(subj['t_array'],np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject low')
-				plt.step(subj['t_array'],np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject high')
+				self.logger.debug('Created confidence axes')
+				plt.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject low',where='post')
+				plt.step(subj_t_array,np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject high',where='post')
 				plt.plot(model['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model low',linewidth=3)
 				plt.plot(model['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model high',linewidth=3)
 				if xlim_rt_cutoff:
 					axconf.set_xlim([0,rt_cutoff])
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
-				logging.debug('Plotted confidence axes')
+				self.logger.debug('Plotted confidence axes')
 				
 				axhitconf = plt.subplot(gs1[1,0])
-				logging.debug('Created hit confidence axes')
-				plt.step(subj['t_array'],subj_lowconf_rt[0],'mediumpurple',label='Subject hit low')
-				plt.step(subj['t_array'],subj_highconf_rt[0],'forestgreen',label='Subject hit high')
+				self.logger.debug('Created hit confidence axes')
+				plt.step(subj_t_array,subj_lowconf_rt[0],'mediumpurple',label='Subject hit low',where='post')
+				plt.step(subj_t_array,subj_highconf_rt[0],'forestgreen',label='Subject hit high',where='post')
 				plt.plot(model['t_array'],model_low_rt[0],'mediumpurple',label='Model hit low',linewidth=3)
 				plt.plot(model['t_array'],model_high_rt[0],'forestgreen',label='Model hit high',linewidth=3)
 				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
@@ -3039,47 +3121,54 @@ class Fitter_plot_handler():
 				if xlim_rt_cutoff:
 					axhitconf.set_xlim([0,rt_cutoff])
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
-				logging.debug('Plotted hit confidence axes')
+				self.logger.debug('Plotted hit confidence axes')
 				
 				axmissconf = plt.subplot(gs1[1,1])
-				logging.debug('Created miss confidence axes')
-				plt.step(subj['t_array'],subj_lowconf_rt[1],'mediumpurple',label='Subject miss low')
-				plt.step(subj['t_array'],subj_highconf_rt[1],'forestgreen',label='Subject miss high')
+				self.logger.debug('Created miss confidence axes')
+				plt.step(subj_t_array,subj_lowconf_rt[1],'mediumpurple',label='Subject miss low',where='post')
+				plt.step(subj_t_array,subj_highconf_rt[1],'forestgreen',label='Subject miss high',where='post')
 				plt.plot(model['t_array'],model_low_rt[1],'mediumpurple',label='Model miss low',linewidth=3)
 				plt.plot(model['t_array'],model_high_rt[1],'forestgreen',label='Model miss high',linewidth=3)
 				plt.xlabel('RT [{time_units}]'.format(time_units=self.time_units()))
 				if xlim_rt_cutoff:
 					axmissconf.set_xlim([0,rt_cutoff])
 				plt.legend(loc='best', fancybox=True, framealpha=0.5)
-				logging.debug('Plotted miss confidence axes')
-				logging.debug('Completed confidence axes plot, legend and labels')
+				self.logger.debug('Plotted miss confidence axes')
+				self.logger.debug('Completed confidence axes plot, legend and labels')
 				
 				plt.suptitle(key)
-				logging.debug('Sucessfully completed figure for key {0}'.format(key))
+				self.logger.debug('Sucessfully completed figure for key {0}'.format(key))
 			
 			if saver:
-				logging.debug('Saving figure')
+				self.logger.debug('Saving figure')
 				if isinstance(saver,str):
 					plt.savefig(saver,bbox_inches='tight')
 				else:
 					saver.savefig(fig,bbox_inches='tight')
 			if show:
-				logging.debug('Showing figure')
+				self.logger.debug('Showing figure')
 				plt.show(True)
 				fig = None
 	
 	def save(self,fname):
-		logging.debug('Fitter_plot_handler state that will be saved = "%s"',self.__getstate__())
-		logging.info('Saving Fitter_plot_handler state to file "%s"',fname)
+		self.logger.debug('Fitter_plot_handler state that will be saved = "%s"',self.__getstate__())
+		self.logger.info('Saving Fitter_plot_handler state to file "%s"',fname)
 		f = open(fname,'w')
 		pickle.dump(self,f,pickle.HIGHEST_PROTOCOL)
 		f.close()
 	
 	def __setstate__(self,state):
-		self.__init__(state['dictionary'],state['time_units'])
+		self.logger = logging.getLogger("fits_cognition.Fitter_plot_handler")
+		if 'binary_split_method' in state.keys():
+			binary_split_method = state['binary_split_method']
+		else:
+			binary_split_method = None
+			self.logger.debug('Old version of Fitter_plot_handler without the binary_split_method attribute. Will set it to None to explicitly set it appart from the default median split initialization.')
+		self.__init__(state['dictionary'],state['time_units'],binary_split_method)
 	
 	def __getstate__(self):
-		return {'dictionary':self.dictionary,'time_units':self._time_units}
+		return {'dictionary':self.dictionary,'time_units':self._time_units,
+				'binary_split_method':self.binary_split_method}
 	
 	def merge(self,merge='all'):
 		"""
@@ -3103,7 +3192,7 @@ class Fitter_plot_handler():
 			key_aliaser = lambda key: re.sub('_session_[\[\]\-0-9]+','',re.sub('_subject_[\[\]\-0-9]+','',key))
 		else:
 			raise ValueError('Unknown merge option={0}'.format(merge))
-		output = Fitter_plot_handler({},self._time_units)
+		output = Fitter_plot_handler({},self._time_units,self.binary_split_method)
 		return output.__aliased_iadd__(self,key_aliaser)
 
 def parse_input():
@@ -3224,7 +3313,7 @@ def parse_input():
        The default method is 'log_odds'. Be aware that, the mapping method
        is only added to the saved filename for the methods different than
        'log_odds'.
- '--binary_split_method': A string to identify the method used to
+ '-bs' or '--binary_split_method': A string to identify the method used to
                           binarize the subjectSession's confidence
                           reports. Available methods are 'median',
                           'half' and 'mean'. If 'median', every report
@@ -3261,7 +3350,7 @@ def parse_input():
                   the starting points for the parameters that you wish not to start at the default
                   start point. Default start points are estimated from the subjectSession data.
  
- '--bounds': A dictionary of lower and upper bounds in parameter space.
+ '-bo' or '--bounds': A dictionary of lower and upper bounds in parameter space.
              The dictionary must be written as '{"parameter_name":[low_bound_value,up_bound_value],etc}'
              As for the --start_point option, if a parameter is omitted, its default bound is used.
              Default bounds are:
@@ -3388,7 +3477,7 @@ def parse_input():
 				key = 'start_point'
 				expecting_key = False
 				json_encoded_key = True
-			elif arg=='--bounds':
+			elif arg=='-bo' or arg=='--bounds':
 				key = 'bounds'
 				expecting_key = False
 				json_encoded_key = True
@@ -3413,7 +3502,7 @@ def parse_input():
 			elif arg=='--plot_binary':
 				key = 'plot_binary'
 				expecting_key = False
-			elif arg=='--binary_split_method':
+			elif arg=='-bs' or arg=='--binary_split_method':
 				key = 'binary_split_method'
 				expecting_key = False
 			elif arg=='-h' or arg=='--help':
@@ -3472,9 +3561,9 @@ def prepare_fit_args(fitter,options,fname):
 	for k in loaded_parameters.keys():
 		if not k in temp.get_fitted_parameters():
 			del loaded_parameters[k]
-	logging.debug('Loaded parameters: {0}'.format(loaded_parameters))
+	package_logger.debug('Loaded parameters: {0}'.format(loaded_parameters))
 	if temp.time_units!=fitter.time_units:
-		logging.debug('Changing loaded parameters time units')
+		package_logger.debug('Changing loaded parameters time units')
 		for fp in loaded_parameters.keys():
 			if fp in ['cost','internal_var']:
 				scaling_factor = 1e3 if fitter.time_units=='seconds' else 1e-3
@@ -3618,8 +3707,8 @@ def prepare_fit_args(fitter,options,fname):
 		except KeyError:
 			pass
 		fixed_parameters['confidence_map_slope'] = np.inf
-	logging.debug('Prepared fixed_parameters = {0}'.format(fixed_parameters))
-	logging.debug('Prepared start_point = {0}'.format(start_point))
+	package_logger.debug('Prepared fixed_parameters = {0}'.format(fixed_parameters))
+	package_logger.debug('Prepared start_point = {0}'.format(start_point))
 	return fixed_parameters,start_point
 
 if __name__=="__main__":
@@ -3641,18 +3730,18 @@ if __name__=="__main__":
 	subjects = io.filter_subjects_list(io.unique_subject_sessions(raw_data_dir),'all_sessions_by_experiment')
 	if options['experiment']!='all':
 		subjects = io.filter_subjects_list(subjects,'experiment_'+options['experiment'])
-	logging.debug('Total number of subjectSessions listed = {0}'.format(len(subjects)))
-	logging.debug('Total number of subjectSessions that will be fitted = {0}'.format(len(range(task,len(subjects),ntasks))))
+	package_logger.debug('Total number of subjectSessions listed = {0}'.format(len(subjects)))
+	package_logger.debug('Total number of subjectSessions that will be fitted = {0}'.format(len(range(task,len(subjects),ntasks))))
 	fitter_plot_handler = None
 	
 	# Main loop over subjectSessions
 	for i,s in enumerate(subjects):
-		logging.debug('Enumerated {0} subject {1}'.format(i,s.get_key()))
+		package_logger.debug('Enumerated {0} subject {1}'.format(i,s.get_key()))
 		if (i-task)%ntasks==0:
-			logging.info('Task will execute for enumerated {0} subject {1}'.format(i,s.get_key()))
+			package_logger.info('Task will execute for enumerated {0} subject {1}'.format(i,s.get_key()))
 			# Fit parameters if the user did not disable the fit flag
 			if options['fit']:
-				logging.debug('Flag "fit" was True')
+				package_logger.debug('Flag "fit" was True')
 				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],\
 					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
 					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
@@ -3664,7 +3753,7 @@ if __name__=="__main__":
 					# Set start point and fixed parameters to the user supplied values
 					# Or to the parameters loaded from a previous fit round
 					if options['start_point_from_fit_output']:
-						logging.debug('Flag start_point_from_fit_output was present. Will load parameters from previous fit round')
+						package_logger.debug('Flag start_point_from_fit_output was present. Will load parameters from previous fit round')
 						loaded_method = options['start_point_from_fit_output']['method']
 						loaded_optimizer = options['start_point_from_fit_output']['optimizer']
 						loaded_suffix = options['start_point_from_fit_output']['suffix']
@@ -3672,7 +3761,7 @@ if __name__=="__main__":
 						fname = Fitter_filename(experiment=s.experiment,method=loaded_method,name=s.get_name(),\
 												session=s.get_session(),optimizer=loaded_optimizer,suffix=loaded_suffix,\
 												confidence_map_method=loaded_cmapmeth)
-						logging.debug('Will load parameters from file: {0}'.format(fname))
+						package_logger.debug('Will load parameters from file: {0}'.format(fname))
 						fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
 					else:
 						fixed_parameters = options['fixed_parameters']
@@ -3686,21 +3775,21 @@ if __name__=="__main__":
 											optimizer_kwargs=options['optimizer_kwargs'])
 					fitter.save()
 				else:
-					logging.warning('File {0} already exists, will skip enumerated subject {1} whose key is {2}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i,s.get_key()))
+					package_logger.warning('File {0} already exists, will skip enumerated subject {1} whose key is {2}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i,s.get_key()))
 			# Prepare plotable data
 			if options['show'] or options['save'] or options['save_plot_handler']:
-				logging.debug('show, save or save_plot_fitter flags were True.')
+				package_logger.debug('show, save or save_plot_fitter flags were True.')
 				if options['load_plot_handler']:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
 							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix'],
 							confidence_map_method=options['high_confidence_mapping_method']).replace('.pkl','_plot_handler.pkl')
-					logging.debug('Loading Fitter_plot_handler from file={0}'.format(fname))
+					package_logger.debug('Loading Fitter_plot_handler from file={0}'.format(fname))
 					try:
 						f = open(fname,'r')
 						temp = pickle.load(f)
 						f.close()
 					except:
-						logging.warning('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(fname))
+						package_logger.warning('Failed to load Fitter_plot_handler from file={0}. Will continue to next subject.'.format(fname))
 						continue
 				else:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
@@ -3708,19 +3797,19 @@ if __name__=="__main__":
 							confidence_map_method=options['high_confidence_mapping_method'])
 					# Try to load the fitted data from file 'fname' or continue to next subject
 					try:
-						logging.debug('Attempting to load fitter from file "{0}".'.format(fname))
+						package_logger.debug('Attempting to load fitter from file "{0}".'.format(fname))
 						fitter = load_Fitter_from_file(fname)
 					except:
-						logging.warning('Failed to load fitter from file {0}. Will continue to next subject.'.format(fname))
+						package_logger.warning('Failed to load fitter from file {0}. Will continue to next subject.'.format(fname))
 						continue
 					# Create Fitter_plot_handler for the loaded Fitter instance
-					logging.debug('Getting Fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
+					package_logger.debug('Getting Fitter_plot_handler with merge_plot={0}.'.format(options['plot_merge']))
 					if not options['plot_handler_rt_cutoff'] is None:
 						if s.experiment=='Luminancia':
 							cutoff = np.min([1.,options['plot_handler_rt_cutoff']])
 						else:
 							cutoff = options['plot_handler_rt_cutoff']
-						logging.debug('Fitter_plot_handler will use rt_cutoff = {0}'.format(cutoff))
+						package_logger.debug('Fitter_plot_handler will use rt_cutoff = {0}'.format(cutoff))
 						edges = np.linspace(0,cutoff,51)
 					else:
 						edges = None
@@ -3728,12 +3817,12 @@ if __name__=="__main__":
 					if options['save_plot_handler']:
 						fname = fname.replace('.pkl','_plot_handler.pkl')
 						if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
-							logging.debug('Saving Fitter_plot_handler to file={0}.'.format(fname))
+							package_logger.debug('Saving Fitter_plot_handler to file={0}.'.format(fname))
 							temp.save(fname)
 						else:
-							logging.warning('Could not save Fitter_plot_handler. File {0} already exists. To override supply the flag -w.'.format(fname))
+							package_logger.warning('Could not save Fitter_plot_handler. File {0} already exists. To override supply the flag -w.'.format(fname))
 				# Add the new Fitter_plot_handler to the bucket of plot handlers
-				logging.debug('Adding Fitter_plot_handlers')
+				package_logger.debug('Adding Fitter_plot_handlers')
 				if fitter_plot_handler is None:
 					fitter_plot_handler = temp
 				else:
@@ -3763,11 +3852,12 @@ if __name__=="__main__":
 		saver = None
 	# Plot and show, or plot and save depending on the flags supplied by the user
 	if options['show'] or options['save']:
-		logging.debug('Plotting results from fitter_plot_handler')
+		package_logger.debug('Plotting results from fitter_plot_handler')
 		assert not fitter_plot_handler is None, 'Could not create the Fitter_plot_handler to plot the fitter results'
 		if options['plot_merge'] and options['load_plot_handler']:
 			fitter_plot_handler = fitter_plot_handler.merge(options['plot_merge'])
-		fitter_plot_handler.plot(saver=saver,show=options['show'],is_binary_confidence=options['plot_binary'])
+		fitter_plot_handler.plot(saver=saver,show=options['show'],is_binary_confidence=options['plot_binary'],
+								binary_split_method=options['binary_split_method'])
 		if options['save']:
-			logging.debug('Closing saver')
+			package_logger.debug('Closing saver')
 			saver.close()

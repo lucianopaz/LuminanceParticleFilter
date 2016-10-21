@@ -678,16 +678,16 @@ def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', 
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
-	#~ parameters,parameter_names,names,sessions,experiments = \
-		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	parameters,parameter_names,names,sessions,experiments = \
-		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
-													  'confidence_map_slope':'all',\
-													  'cost':'all',\
-													  'high_confidence_threshold':'all',\
-													  'dead_time':'all',\
-													  'dead_time_sigma':'all',\
-													  'phase_out_prob':'all'})
+		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
+	#~ parameters,parameter_names,names,sessions,experiments = \
+		#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
+													  #~ 'confidence_map_slope':'all',\
+													  #~ 'cost':'all',\
+													  #~ 'high_confidence_threshold':'all',\
+													  #~ 'dead_time':'all',\
+													  #~ 'dead_time_sigma':'all',\
+													  #~ 'phase_out_prob':'all'})
 	
 	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
 	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
