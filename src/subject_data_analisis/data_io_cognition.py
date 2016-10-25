@@ -3,6 +3,7 @@
 """ Package for loading the behavioral dataset """
 
 from __future__ import division
+from __future__ import print_function
 import numpy as np
 from scipy import io as io
 import os, itertools, sys, random, re, scipy.integrate

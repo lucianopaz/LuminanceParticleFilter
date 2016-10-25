@@ -1,4 +1,5 @@
 from __future__ import division
+from __future__ import print_function
 
 import sys, pickle
 import numpy as np
@@ -673,8 +674,6 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 		ax2.plot(m.t,m.bounds[1],color=c2)
 		for j,mu in enumerate(mus):
 			rt = m.rt(mu,bounds=(xub,xlb))
-			#~ if mu/np.sqrt(v)>2e2:
-				#~ print rt
 			evidence[i,j] = mu/np.sqrt(v)
 			performance[i,j] = np.sum(rt[0])*m.dt
 	ax1.set_ylabel('$x(t)$ Bounds',fontsize=16)
@@ -685,8 +684,6 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	cbar_ax = plt.subplot(gs2[0])
 	cbar = np.array([[plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,100)],
 					 [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,100)]])
-	#~ cbar = np.array([[plt.get_cmap('brg')(x) for x in np.linspace(0,0.5,100)],
-					 #~ [plt.get_cmap('brg')(x) for x in np.linspace(1,0.5,100)]])
 	cbar = np.swapaxes(cbar,0,1)
 	plt.sca(cbar_ax)
 	cbar_ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(r'$10^{%1.0f}$'))
@@ -702,13 +699,12 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 		evidence = evidence[np.logical_not(np.isnan(performance))]
 		performance = performance[np.logical_not(np.isnan(performance))]
 	fun = lambda x,a: 1./(1.+np.exp(a*x))
-	#~ jac = lambda x,a: np.array([-a*np.exp(a*x)/(1.+np.exp(a*x))**2,-x*np.exp(a*x)/(1.+np.exp(a*x))**2])
 	from scipy.optimize import curve_fit
 	popt,pcov = curve_fit(fun, evidence, performance)
 	try:
-		print 'Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0]))
+		print('Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0])))
 	except:
-		print 'Par = {0}+-{1}'.format(popt,np.sqrt(pcov))
+		print('Par = {0}+-{1}'.format(popt,np.sqrt(pcov)))
 	
 	ax = plt.subplot(gs3[0])
 	plt.plot(evidence,performance,'o',label='Simulations',color='k')
@@ -744,7 +740,7 @@ def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg
 	performance = np.zeros((len(mus),len(costs),len(model_vars)))
 	evidence = np.zeros_like(performance)
 	for k,mu in enumerate(mus):
-		print mu
+		print(mu)
 		for i,cost in enumerate(costs):
 			m.set_cost(cost)
 			for j,var in enumerate(model_vars):
@@ -1129,7 +1125,7 @@ def parse_input():
 			skip_arg = False
 			continue
 		if arg=='-h' or arg=='--help':
-			print script_help
+			print(script_help)
 			sys.exit()
 		elif arg=='--all':
 			for key in keys:

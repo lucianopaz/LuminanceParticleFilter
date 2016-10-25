@@ -2,6 +2,7 @@
 #-*- coding: UTF-8 -*-
 
 from __future__ import division
+from __future__ import print_function
 import numpy as np
 from scipy import io
 from scipy import optimize
@@ -356,7 +357,6 @@ bounds = {bounds}
 			self.rho = optimize.brentq(f,lb,ub)
 		except ValueError as er:
 			if er.message=="f(a) and f(b) must have different signs":
-				#~ print "Changing bound for brentq root finding of rho"
 				m = f(lb)
 				M = f(ub)
 				if m!=0 and M!=0:
@@ -364,14 +364,11 @@ bounds = {bounds}
 						if (m<M and m<0) or (m>M and m>0):
 							lb = ub
 							ub = ub*10
-							#~ print "Setting upper bound equal to %1.4f" % (ub)
 							M = f(ub)
 						elif (m>M and m<0) or (m<M and m>0):
 							ub = lb
 							lb = lb*10
-							#~ print "Setting lower bound equal to %1.4f" % (lb)
 							m = f(lb)
-					#~ print "Success! Bounds for root finding set to lb=%1.4f and ub=%1.4f" % (lb,ub)
 					self.rho = optimize.brentq(f,lb,ub)
 				else:
 					if m==0:
@@ -702,7 +699,6 @@ bounds = {bounds}
 						self.cost[:old_nT-1] = old_cost
 						self.cost[old_nT-1:] = old_cost[-1]
 			if n is not None:
-				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
 				if n%2==0:
 					n+=1
@@ -765,7 +761,6 @@ bounds = {bounds}
 						self.cost[:old_nT-1] = old_cost
 						self.cost[old_nT-1:] = old_cost[-1]
 			if n is not None:
-				#~ print self.value[0,int(0.5*self.n)]
 				n = int(n)
 				if n%2==0:
 					n+=1
@@ -781,7 +776,6 @@ bounds = {bounds}
 				else:
 					self.memory_efficient_backpropagate_value(rho=self.rho)
 				val0 = self.value[0,int(0.5*self.n)]
-				#~ print val0
 				if abs(val0)>tolerance:
 					# Must refine the value of self.rho
 					if val0<0:
@@ -851,13 +845,6 @@ bounds = {bounds}
 		if (rt-self.t[t_i])==0:
 			return -np.log(g[t_i])
 		ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
-		#~ oldstate = np.seterr(divide='raise')
-		#~ try:
-			#~ ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
-		#~ except:
-			#~ print t_i,g[t_i],g[t_i+1],rt,self.t[t_i],g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i])
-			#~ ret = -np.log(g[t_i]+(g[t_i+1]-g[t_i])/self.dt*(rt-self.t[t_i]))
-		#~ np.seterr(**oldstate)
 		return ret
 	
 	def log_odds(self):
@@ -955,7 +942,7 @@ def main():
 		xub,xlb,value,v_explore,v1,v2 = m.xbounds_fixed_rho(set_bounds=True,return_values=True)
 		xb = np.array([xub,xlb])
 		b = m.bounds
-		print xb.shape, b.shape
+		print(xb.shape, b.shape)
 		io.savemat('tesis_figure_data4',{'value':value,'gb':b,'xb':xb,'v_explore':v_explore,'v1':v1,'v2':v2,'t':m.t,'g':m.g}) 
 		
 		plt.figure(figsize=(11,8))
