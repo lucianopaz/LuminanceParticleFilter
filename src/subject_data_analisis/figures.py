@@ -964,9 +964,9 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 	
 	experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
 	row_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
-	plot_gs = gridspec.GridSpec(3, 2,left=0.25, right=0.98,hspace=0.20,wspace=0.18)
-	exp_scheme_gs = gridspec.GridSpec(3, 1,left=0., right=0.16,hspace=0.25)
-	plt.figure(figsize=(12,11))
+	plot_gs = gridspec.GridSpec(3, 3,left=0.20, right=0.98,hspace=0.20,wspace=0.18)
+	exp_scheme_gs = gridspec.GridSpec(3, 1,left=0., right=0.14,hspace=0.25)
+	plt.figure(figsize=(14,11))
 	fitter_plot_handler.normalize()
 	for experiment in fitter_plot_handler.keys():
 		subj = fitter_plot_handler[experiment]['experimental']
@@ -1019,10 +1019,10 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 		subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
 		
 		axrt = plt.subplot(plot_gs[row-1,0])
-		plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
-		plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
-		plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
-		plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+		plt.step(subj_t_array,subj_rt[0],'b',label='Subject P(RT,hit)',where='post')
+		plt.step(subj_t_array,subj_rt[1],'r',label='Subject P(RT,miss)',where='post')
+		plt.plot(model['t_array'],model['rt'][0],'b',label='Model P(RT,hit)',linewidth=3)
+		plt.plot(model['t_array'],model['rt'][1],'r',label='Model P(RT,miss)',linewidth=3)
 		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
 		plt.ylabel('Prob density')
 		if row==1:
@@ -1033,13 +1033,26 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 		plt.ylabel('Prob density')
 		
 		axconf = plt.subplot(plot_gs[row-1,1])
-		plt.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject low',where='post')
-		plt.step(subj_t_array,np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject high',where='post')
-		plt.plot(model['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model low',linewidth=3)
-		plt.plot(model['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model high',linewidth=3)
+		plt.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject P(RT,low)',where='post')
+		plt.step(subj_t_array,np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject P(RT,high)',where='post')
+		plt.plot(model['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model P(RT,low)',linewidth=3)
+		plt.plot(model['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model P(RT,high)',linewidth=3)
 		axconf.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
 		if row==1:
 			plt.title('Confidence distribution')
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('Confidence')
+		
+		mdt = model['t_array'][1]-model['t_array'][0]
+		axconf2 = plt.subplot(plot_gs[row-1,2])
+		plt.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0)/np.sum(subj_lowconf_rt*dt),'mediumpurple',label='Subject P(RT|low)',where='post')
+		plt.step(subj_t_array,np.sum(subj_highconf_rt,axis=0)/np.sum(subj_highconf_rt*dt),'forestgreen',label='Subject P(RT|high)',where='post')
+		plt.plot(model['t_array'],np.sum(model_low_rt,axis=0)/np.sum(model_low_rt*mdt),'mediumpurple',label='Model P(RT|low)',linewidth=3)
+		plt.plot(model['t_array'],np.sum(model_high_rt,axis=0)/np.sum(model_high_rt*mdt),'forestgreen',label='Model P(RT|high)',linewidth=3)
+		axconf2.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		if row==1:
+			plt.title('Conditional confidence distribution')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		elif row==3:
 			plt.xlabel('Confidence')

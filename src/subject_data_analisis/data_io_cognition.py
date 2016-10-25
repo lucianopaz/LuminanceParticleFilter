@@ -459,6 +459,21 @@ def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by
 	return output
 
 def merge_subjectSessions(subjectSessions,merge='all'):
+	"""
+	merge_subjectSessions(subjectSessions,merge='all')
+	
+	Take a list of SubjectSession instances and merge them according to
+	the criteria specified in input merge. Available merge values:
+	'all': All the SubjectSession instances with matching experiments
+		are merged into a single SubjectSession instance.
+	'sessions': All the SubjectSession instances with matching experiments
+		and sessions are merged into a single SubjectSession instance.
+	'names': All the SubjectSession instances with matching experiments
+		and names are merged into a single SubjectSession instance.
+	
+	Output: a list of SubjectSession instances.
+	
+	"""
 	merge = merge.lower()
 	if merge=='all':
 		names = {}
@@ -497,7 +512,7 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 			else:
 				sessions[key]['data'].extend(ss.session)
 		output = [SubjectSession(sessions[key]['name'],sessions[key]['data'],sessions[key]['experiment'],sessions[key]['data_dir']) for key in sessions.keys()]
-	elif merge=='subjects':
+	elif merge=='names':
 		data_dirs = {}
 		for ss in subjectSessions:
 			exp = str(ss.experiment)
@@ -525,6 +540,7 @@ def increase_histogram_count(d,n):
 	of shape (n,) that copies the elements of d keeping d's histogram
 	approximately invariant. Second output "indexes" is an array so
 	that out = d(indexes)
+	
 	"""
 	d = d.squeeze()
 	if len(d.shape)>1:
@@ -559,6 +575,28 @@ def increase_histogram_count(d,n):
 	return out[randperm_indexes], indexes[randperm_indexes]
 
 def compute_roc(performance,confidence,partition=101):
+	"""
+	compute_roc(performance,confidence,partition=101)
+	
+	Compute the Receiver Operation Characteristic (ROC) curve from two
+	input arrays that hold performance (0 miss, 1 hit) and confidence.
+	
+	Input:
+		performance: 1D numpy array of binary performances (0 miss,
+			1 hit)
+		confidence: 1D numpy array with the same number of elements as
+			performance that holds confidence floating point values in
+			the range [0,1].
+		partition: Int that represents the number of edges that will be
+			used to partition the [0,1] confidence interval to compute
+			the ROC curves
+	
+	Output:
+		roc: 2D numpy array whos shape is (partition,2).
+			roc[:,0] = P(confidence<x|hit)
+			roc[:,1] = P(confidence<x|miss)
+	
+	"""
 	edges = np.linspace(0,1,int(partition))
 	roc = np.zeros((int(partition),2),dtype=np.float)
 	hit = performance==1
@@ -576,6 +614,17 @@ def compute_roc(performance,confidence,partition=101):
 	return roc
 
 def compute_auc(roc):
+	"""
+	compute_auc(roc)
+	
+	Compute the area under the ROC curve.
+	Input:
+		roc: A 2D numpy array as the one returned by compute_roc.
+	
+	Output:
+		auc: A float that is the area under the ROC curve
+	
+	"""
 	return scipy.integrate.trapz(roc[:,1],roc[:,0])
 
 def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'):
@@ -597,54 +646,54 @@ def test(raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/
 		#~ key = s.experiment
 		#~ bla[key].append(np.sum((rt<8.).astype(np.float))/float(len(rt)))
 	
-	print str(len(subjects))+' subjectSessions can be constructed found'
+	print(str(len(subjects))+' subjectSessions can be constructed found')
 	filtered_subjects = filter_subjects_list(subjects)
-	print str(len(filtered_subjects))+' filtered subjectSessions with all_experiments criteria'
+	print(str(len(filtered_subjects))+' filtered subjectSessions with all_experiments criteria')
 	subjects = filter_subjects_list(subjects,'all_sessions_by_experiment')
-	print str(len(subjects))+' filtered subjectSessions with sessions_by_experiment criteria'
+	print(str(len(subjects))+' filtered subjectSessions with sessions_by_experiment criteria')
 	
 	merged_all = merge_subjectSessions(subjects,merge='all')
-	print str(len(merged_all))+' merged subjectSessions with merge all'
+	print(str(len(merged_all))+' merged subjectSessions with merge all')
 	merged_sessions = merge_subjectSessions(subjects,merge='sessions')
-	print str(len(merged_sessions))+' merged subjectSessions with merge sessions'
-	merged_subjects = merge_subjectSessions(subjects,merge='subjects')
-	print str(len(merged_subjects))+' merged subjectSessions with merge subjects'
+	print(str(len(merged_sessions))+' merged subjectSessions with merge sessions')
+	merged_subjects = merge_subjectSessions(subjects,merge='names')
+	print(str(len(merged_subjects))+' merged subjectSessions with merge subjects')
 	
 	experiments_data = merge_data_by_experiment(subjects,return_column_headers=True)
 	
-	print 'Successfully merged all subjects data in '+str(len([k for k in experiments_data.keys() if k!='headers']))+' experiments'
+	print('Successfully merged all subjects data in '+str(len([k for k in experiments_data.keys() if k!='headers']))+' experiments')
 	headers = experiments_data['headers']
 	for key in experiments_data.keys():
 		if key=='headers':
 			continue
 		data = experiments_data[key]
 		#~ data[:,0] = np.round(data[:,0]*5e3)/5e3
-		print key,len(set(data[:,0]))
+		print(key,len(set(data[:,0])))
 		matches = True
 		for test_subj in [t for t in merged_all if t.experiment==key]:
 			testdata = test_subj.load_data()
 			test = testdata.shape[0]==data.shape[0]
 			if not test:
-				print testdata.shape,data.shape
+				print(testdata.shape,data.shape)
 			matches = matches and test
-		print 'Merged all matches shape? {0}'.format('Yes' if matches else 'No')
+		print('Merged all matches shape? {0}'.format('Yes' if matches else 'No'))
 		matches = True
 		for test_subj in [t for t in merged_sessions if t.experiment==key]:
 			testdata = test_subj.load_data()
 			test = testdata.shape[0]==data[data[:,-2]==int(test_subj.name)].shape[0]
 			if not test:
-				print test_subj.name,testdata.shape,data[data[:,-2]==test_subj.name].shape
+				print(test_subj.name,testdata.shape,data[data[:,-2]==test_subj.name].shape)
 			matches = matches and test
-		print 'Merged all sessions matches shape? {0}'.format('Yes' if matches else 'No')
+		print('Merged all sessions matches shape? {0}'.format('Yes' if matches else 'No'))
 		matches = True
 		for test_subj in [t for t in merged_subjects if t.experiment==key]:
 			testdata = test_subj.load_data()
 			test = testdata.shape[0]==data[data[:,-1]==test_subj.session].shape[0]
 			if not test:
-				print testdata.shape,data[data[:,-1]==test_subj.session].shape
+				print(testdata.shape,data[data[:,-1]==test_subj.session].shape)
 			matches = matches and test
-		print 'Merged all subjects matches shape? {0}'.format('Yes' if matches else 'No')
-		print '{0}: {1} trials, {2} sessions, {3} subjects'.format(key,data.shape[0],len(np.unique(data[:,-1])),len(np.unique(data[:,-2])))
+		print('Merged all subjects matches shape? {0}'.format('Yes' if matches else 'No'))
+		print('{0}: {1} trials, {2} sessions, {3} subjects'.format(key,data.shape[0],len(np.unique(data[:,-1])),len(np.unique(data[:,-2]))))
 		if loaded_plot_libs:
 			inds = data[:,1]<14.
 			plt.figure()

@@ -552,6 +552,10 @@ class Fitter:
 			self.high_confidence_mapping_method = state['high_confidence_mapping_method']
 		else:
 			self.high_confidence_mapping_method = 'log_odds'
+		if 'binary_split_method' in state.keys():
+			self.binary_split_method = state['binary_split_method']
+		else:
+			self.binary_split_method = 'median'
 		self.__fit_internals__ = None
 	
 	def set_fixed_parameters(self,fixed_parameters={}):
@@ -805,7 +809,8 @@ class Fitter:
 				 'decisionPolicyKwArgs':self.decisionPolicyKwArgs,
 				 'confidence_partition':self.confidence_partition,
 				 'raw_data_dir':self.raw_data_dir,
-				 'high_confidence_mapping_method':self.high_confidence_mapping_method}
+				 'high_confidence_mapping_method':self.high_confidence_mapping_method,
+				 'binary_split_method':self.binary_split_method}
 		if hasattr(self,'_start_point'):
 			state['_start_point'] = self._start_point
 		if hasattr(self,'_bounds'):

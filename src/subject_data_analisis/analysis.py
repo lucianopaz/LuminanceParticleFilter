@@ -22,6 +22,7 @@ def default_tree_layout(node):
 	
 	Takes an ete3.TreeNode instance and sets its default style adding the
 	appropriate TextFaces
+	
 	"""
 	style = ete3.NodeStyle(vt_line_width=3,hz_line_width=3,size=0)
 	if node.is_leaf():
@@ -85,6 +86,7 @@ def default_tree_style(mode='r',title=None):
 	
 	mode can be 'r' or 'c'. Returns an ete3.TreeStyle instance with a
 	rectangular or circular display depending on the supplied mode
+	
 	"""
 	tree_style = ete3.TreeStyle()
 	tree_style.layout_fn = default_tree_layout
@@ -102,30 +104,210 @@ def default_tree_style(mode='r',title=None):
 	return tree_style
 
 class Analyzer():
-	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '', override=False,\
-				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean, connectivity=None):
+	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '',
+				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				linkage='ward', pooling_func=np.nanmean, connectivity=None):
+		"""
+		Analyzer(method = 'full_confidence', optimizer = 'cma', suffix = '',
+				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				linkage='ward', pooling_func=np.nanmean, connectivity=None)
+		
+		This Class implements an interface between the
+		data_io_cognition.SubjectSession and the fits_cognition.Fitter
+		that constructs a summary of relevant statistics and features
+		of the experimental data and theoretical predictions, and can
+		then perform relevant analyces and graphics from them.
+		
+		The main analysis is the hierarchical clustering of the fitted
+		parameters, which is performed with the scikit learn (sklearn)
+		package's AgglomerativeClustering class. Thus, when constructing
+		the Analyzer, many input parameters are simply parameters used
+		for the creation of an AgglomerativeClustering instance.
+		
+		Input:
+			method: Fitter instance's method.
+			optimizer: Fitter instance's optimizer.
+			suffix: Fitter instance's suffix.
+			cmap_meth: Fitter intance's high_confidence_mapping_method.
+			
+			The four parameters listed above are used to determine the
+			Fitter files that should be loaded to get the relevant
+			statistics.
+			
+			override: Bool by default False. The construction of the
+				experimental and theoretical statistics takes a lot of
+				time. To improve succesive runtimes, the Analyzer, will
+				attempt to load the summary statistics from the file
+				'summary_{method}_{optimizer}_{cmapmeth}{suffix}.pkl',
+				and if it does not exist, it will perform the
+				computations and then save the summaries to the above
+				mentioned file. If the override parameter is True, the
+				summary statistics are not loaded from the file,
+				they are computed and the contents of
+				'summary_{method}_{optimizer}_{cmapmeth}{suffix}.pkl'
+				are overriden with the currently computed statistics.
+			
+			The following parameters are used to construct the 
+			sklearn.cluster.AgglomerativeClustering instance. Refer to
+			the scikit learn documentation for a detailed description
+			of each of these parameters:
+			n_clusters: Int. Default 2
+			affinity: Str. Default 'euclidean'
+			linkage: Str. Default 'ward'
+			pooling_func: Callable. Default numpy.nanmean
+			connectivity: Optional array-like or callable. Default None.
+			
+			We will only mention that the pooling_func is also used to
+			pool together the parameters when applying merges in the
+			scatter_parameters, controlled_scatter and cluster methods.
+			Furthermore, the affinity and linkage are used to compute
+			the cluster span.
+		
+		"""
 		self.method = method
 		self.optimizer = optimizer
 		self.suffix = suffix
+		self.cmap_meth = cmap_meth
 		self.get_summary(override=override)
 		self.init_clusterer(n_clusters=n_clusters, affinity=affinity,\
 				linkage=linkage, pooling_func=pooling_func, connectivity=connectivity)
 	
-	def init_clusterer(self,n_clusters=2, affinity='euclidean', compute_full_tree=True,\
+	def init_clusterer(self,n_clusters=2, affinity='euclidean', compute_full_tree=True,
 						linkage='ward', pooling_func=np.nanmean,connectivity=None):
+		"""
+		self.init_clusterer(n_clusters=2, affinity='euclidean', compute_full_tree=True,
+						linkage='ward', pooling_func=np.nanmean,connectivity=None)
+		
+		This method constructs a sklearn.cluster.AgglomerativeClustering
+		instance using the call:
+		sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters,
+			affinity=affinity, compute_full_tree=compute_full_tree,
+			linkage=linkage, pooling_func=pooling_func,connectivity=connectivity)
+		
+		The parameters used for the above mentioned construction are the
+		input parameters supplied to this function.
+		
+		"""
 		self.agg_clusterer = cluster.AgglomerativeClustering(n_clusters=n_clusters, affinity=affinity,\
 				connectivity=connectivity,compute_full_tree=compute_full_tree, linkage=linkage,\
 				pooling_func=pooling_func)
 		self.linkage = linkage
 		self.affinity = affinity
 		self.pooling_func=pooling_func
+		self.spanner = self.get_cluster_spanner()
 	
 	def set_pooling_func(self,pooling_func):
+		"""
+		self.set_pooling_func(pooling_func)
+		
+		Set the pooling function used for parameter clustering.
+		
+		"""
 		self.agg_clusterer.set_params(**{'pooling_func':pooling_func})
 		self.pooling_func = pooling_func
+		self.spanner = self.get_cluster_spanner()
+	
+	def set_linkage(self,linkage):
+		"""
+		self.set_linkage(linkage)
+		
+		Set the linkage used for parameter clustering.
+		
+		"""
+		self.agg_clusterer.set_params(**{'linkage':linkage})
+		self.linkage = linkage
+		self.spanner = self.get_cluster_spanner()
+	
+	def set_affinity(self,affinity):
+		"""
+		self.set_affinity(affinity)
+		
+		Set the affinity used for parameter clustering.
+		
+		"""
+		self.agg_clusterer.set_params(**{'affinity':affinity})
+		self.affinity = affinity
+		self.spanner = self.get_cluster_spanner()
+	
+	def get_cluster_spanner(self):
+		"""
+		spanner = self.get_cluster_spanner()
+		
+		Get a callable that computes a given cluster's span. To compute
+		a cluster's span, call
+		spanner(cluster)
+		
+		The cluster must be a 2D numpy array, where the axis=0 holds
+		separate cluster members and the axis=1 holds the different
+		variables.
+		
+		"""
+		if self.linkage=='ward':
+			if self.affinity=='euclidean':
+				spanner = lambda x:np.sum((x-self.pooling_func(x,axis=0))**2)
+			elif self.affinity in ['l1','l2','manhattan','cosine']:
+				raise ValueError('Ward linkage only accepts euclidean affinity. However, affinity attribute was set to {0}.'.format(self.affinity))
+			else:
+				raise AttributeError('Unknown affinity attribute value {0}.'.format(self.affinity))
+		elif self.linkage=='complete':
+			if self.affinity=='euclidean':
+				spanner = lambda x:np.max(np.sum((x[:,None,:]-x[None,:,:])**2,axis=2))
+			elif self.affinity=='l1' or self.affinity=='manhattan':
+				spanner = lambda x:np.max(np.sum(np.abs(x[:,None,:]-x[None,:,:]),axis=2))
+			elif self.affinity=='l2':
+				spanner = lambda x:np.max(np.sqrt(np.sum((x[:,None,:]-x[None,:,:])**2,axis=2)))
+			elif self.affinity=='cosine':
+				spanner = lambda x:np.max(np.sum((x[:,None,:]*x[None,:,:]))/(np.sqrt(np.sum(x[:,None,:]*x[:,None,:],axis=2,keepdims=True))*np.sqrt(np.sum(x[None,:,:]*x[None,:,:],axis=2,keepdims=True))))
+			else:
+				raise AttributeError('Unknown affinity attribute value {0}.'.format(self.affinity))
+		elif self.linkage=='average':
+			if self.affinity=='euclidean':
+				spanner = lambda x:np.mean(np.sum((x[:,None,:]-x[None,:,:])**2,axis=2))
+			elif self.affinity=='l1' or self.affinity=='manhattan':
+				spanner = lambda x:np.mean(np.sum(np.abs(x[:,None,:]-x[None,:,:]),axis=2))
+			elif self.affinity=='l2':
+				spanner = lambda x:np.mean(np.sqrt(np.sum((x[:,None,:]-x[None,:,:])**2,axis=2)))
+			elif self.affinity=='cosine':
+				spanner = lambda x:np.mean(np.sum((x[:,None,:]*x[None,:,:]))/(np.sqrt(np.sum(x[:,None,:]*x[:,None,:],axis=2,keepdims=True))*np.sqrt(np.sum(x[None,:,:]*x[None,:,:],axis=2,keepdims=True))))
+			else:
+				raise AttributeError('Unknown affinity attribute value {0}.'.format(self.affinity))
+		else:
+			raise AttributeError('Unknown linkage attribute value {0}.'.format(self.linkage))
+		return spanner
+	
+	def get_summary_filename(self):
+		"""
+		self.get_summary_filename()
+		
+		Simply returns 'summary_{method}_{optimizer}_{cmap_meth}{suffix}.pkl'
+		formated with the Analyzer instance's attribute values.
+		
+		"""
+		return 'summary_{method}_{optimizer}_{cmap_meth}{suffix}.pkl'.format(
+				method=self.method,optimizer=self.optimizer,suffix=self.suffix,
+				cmap_meth=self.cmap_meth)
 	
 	def get_summary(self,override=False):
-		if override or not(os.path.exists('summary_statistics.pkl') and os.path.isfile('summary_statistics.pkl')):
+		"""
+		self.get_summary(override=False)
+		
+		Get the experimental and theoretical summaries. The input
+		'override', if True, signals that the method must compute the
+		individual summaries and then override the Analyzer's summary
+		filename. If False, this method first tries to load the
+		summaries from the Analyzer's summary filename, and if said file
+		does not exist, it computes the summaries and then saves them.
+		
+		Output:
+			summary: A dictionary with keys 'experimental' and 'theoretical'.
+				Each key holds the output of the methods
+				self.subjectSession_measures ('experimental' key) and
+				self.fitter_measures ('theoretical' key), called for
+				every subject and session that complies with
+				data_io_cognition.filter_subjects_list(data_io_cognition.unique_subject_sessions(fits_cognition.raw_data_dir),'all_sessions_by_experiment')
+		
+		"""
+		if override or not(os.path.exists(self.get_summary_filename()) and os.path.isfile(self.get_summary_filename())):
 			subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 			self.summary = {'experimental':{},'theoretical':{}}
 			for s in subjects:
@@ -138,16 +320,37 @@ class Analyzer():
 				fitter = fits.load_Fitter_from_file(fname)
 				f_measures = self.fitter_measures(fitter)
 				self.summary['theoretical'].update(f_measures)
-			f = open('summary_statistics.pkl','w')
+			f = open(self.get_summary_filename(),'w')
 			pickle.dump(self.summary,f)
 			f.close()
 		else:
-			f = open('summary_statistics.pkl','r')
+			f = open(self.get_summary_filename(),'r')
 			self.summary = pickle.load(f)
 			f.close()
 		return self.summary
 	
 	def subjectSession_measures(self,subjectSession):
+		"""
+		self.subjectSession_measures(subjectSession)
+		
+		Get the summary statistics of a SubjectSession instance.
+		
+		Output:
+			stats: A dict with keys equal to
+				'experiment_{experiment}_subject_{name}_session_{session}'
+				where experiment, name and session are the unique tuple
+				values encountered in the subjectSession data.
+				The value assigned to each key is itself a dict with shape:
+				{'experiment':...,'n':...,'auc':...,
+				'name':...,'session':...,
+				'means':{'rt':...,'performance':...,'confidence':...,\
+						'hit_rt':...,'miss_rt':...,\
+						'hit_confidence':...,'miss_confidence':...},\
+				'stds':{'rt':...,'performance':...,'confidence':...,\
+						'hit_rt':...,'miss_rt':...,\
+						'hit_confidence':...,'miss_confidence':...}}
+		
+		"""
 		data = subjectSession.load_data()
 		unique_names = np.unique(data[:,-2].astype(np.int))
 		unique_sessions = np.unique(data[:,-1].astype(np.int))
@@ -188,6 +391,27 @@ class Analyzer():
 		return out
 	
 	def fitter_measures(self,fitter):
+		"""
+		self.fitter_measures(fitter)
+		
+		Get the summary statistics of a Fitter instance.
+		
+		Output:
+			stats: A dict with keys equal to
+				'experiment_{experiment}_subject_{name}_session_{session}'
+				where experiment, name and session are the Fitter
+				instance's experiment attribute,
+				fitter.subjectSession.get_name() and
+				fitter.subjectSession.get_session() returned values.
+				The value assigned to each key is itself a dict with shape:
+				{'experiment':...,'parameters':...,'full_merit':...,
+				'full_confidence_merit':...,'confidence_only_merit':...,
+				'name':...,'session':...,
+				'performance':...,'rt':...,'hit_rt':...,'miss_rt':...,
+				'confidence':...,'hit_confidence':...,
+				'miss_confidence':...,'auc':...}
+		
+		"""
 		parameters = fitter.get_parameters_dict_from_fit_output()
 		full_confidence_merit = fitter.forced_compute_full_confidence_merit(parameters)
 		full_merit = fitter.forced_compute_full_merit(parameters)
@@ -222,6 +446,37 @@ class Analyzer():
 		return out
 	
 	def get_parameter_array_from_summary(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd):
+		"""
+		self.get_parameter_array_from_summary(summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd)
+		
+		Get the array of parameters, experiments, sessions and names
+		from the summary['theoretical'] dict.
+		
+		Input:
+			summary: A summary dict or None. If None, the Analyzer's
+				summary instance is used instead.
+			normalize: Can be None or a dict that is passed to the method
+				self.normalize_parameters in order to normalize the
+				Fitter parameters before returning them.
+			normalization_function: A callable that is passed to the
+				method self.normalize_parameters in order to
+				normalize the Fitter parameters before returning them.
+				This function is only used if normalize is not None.
+		
+		Output:
+			parameters: 2D numpy array. Axis=0 corresponds to different
+				experiment, name and subject tuple values, while axis=1
+				corresponds to different parameter names.
+			parameter_names: A list with the parameter names in the order
+				in which they appear in the parameters output
+			names: A 1D numpy array with the SubjectSession names that
+				correspond to each parameter.
+			sessions: A 1D numpy array with the SubjectSession sessions
+				that correspond to each parameter.
+			experiments: A 1D numpy array with the SubjectSession
+				experiments that correspond to each parameter.
+		
+		"""
 		if summary is None:
 			summary = self.summary
 		parameter_dicts = []
@@ -260,10 +515,48 @@ class Analyzer():
 		self._sessions = np.array(self._sessions)
 		self._experiments = np.array(self._experiments)
 		if normalize:
-			self.normalize_internal_vars(normalize,normalization_function)
+			self.normalize_parameters(normalize,normalization_function)
 		return self._parameters,self._parameter_names,self._names,self._sessions,self._experiments
 	
-	def normalize_internal_vars(self,normalize,normalization_function=np.nanstd):
+	def normalize_parameters(self,normalize,normalization_function=np.nanstd):
+		"""
+		self.normalize_parameters(normalize,normalization_function=np.nanstd)
+		
+		The hierarchical clustering of parameters depends on the distance
+		between parameters where each parameter name is interpreted as
+		a separate dimension in a certain metric space (Default is
+		euclidean but other metrics can be specified in the affinity).
+		However, each parameter is usually located in an interval that
+		has a completely different scale across experiments and parameter
+		names. This function seeks to normalize the parameter values
+		to make them inhabit similarly sized regions, and thus improve
+		the clustering. The most problematic parameter is the
+		'internal_var' because its units vary between experiments.
+		To solve this, normalize_parameters allows the user to specify
+		different grouping methods for different parameters.
+		
+		Input:
+			normalize: A dict whos keys are parameter names. The values
+				indicate the grouping method that will be used to
+				normalize the parameter values. Each group is then divided
+				by the output of a call to the normalization_function on
+				itself. Four methods are available:
+				'all': All parameters are taken into a single group.
+				'experiment': One group for each experiment is formed.
+				'session': One group for each session is formed.
+				'name': One group for each name is formed.
+				By default normalize is {'internal_var':'experiment'}
+				because the internal_var is completely different
+				for each experiment.
+			normalization_function: A callable that is called on each
+				group. Then each parameter value in the group is divided
+				by the output of this call.
+		
+		The normalization is performed inplace, in the instance's
+		_parameter attribute so no memory of the original parameter
+		values are retained.
+		
+		"""
 		for parameter in normalize.keys():
 			grouping_method = normalize[parameter]
 			par_ind = self._parameter_names.index(parameter)
@@ -291,6 +584,26 @@ class Analyzer():
 				self._parameters[category_ind,par_ind]/=normalization_function(self._parameters[category_ind,par_ind])
 	
 	def scatter_parameters(self,merge=None,show=False):
+		"""
+		self.scatter_parameters(merge=None,show=False)
+		
+		Plot the parameters 'internal_var', 'cost' and 'phase_out_prob'
+		against each other, and also plot 'high_confidence_threshold'
+		against 'confidence_map_slope' in a 2x2 subplot with a colorbar
+		that represents subject names or experiments depending on the
+		'merge' input value.
+		
+		Input:
+			merge: None, 'names' or 'sessions'. If None, all the parameters
+				are plotted. If 'names', the parameters that correspond
+				to different subject names but to the same experiment
+				and session are pooled together. If 'sessions', the same
+				procedure is applied but for parameters that correspond
+				to different sessions.
+			show: A bool that if True, shows the plotted figure and
+				freezes the execution until said figure is closed.
+		
+		"""
 		try:
 			unames,indnames = np.unique(self._names,return_inverse=True)
 		except:
@@ -299,7 +612,7 @@ class Analyzer():
 		uexps,indexps = np.unique(self._experiments,return_inverse=True)
 		usess,indsess = np.unique(self._sessions,return_inverse=True)
 		if not merge is None:
-			if merge=='subjects':
+			if merge=='names':
 				temp_pars = []
 				temp_sess = []
 				temp_exps = []
@@ -400,6 +713,41 @@ class Analyzer():
 			plt.show(True)
 	
 	def controlled_scatter(self,scattered_parameters=['cost','internal_var','phase_out_prob'],axes=None,color_category='experiment',marker_category='session',merge=None,show=False):
+		"""
+		self.controlled_scatter(scattered_parameters=['cost','internal_var','phase_out_prob'],axes=None,color_category='experiment',marker_category='session',merge=None,show=False)
+		
+		A more refined version of the method scatter_parameters where
+		it is posible to select the group of parameters to plot against
+		each other, to which axes to plot them along with other options.
+		
+		Input:
+			scattered_parameters: A list of valid Fitter parameter
+				names to plot against each other. The list must have 2
+				or 3 elements, and the scatter will be in 2D or 3D
+				accordingly.
+			axes: None or a matplotlib.Axes or mpl_toolkits.mplot3d.Axes3D
+				instance. If None, the axes is created on the fly in a
+				new figure. If not None, then the supplied axes will be
+				used to call the scatter method.
+			color_category: Can be 'experiment', 'session' or 'name'. It
+				is used to indicate if the maker's color should indicate
+				the corresponding experiment, session or subject name.
+			marker_category: Can be 'experiment' or 'session'. It is
+				used to indicate if the maker should indicate the
+				corresponding experiment or session.
+			merge: Can be None, 'experiments', 'names' or 'sessions',
+				and has the same behavior as the 'merge' input in
+				the scatter_parameters method. Refer to the
+				scatter_parameters docstring for further details.
+			show: A bool that if True, shows the plotted figure and
+				freezes the execution until said figure is closed.
+		
+		Output:
+			If show is True, this function returns None.
+			If show is False, this function returns the Axes instance
+			which was used to scatter the parameters.
+		
+		"""
 		if len(scattered_parameters)<2 or len(scattered_parameters)>3:
 			raise ValueError('Can only scatter sets of 2 or 3 parameters. User supplied scattered_parameters={0}'.format(scattered_parameters))
 		elif len(scattered_parameters)==2:
@@ -554,6 +902,44 @@ class Analyzer():
 			return axes
 	
 	def cluster(self,merge=None,clustered_parameters=['cost','internal_var','phase_out_prob'],filter_nans='post'):
+		"""
+		self.cluster(merge=None,clustered_parameters=['cost','internal_var','phase_out_prob'],filter_nans='post')
+		
+		Method that performs the hierarchical clustering of the Fitter
+		parameters.
+		
+		Input:
+			merge: None, or 'experiments', 'sessions', 'names'. This
+				input specifies if and how the parameters should be
+				merged before being clustered. Initially, there is one
+				parameter vector for each individual experiment, session
+				and name tuple. If merge is None, all the individual
+				parameters are used for the clustering. If 'experiments',
+				all the parameters that correspond to the same 'name' and
+				'session' pairs are merged (the different experiments
+				are pooled together). Analoguously, for 'sessions' and
+				'names' the different session and different name values,
+				correspondingly, are pooled together.
+			clustered_parameters: A list of valid Fitter parameter names.
+				If None, all the available Fitter parameter names are
+				used. Each parameter name represents a different dimension
+				of each parameter array that is passed to the clustering
+				fit function.
+			filter_nans: A str that can be 'pre', 'post' or 'none' that
+				indicates if and how the nans should be handled. If
+				'none', no handling is performed. If 'pre', the parameter
+				array that holds a nan value in any parameter name, even
+				if it is not in the clustered_parameters list is removed.
+				If 'post', only the parameters that have a nan value in
+				one of the clustered_parameters is removed.
+		
+		Output:
+			tree: An ete3.Tree instance that is built from the Newick
+				representation of the
+				sklearn.cluster.AgglomerativeClustering.fit() tree
+				structure.
+		
+		"""
 		if not filter_nans in ['pre','post','none']:
 			raise ValueError('filter_nans must be "pre", "post" or "none". User supplied {0}'.format(filter_nans))
 		try:
@@ -616,9 +1002,43 @@ class Analyzer():
 		return tree
 	
 	def build_Newick_tree(self,children,n_leaves,X,leaf_labels):
+		"""
+		self.build_Newick_tree(children,n_leaves,X,leaf_labels)
+		
+		Get a string representation (Newick tree) from the sklearn
+		AgglomerativeClustering.fit output.
+		
+		Input:
+			children: AgglomerativeClustering.children_
+			n_leaves: AgglomerativeClustering.n_leaves_
+			X: parameters supplied to AgglomerativeClustering.fit
+			leaf_labels: The label of each parameter array in X
+		
+		Output:
+			ntree: A str with the Newick tree representation
+		
+		"""
 		return self.go_down_tree(children,n_leaves,X,leaf_labels,len(children)+n_leaves-1)[0]+';'
 	
 	def go_down_tree(self,children,n_leaves,X,leaf_labels,nodename):
+		"""
+		self.go_down_tree(children,n_leaves,X,leaf_labels,nodename)
+		
+		Iterative function that traverses the subtree that descends from
+		nodename and returns the Newick representation of the subtree.
+		
+		Input:
+			children: AgglomerativeClustering.children_
+			n_leaves: AgglomerativeClustering.n_leaves_
+			X: parameters supplied to AgglomerativeClustering.fit
+			leaf_labels: The label of each parameter array in X
+			nodename: An int that is the intermediate node name whos
+				children are located in children[nodename-n_leaves].
+		
+		Output:
+			ntree: A str with the Newick tree representation
+		
+		"""
 		nodeindex = nodename-n_leaves
 		if nodename<n_leaves:
 			return leaf_labels[nodeindex],np.array([X[nodeindex]])
@@ -636,15 +1056,24 @@ class Analyzer():
 			return nodename,node
 	
 	def get_branch_span(self,branchsamples):
-		if self.affinity=='euclidean':
-			return np.sum((branchsamples-self.pooling_func(branchsamples,axis=0))**2)
-		else:
-			raise NotImplementedError('get_branch_span is not implemented for affinity: {0}'.format(self.affinity))
+		"""
+		self.get_branch_span(branchsamples)
+		
+		Assume that a tree branch is a cluster returned by
+		AgglomerativeClustering and compute its corresponding span. The
+		returned value will depend on the linkage and affinity.
+		
+		Output: A float that represents the cluster's span.
+		
+		"""
+		return self.spanner(branchsamples)
 
-def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
+def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
+				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
+				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
 												  'confidence_map_slope':'all',\
 												  'cost':'all',\
@@ -674,10 +1103,12 @@ def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', overr
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		plt.show(True)
 
-def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', override=False,\
+def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
+				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
+				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
 	parameters,parameter_names,names,sessions,experiments = \
 		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	#~ parameters,parameter_names,names,sessions,experiments = \
@@ -782,10 +1213,12 @@ def correct_rho_pval(pvals):
 			pvals[j+k+1,j] = ps[counter]
 			counter+=1
 
-def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
+def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
 				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
 				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method, optimizer, suffix, override, n_clusters, affinity, linkage, pooling_func)
+	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
+				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
+				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
 	parameters,parameter_names,names,sessions,experiments = \
 		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	#~ parameters,parameter_names,names,sessions,experiments = \
@@ -944,14 +1377,13 @@ def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix
 
 def test():
 	parameter_correlation()
-	return
 	binary_confidence_analysis()
 	
 	a = Analyzer()
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
-	#~ tree = a.cluster(merge='names')
+	tree = a.cluster(merge='names')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
-	#~ tree.show(tree_style=default_tree_style(mode='r'))
+	tree.show(tree_style=default_tree_style(mode='r'))
 	#~ tree = a.cluster(merge='sessions')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
@@ -959,10 +1391,10 @@ def test():
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
 	#~ a.scatter_parameters()
-	#~ a.scatter_parameters(merge='subjects')
+	a.scatter_parameters(merge='names',show=True)
 	#~ a.scatter_parameters(merge='sessions')
 	#~ a.set_pooling_func(np.median)
-	#~ a.scatter_parameters(merge='subjects')
+	#~ a.scatter_parameters(merge='names')
 	#~ a.scatter_parameters(merge='sessions')
 	unams,indnams = np.unique(a._names,return_inverse=True)
 	#~ uexps,indexps = np.unique(a._experiments,return_inverse=True)
