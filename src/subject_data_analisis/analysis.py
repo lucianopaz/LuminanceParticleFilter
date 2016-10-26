@@ -15,6 +15,7 @@ from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.stats as stats
 import utils
+import diptest.diptest as diptest
 
 def default_tree_layout(node):
 	"""
@@ -379,14 +380,15 @@ class Analyzer():
 					else:
 						miss_means = np.nan*np.ones(2)
 						miss_stds = np.nan*np.ones(2)
+					dip = diptest.dip(data[inds,3], min_is_0=True, x_is_sorted=False)
 					key = '_'.join(['experiment_'+subjectSession.experiment,'subject_'+str(un),'session_'+str(us)])
-					out[key] = {'experiment':subjectSession.experiment,'n':n,'auc':auc,\
-								'name':un,'session':us,\
-								'means':{'rt':means[0],'performance':means[1],'confidence':means[2],\
-										'hit_rt':hit_means[0],'miss_rt':miss_means[0],\
-										'hit_confidence':hit_means[1],'miss_confidence':miss_means[1]},\
-								'stds':{'rt':stds[0],'performance':stds[1],'confidence':stds[2],\
-										'hit_rt':hit_stds[0],'miss_rt':miss_stds[0],\
+					out[key] = {'experiment':subjectSession.experiment,'n':n,'auc':auc,
+								'name':un,'session':us,'multi_mod_index':dip,
+								'means':{'rt':means[0],'performance':means[1],'confidence':means[2],
+										'hit_rt':hit_means[0],'miss_rt':miss_means[0],
+										'hit_confidence':hit_means[1],'miss_confidence':miss_means[1]},
+								'stds':{'rt':stds[0],'performance':stds[1],'confidence':stds[2],
+										'hit_rt':hit_stds[0],'miss_rt':miss_stds[0],
 										'hit_confidence':hit_stds[1],'miss_confidence':miss_stds[1]}}
 		return out
 	
@@ -420,10 +422,6 @@ class Analyzer():
 				return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
 				return_auc=True)
 		
-		c_array = np.linspace(0,1,fitter.confidence_partition)
-		norm = np.sum(model_prediction)
-		norm0 = np.sum(model_prediction[0])
-		norm1 = np.sum(model_prediction[1])
 		performance = fitter_stats['performance']
 		performance_conditioned = fitter_stats['performance_conditioned']
 		confidence = fitter_stats['mean_confidence']
@@ -1376,14 +1374,17 @@ def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix
 	plt.show(True)
 
 def test():
-	parameter_correlation()
-	binary_confidence_analysis()
+	parameter_correlation(override=True)
+	return
+	#~ binary_confidence_analysis()
 	
-	a = Analyzer()
-	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
-	tree = a.cluster(merge='names')
+	#~ a = Analyzer()
+	#~ subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	#~ a.subjectSession_measures(subjects[0])
+	#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
+	#~ tree = a.cluster(merge='names')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
-	tree.show(tree_style=default_tree_style(mode='r'))
+	#~ tree.show(tree_style=default_tree_style(mode='r'))
 	#~ tree = a.cluster(merge='sessions')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
@@ -1391,14 +1392,14 @@ def test():
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
 	#~ a.scatter_parameters()
-	a.scatter_parameters(merge='names',show=True)
+	#~ a.scatter_parameters(merge='names',show=True)
 	#~ a.scatter_parameters(merge='sessions')
 	#~ a.set_pooling_func(np.median)
 	#~ a.scatter_parameters(merge='names')
 	#~ a.scatter_parameters(merge='sessions')
-	unams,indnams = np.unique(a._names,return_inverse=True)
+	#~ unams,indnams = np.unique(a._names,return_inverse=True)
 	#~ uexps,indexps = np.unique(a._experiments,return_inverse=True)
-	usess,indsess = np.unique(a._sessions,return_inverse=True)
+	#~ usess,indsess = np.unique(a._sessions,return_inverse=True)
 	
 	for un in unams:
 		inds = a._names==un

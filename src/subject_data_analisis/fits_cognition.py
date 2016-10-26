@@ -2585,7 +2585,7 @@ class Fitter:
 		c = np.linspace(0,1,pdf.shape[1])
 		dc = c[1]-c[0]
 		performance = np.sum(pdf[0]*dt)
-		performance_conditioned = np.sum(pdf[0],axis=2)*dt
+		performance_conditioned = np.sum(pdf,axis=2)*dt
 		if return_mean_rt or return_std_rt:
 			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
 			mean_rt = np.sum(any_perf_conf_pdf*t*dt)
@@ -2596,7 +2596,11 @@ class Fitter:
 		if return_median_rt:
 			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
 			median_rt = np.interp(0.5,np.cumsum(any_perf_conf_pdf)*dt,t)
-			median_rt_conditioned = np.interp(0.5,np.cumsum(pdf,axis=2)/np.sum(pdf,axis=2),t)
+			cumpdf = np.cumsum(pdf,axis=2)/np.sum(pdf,axis=2,keepdims=True)
+			median_rt_conditioned = np.zeros(tuple(cumpdf.shape[:2]))
+			for row in range(cumpdf.shape[0]):
+				for col in range(cumpdf.shape[1]):
+					median_rt_conditioned[row,col] = np.interp(0.5,cumpdf[row,col],t)
 		if return_mean_confidence or return_std_confidence:
 			any_rt_pdf = np.sum(pdf,axis=2)*dt
 			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
@@ -2609,7 +2613,10 @@ class Fitter:
 			any_rt_pdf = np.sum(pdf,axis=2)*dt
 			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
 			median_confidence = np.interp(0.5,np.cumsum(any_perf_rt_pdf)*dc,c)
-			median_confidence_conditioned = np.interp(0.5,np.cumsum(any_rt_pdf,axis=1)/np.sum(any_rt_pdf,axis=1),c)
+			cumpdf = np.cumsum(any_rt_pdf,axis=1)/np.sum(any_rt_pdf,axis=1,keepdims=True)
+			median_confidence_conditioned = np.zeros(cumpdf.shape[0])
+			for row in range(cumpdf.shape[0]):
+				median_confidence_conditioned[row] = np.interp(0.5,cumpdf[row],c)
 		if return_auc:
 			import scipy.integrate
 			pconf_hit = np.hstack((np.zeros(1),np.cumsum(np.sum(pdf[0],axis=1)*dt)))
@@ -2638,6 +2645,7 @@ class Fitter:
 			output['std_confidence_conditioned'] = std_confidence_conditioned
 		if return_auc:
 			output['auc'] = auc
+		return output
 
 class Fitter_plot_handler():
 	def __init__(self,obj,time_units,binary_split_method='median'):
