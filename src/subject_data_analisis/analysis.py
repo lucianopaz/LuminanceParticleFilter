@@ -362,6 +362,7 @@ class Analyzer():
 				if any(inds):
 					n = np.sum(inds.astype(np.int))
 					means = np.mean(data[inds,1:4],axis=0)
+					medians = np.median(data[inds,1:4],axis=0)
 					stds = np.std(data[inds,1:4],axis=0)/np.sqrt(float(n))
 					auc = io.compute_auc(io.compute_roc(data[inds,2],data[inds,3]))
 					hit = data[:,2]==1
@@ -369,16 +370,20 @@ class Analyzer():
 					if any(hit):
 						inds1 = np.logical_and(hit,inds)
 						hit_means = np.mean(data[inds1,1:4:2],axis=0)
+						hit_medians = np.median(data[inds1,1:4:2],axis=0)
 						hit_stds = np.std(data[inds1,1:4:2],axis=0)/np.sqrt(np.sum(inds1).astype(np.float))
 					else:
 						hit_means = np.nan*np.ones(2)
+						hit_medians = np.nan*np.ones(2)
 						hit_stds = np.nan*np.ones(2)
 					if any(miss):
 						inds1 = np.logical_and(miss,inds)
 						miss_means = np.mean(data[inds1,1:4:2],axis=0)
+						miss_medians = np.median(data[inds1,1:4:2],axis=0)
 						miss_stds = np.std(data[inds1,1:4:2],axis=0)/np.sqrt(np.sum(inds1).astype(np.float))
 					else:
 						miss_means = np.nan*np.ones(2)
+						miss_medians = np.nan*np.ones(2)
 						miss_stds = np.nan*np.ones(2)
 					dip = diptest.dip(data[inds,3], min_is_0=True, x_is_sorted=False)
 					key = '_'.join(['experiment_'+subjectSession.experiment,'subject_'+str(un),'session_'+str(us)])
@@ -389,7 +394,10 @@ class Analyzer():
 										'hit_confidence':hit_means[1],'miss_confidence':miss_means[1]},
 								'stds':{'rt':stds[0],'performance':stds[1],'confidence':stds[2],
 										'hit_rt':hit_stds[0],'miss_rt':miss_stds[0],
-										'hit_confidence':hit_stds[1],'miss_confidence':miss_stds[1]}}
+										'hit_confidence':hit_stds[1],'miss_confidence':miss_stds[1]},
+								'medians':{'rt':medians[0],'performance':medians[1],'confidence':medians[2],
+										'hit_rt':hit_medians[0],'miss_rt':miss_medians[0],
+										'hit_confidence':hit_medians[1],'miss_confidence':miss_medians[1]}}
 		return out
 	
 	def fitter_measures(self,fitter):
@@ -515,6 +523,99 @@ class Analyzer():
 		if normalize:
 			self.normalize_parameters(normalize,normalization_function)
 		return self._parameters,self._parameter_names,self._names,self._sessions,self._experiments
+	
+	def get_summary_stats_array(self,summary=None):
+		"""
+		self.get_summary_stats_array(summary=None)
+		
+		Get the two numpy arrays of the summary statistics. One for the
+		experimental data and another for the theoretical data.
+		
+		Input:
+			summary: A summary dict or None. If None, the Analyzer's
+				summary instance is used instead.
+		
+		Output:
+			(experimental,theoretical): Two numpy arrays with named
+				fields. It is posible to access the field names from the
+				attribute experimental.dtype.names.
+				The two arrays have different field names, except for a
+				few. The most important are 'experiment', 'session' and
+				'name' which encode the corresponding experiment, session
+				and subject name. These fields should be used to get the
+				corresponding experimental and theoretical entries.
+				
+		
+		
+		"""
+		if summary is None:
+			summary = self.summary
+		
+		experimental = []
+		experimental_ind_names = []
+		theoretical = []
+		theoretical_ind_names = []
+		max_experiment_len = 0
+		max_name_len = 0
+		for k in summary['theoretical'].keys():
+			teo = summary['theoretical'][k]
+			exp = summary['experimental'][k]
+			for teo_k in teo.keys():
+				if teo_k=='experiment':
+					max_experiment_len = max([max_experiment_len,len(teo[teo_k])])
+				elif teo_k=='name':
+					max_name_len = max([max_name_len,len(str(teo[teo_k]))])
+				if teo_k!='parameters':
+					if teo_k not in theoretical_ind_names:
+						theoretical_ind_names.append(teo_k)
+						theoretical.append([teo[teo_k]])
+					else:
+						theoretical[theoretical_ind_names.index(teo_k)].append(teo[teo_k])
+			for exp_k in exp.keys():
+				if exp_k=='experiment':
+					max_experiment_len = max([max_experiment_len,len(exp[exp_k])])
+				elif exp_k=='name':
+					max_name_len = max([max_name_len,len(str(exp[exp_k]))])
+				if exp_k not in ['means','stds','medians']:
+					if exp_k not in experimental_ind_names:
+						experimental_ind_names.append(exp_k)
+						experimental.append([exp[exp_k]])
+					else:
+						experimental[experimental_ind_names.index(exp_k)].append(exp[exp_k])
+				else:
+					for nested_key in exp[exp_k].keys():
+						composed_key = nested_key+{'means':'_mean','stds':'_std'}[exp_k]
+						if composed_key not in experimental_ind_names:
+							experimental_ind_names.append(composed_key)
+							experimental.append([exp[exp_k][nested_key]])
+						else:
+							experimental[experimental_ind_names.index(composed_key)].append(exp[exp_k][nested_key])
+		dtype_dict = {'experiment':'S'+str(max_experiment_len),
+					  'n':'i',
+					  'session':'i',
+					  'name':'S'+str(max_name_len)}
+		exp_dtype = []
+		for exp_ind in experimental_ind_names:
+			try:
+				exp_dtype.append((exp_ind,dtype_dict[exp_ind]))
+			except:
+				exp_dtype.append((exp_ind,'f'))
+		teo_dtype = []
+		for teo_ind in theoretical_ind_names:
+			try:
+				teo_dtype.append((teo_ind,dtype_dict[teo_ind]))
+			except:
+				teo_dtype.append((teo_ind,'f'))
+		
+		N = len(experimental[0])
+		experimental_ = []
+		theoretical_ = []
+		for i in range(N):
+			experimental_.append(tuple([e[i] for e in experimental]))
+			theoretical_.append(tuple([t[i] for t in theoretical]))
+		experimental = np.array(experimental_,exp_dtype)
+		theoretical = np.array(theoretical_,teo_dtype)
+		return experimental,theoretical
 	
 	def normalize_parameters(self,normalize,normalization_function=np.nanstd):
 		"""
@@ -1374,7 +1475,10 @@ def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix
 	plt.show(True)
 
 def test():
-	parameter_correlation(override=True)
+	a = Analyzer()
+	a.get_summary_stats_array()
+	return
+	parameter_correlation()
 	return
 	#~ binary_confidence_analysis()
 	
