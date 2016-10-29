@@ -15,7 +15,10 @@ from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.stats as stats
 import utils
-import diptest.diptest as diptest
+try:
+	from diptest.diptest import dip
+except:
+	from utils import dip
 
 def default_tree_layout(node):
 	"""
@@ -385,10 +388,10 @@ class Analyzer():
 						miss_means = np.nan*np.ones(2)
 						miss_medians = np.nan*np.ones(2)
 						miss_stds = np.nan*np.ones(2)
-					dip = diptest.dip(data[inds,3], min_is_0=True, x_is_sorted=False)
+					dipval = dip(data[inds,3], min_is_0=True, x_is_sorted=False)
 					key = '_'.join(['experiment_'+subjectSession.experiment,'subject_'+str(un),'session_'+str(us)])
 					out[key] = {'experiment':subjectSession.experiment,'n':n,'auc':auc,
-								'name':un,'session':us,'multi_mod_index':dip,
+								'name':un,'session':us,'multi_mod_index':dipval,
 								'means':{'rt':means[0],'performance':means[1],'confidence':means[2],
 										'hit_rt':hit_means[0],'miss_rt':miss_means[0],
 										'hit_confidence':hit_means[1],'miss_confidence':miss_means[1]},
@@ -521,10 +524,16 @@ class Analyzer():
 		self._sessions = np.array(self._sessions)
 		self._experiments = np.array(self._experiments)
 		if normalize:
-			self.normalize_parameters(normalize,normalization_function)
+			self.normalize_parameters(parameters=self._parameters,
+									  parameter_names=self._parameter_names,
+									  names=self._names,
+									  sessions=self._sessions,
+									  experiments=self._experiments,
+									  normalize=normalize,
+									  normalization_function=normalization_function)
 		return self._parameters,self._parameter_names,self._names,self._sessions,self._experiments
 	
-	def get_summary_stats_array(self,summary=None):
+	def get_summary_stats_array(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd):
 		"""
 		self.get_summary_stats_array(summary=None)
 		
@@ -557,6 +566,7 @@ class Analyzer():
 		theoretical_ind_names = []
 		max_experiment_len = 0
 		max_name_len = 0
+		parameter_names = []
 		for k in summary['theoretical'].keys():
 			teo = summary['theoretical'][k]
 			exp = summary['experimental'][k]
@@ -571,6 +581,15 @@ class Analyzer():
 						theoretical.append([teo[teo_k]])
 					else:
 						theoretical[theoretical_ind_names.index(teo_k)].append(teo[teo_k])
+				else:
+					for par in teo[teo_k].keys():
+						par = str(par)
+						if par not in parameter_names:
+							parameter_names.append(par)
+							theoretical_ind_names.append(par)
+							theoretical.append([teo[teo_k][par]])
+						else:
+							theoretical[theoretical_ind_names.index(par)].append(teo[teo_k][par])
 			for exp_k in exp.keys():
 				if exp_k=='experiment':
 					max_experiment_len = max([max_experiment_len,len(exp[exp_k])])
@@ -606,7 +625,7 @@ class Analyzer():
 				teo_dtype.append((teo_ind,dtype_dict[teo_ind]))
 			except:
 				teo_dtype.append((teo_ind,'f'))
-		
+		print(teo_dtype)
 		N = len(experimental[0])
 		experimental_ = []
 		theoretical_ = []
@@ -615,11 +634,12 @@ class Analyzer():
 			theoretical_.append(tuple([t[i] for t in theoretical]))
 		experimental = np.array(experimental_,exp_dtype)
 		theoretical = np.array(theoretical_,teo_dtype)
+		print(theoretical[parameter_names].shape)
 		return experimental,theoretical
 	
-	def normalize_parameters(self,normalize,normalization_function=np.nanstd):
+	def normalize_parameters(self,parameters,parameter_names,names,sessions,experiments,normalize,normalization_function=np.nanstd):
 		"""
-		self.normalize_parameters(normalize,normalization_function=np.nanstd)
+		self.normalize_parameters(parameters,parameter_names,names,sessions,experiments,normalize,normalization_function=np.nanstd)
 		
 		The hierarchical clustering of parameters depends on the distance
 		between parameters where each parameter name is interpreted as
@@ -635,6 +655,20 @@ class Analyzer():
 		different grouping methods for different parameters.
 		
 		Input:
+			parameters: A 2D numpy array with the parameters. The
+				normalization will be performed inplace in this array.
+				The axis=0 corresponds to separate experiment, session
+				and subject name tuples. The axis=1 corresponds to
+				different parameter names.
+			parameter_names: A list with the parameter names matching
+				the positions they are located in the axis=1 of the
+				supplied parameters array
+			names: A 1D numpy array that indicates the subject name
+				that corresponds to each row of the parameters array.
+			sessions: A 1D numpy array that indicates the session
+				that corresponds to each row of the parameters array.
+			experiments: A 1D numpy array that indicates the experiment
+				that corresponds to each row of the parameters array.
 			normalize: A dict whos keys are parameter names. The values
 				indicate the grouping method that will be used to
 				normalize the parameter values. Each group is then divided
@@ -658,29 +692,29 @@ class Analyzer():
 		"""
 		for parameter in normalize.keys():
 			grouping_method = normalize[parameter]
-			par_ind = self._parameter_names.index(parameter)
+			par_ind = parameter_names.index(parameter)
 			if grouping_method=='all':
 				categories = ['all']
-				categories_inds = [np.ones(self._parameters.shape[0],dtype=np.bool)]
+				categories_inds = [np.ones(parameters.shape[0],dtype=np.bool)]
 			elif grouping_method=='experiment':
 				categories_inds = []
-				categories,inverse = np.unique(self._experiments,return_inverse=True)
+				categories,inverse = np.unique(experiments,return_inverse=True)
 				for i,category in enumerate(categories):
 					categories_inds.append(inverse==i)
 			elif grouping_method=='session':
 				categories_inds = []
-				categories,inverse = np.unique(self._sessions,return_inverse=True)
+				categories,inverse = np.unique(sessions,return_inverse=True)
 				for i,category in enumerate(categories):
 					categories_inds.append(inverse==i)
 			elif grouping_method=='name':
 				categories_inds = []
-				categories,inverse = np.unique(self._names,return_inverse=True)
+				categories,inverse = np.unique(names,return_inverse=True)
 				for i,category in enumerate(categories):
 					categories_inds.append(inverse==i)
 			else:
 				raise ValueError('Unknown normalization grouping method: {0}'.format(grouping_method))
 			for i,category_ind in enumerate(categories_inds):
-				self._parameters[category_ind,par_ind]/=normalization_function(self._parameters[category_ind,par_ind])
+				parameters[category_ind,par_ind]/=normalization_function(parameters[category_ind,par_ind])
 	
 	def scatter_parameters(self,merge=None,show=False):
 		"""
