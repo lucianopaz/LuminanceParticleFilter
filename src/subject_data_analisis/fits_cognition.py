@@ -2533,12 +2533,21 @@ class Fitter:
 			input binary_confidence.
 		mean_rt: A float with the mean overall response time. Is only
 			returned if return_mean_rt is True.
+		mean_rt_perf: A 1D numpy array of floats with the mean response
+			time conditioned to performance. Is only returned if
+			return_mean_rt is True.
 		mean_rt_conditioned: A 2D numpy array of floats with the mean
 			response time conditioned to performance (first axis) and
-			confidence values (second axis). Is only
-			returned if return_mean_rt is True.
+			confidence values (second axis). Is only returned if
+			return_mean_rt is True.
 		median_rt: A float with the median overall response time. Is only
 			returned if return_median_rt is True.
+		median_rt_perf: A 1D numpy array of floats with the median
+			response time conditioned to performance. Is only returned
+			if return_mean_rt is True.
+		median_rt_conf: A 1D numpy array of floats with the median
+			response time conditioned to confidence. Is only returned
+			if return_mean_rt is True.
 		median_rt_conditioned: A 2D numpy array of floats with the median
 			response time conditioned to performance (first axis) and
 			confidence values (second axis). Is only returned if
@@ -2572,6 +2581,21 @@ class Fitter:
 			A dictionary with keys equal to the above mentioned statistic
 			names.
 		
+		IMPORTANT NOTE:
+		The 'Auditivo' task forces the subjects to listen to stimuli
+		and to respond after the stimulation has ended. Our model does
+		not have any method to pause the decision until the stimulation
+		dissapears and, in fact, the model actually forms the decision
+		during the stimulation. In the 'Auditivo' experimental data, the
+		subject's rt are measured relative to the stimulation's end,
+		while our model's rt is measured relative to the stimulation's
+		start. To make the raw experimental data stats compatible with
+		the Fitter stats, we substract the _forced_non_decision_time to
+		all of the time related stats.
+		This issue does not affect any of the plotting methods because
+		the Fitter internally stores the subject's rt with the added
+		_forced_non_decision_time
+		
 		"""
 		pdf,t = self.theoretical_rt_confidence_distribution(fit_output=fit_output)
 		binary_confidence = self.method=='binary_confidence_only' or self.method=='full_binary_confidence'
@@ -2582,6 +2606,19 @@ class Fitter:
 			t = t[valid]
 			pdf = pdf[:,:,valid]
 			pdf/=(np.sum(pdf)*dt)
+		elif self.experiment=='Auditivo':
+			# The Auditory task forces the subjects to listen to stimuli
+			# and to respond after the stimulation has ended. Our model
+			# does not have any method to pause the decision until the
+			# stimulation dissapears and, in fact, the model actually
+			# forms the decision during the stimulation. In the 'Auditivo'
+			# experimental data, the subject's rt are measured relative
+			# to the stimulation's end, while our model's rt is measured
+			# relative to the stimulation's start. To make the raw
+			# experimental data stats compatible with the Fitter stats,
+			# we substract the forced_non_decision_time to all of the
+			# time related stats.
+			t-=self._forced_non_decision_time
 		c = np.linspace(0,1,pdf.shape[1])
 		dc = c[1]-c[0]
 		performance = np.sum(pdf[0]*dt)
@@ -2589,6 +2626,7 @@ class Fitter:
 		if return_mean_rt or return_std_rt:
 			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
 			mean_rt = np.sum(any_perf_conf_pdf*t*dt)
+			mean_rt_perf = np.sum((pdf*t).reshape((pdf.shape[0],-1)),axis=1)/np.sum(pdf.reshape((pdf.shape[0],-1)),axis=1)
 			mean_rt_conditioned = np.sum(pdf*t,axis=2)/np.sum(pdf,axis=2)
 			if return_std_rt:
 				std_rt = np.sqrt(np.sum(any_perf_conf_pdf*(t-mean_rt)**2*dt))
@@ -2597,22 +2635,29 @@ class Fitter:
 			any_perf_conf_pdf = np.sum(np.sum(pdf,axis=0),axis=0)
 			median_rt = np.interp(0.5,np.cumsum(any_perf_conf_pdf)*dt,t)
 			cumpdf = np.cumsum(pdf,axis=2)/np.sum(pdf,axis=2,keepdims=True)
+			cumpdf_perf = np.cumsum(np.sum(pdf,axis=1),axis=1)/np.sum(np.sum(pdf,axis=1),axis=1,keepdims=True)
+			cumpdf_conf = np.cumsum(np.sum(pdf,axis=0),axis=1)/np.sum(np.sum(pdf,axis=0),axis=1,keepdims=True)
+			median_rt_perf = np.zeros(pdf.shape[0])
+			median_rt_conf = np.zeros(pdf.shape[1])
 			median_rt_conditioned = np.zeros(tuple(cumpdf.shape[:2]))
 			for row in range(cumpdf.shape[0]):
+				median_rt_perf[row] = np.interp(0.5,cumpdf_perf[row],t)
 				for col in range(cumpdf.shape[1]):
+					if row==0:
+						median_rt_conf[col] = np.interp(0.5,cumpdf_conf[col],t)
 					median_rt_conditioned[row,col] = np.interp(0.5,cumpdf[row,col],t)
 		if return_mean_confidence or return_std_confidence:
 			any_rt_pdf = np.sum(pdf,axis=2)*dt
 			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
-			mean_confidence = np.sum(any_perf_rt_pdf*c*dc)
+			mean_confidence = np.sum(any_perf_rt_pdf*c)
 			mean_confidence_conditioned = np.sum(any_rt_pdf*c,axis=1)/np.sum(any_rt_pdf,axis=1)
 			if return_std_confidence:
-				std_confidence = np.sqrt(np.sum(any_perf_rt_pdf*(c-mean_confidence)**2*dc))
+				std_confidence = np.sqrt(np.sum(any_perf_rt_pdf*(c-mean_confidence)**2))
 				std_confidence_conditioned = np.sqrt(np.sum(any_rt_pdf*(c[None,:]-mean_confidence_conditioned[:,None])**2,axis=1)/np.sum(any_rt_pdf,axis=1))
 		if return_median_confidence:
 			any_rt_pdf = np.sum(pdf,axis=2)*dt
 			any_perf_rt_pdf = np.sum(any_rt_pdf,axis=0)
-			median_confidence = np.interp(0.5,np.cumsum(any_perf_rt_pdf)*dc,c)
+			median_confidence = np.interp(0.5,np.cumsum(any_perf_rt_pdf),c)
 			cumpdf = np.cumsum(any_rt_pdf,axis=1)/np.sum(any_rt_pdf,axis=1,keepdims=True)
 			median_confidence_conditioned = np.zeros(cumpdf.shape[0])
 			for row in range(cumpdf.shape[0]):
@@ -2627,12 +2672,15 @@ class Fitter:
 		output = {'performance':performance,'performance_conditioned':performance_conditioned}
 		if return_mean_rt:
 			output['mean_rt'] = mean_rt
+			output['mean_rt_perf'] = mean_rt_perf
 			output['mean_rt_conditioned'] = mean_rt_conditioned
 		if return_mean_confidence:
 			output['mean_confidence'] = mean_confidence
 			output['mean_confidence_conditioned'] = mean_confidence_conditioned
 		if return_median_rt:
 			output['median_rt'] = median_rt
+			output['median_rt_perf'] = median_rt_perf
+			output['median_rt_conf'] = median_rt_conf
 			output['median_rt_conditioned'] = median_rt_conditioned
 		if return_median_confidence:
 			output['median_confidence'] = median_confidence
@@ -3733,9 +3781,11 @@ if __name__=="__main__":
 	elif options['verbose']:
 		options['optimizer_kwargs']['disp'] = True
 		logging.basicConfig(level=logging.INFO)
+		logging.disable('DEBUG')
 	else:
 		options['optimizer_kwargs']['disp'] = False
 		logging.basicConfig(level=logging.WARNING)
+		logging.disable('INFO')
 	task = options['task']
 	ntasks = options['ntasks']
 	

@@ -349,8 +349,11 @@ class Analyzer():
 				'name':...,'session':...,
 				'means':{'rt':...,'performance':...,'confidence':...,\
 						'hit_rt':...,'miss_rt':...,\
-						'hit_confidence':...,'miss_confidence':...},\
+						'hit_confidence':...,'miss_confidence':...},
 				'stds':{'rt':...,'performance':...,'confidence':...,\
+						'hit_rt':...,'miss_rt':...,\
+						'hit_confidence':...,'miss_confidence':...},
+				'medians':{'rt':...,'confidence':...,\
 						'hit_rt':...,'miss_rt':...,\
 						'hit_confidence':...,'miss_confidence':...}}
 		
@@ -398,7 +401,7 @@ class Analyzer():
 								'stds':{'rt':stds[0],'performance':stds[1],'confidence':stds[2],
 										'hit_rt':hit_stds[0],'miss_rt':miss_stds[0],
 										'hit_confidence':hit_stds[1],'miss_confidence':miss_stds[1]},
-								'medians':{'rt':medians[0],'performance':medians[1],'confidence':medians[2],
+								'medians':{'rt':medians[0],'confidence':medians[2],
 										'hit_rt':hit_medians[0],'miss_rt':miss_medians[0],
 										'hit_confidence':hit_medians[1],'miss_confidence':miss_medians[1]}}
 		return out
@@ -436,27 +439,37 @@ class Analyzer():
 		performance = fitter_stats['performance']
 		performance_conditioned = fitter_stats['performance_conditioned']
 		confidence = fitter_stats['mean_confidence']
+		confidence_median = fitter_stats['median_confidence']
 		hit_confidence = fitter_stats['mean_confidence_conditioned'][0]
 		miss_confidence = fitter_stats['mean_confidence_conditioned'][1]
+		hit_confidence_median = fitter_stats['median_confidence_conditioned'][0]
+		miss_confidence_median = fitter_stats['median_confidence_conditioned'][1]
 		rt = fitter_stats['mean_rt']
-		rt_conditioned = np.sum(fitter_stats['mean_rt_conditioned']*performance_conditioned,axis=1)
-		hit_rt = rt_conditioned[0]
-		miss_rt = rt_conditioned[1]
+		mean_rt_perf = fitter_stats['mean_rt_perf']
+		hit_rt = mean_rt_perf[0]
+		miss_rt = mean_rt_perf[1]
+		rt_median = fitter_stats['median_rt']
+		rt_median_perf = fitter_stats['median_rt_perf']
+		hit_rt_median = rt_median_perf[0]
+		miss_rt_median = rt_median_perf[1]
 		
 		auc = fitter_stats['auc']
 		
 		key = 'experiment_'+fitter.experiment+'_subject_'+fitter.subjectSession.get_name()+'_session_'+fitter.subjectSession.get_session()
-		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'full_merit':full_merit,\
-					'full_confidence_merit':full_confidence_merit,'confidence_only_merit':confidence_only_merit,\
-					'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),\
-					'performance':performance,'rt':rt,'hit_rt':hit_rt,'miss_rt':miss_rt,\
-					'confidence':confidence,'hit_confidence':hit_confidence,\
-					'miss_confidence':miss_confidence,'auc':auc}}
+		out = {key:{'experiment':fitter.experiment,'parameters':parameters,'full_merit':full_merit,
+					'full_confidence_merit':full_confidence_merit,'confidence_only_merit':confidence_only_merit,
+					'name':fitter.subjectSession.get_name(),'session':fitter.subjectSession.get_session(),
+					'performance_mean':performance,'rt_mean':rt,'hit_rt_mean':hit_rt,'miss_rt_mean':miss_rt,
+					'confidence_mean':confidence,'hit_confidence_mean':hit_confidence,
+					'miss_confidence_mean':miss_confidence,'rt_median':rt_median,
+					'hit_rt_median':hit_rt_median,'miss_rt_median':miss_rt_median,
+					'confidence_median':confidence_median,'hit_confidence_median':hit_confidence_median,
+					'miss_confidence_median':miss_confidence_median}}
 		return out
 	
-	def get_parameter_array_from_summary(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd):
+	def get_parameter_array_from_summary(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=lambda x: x/np.nanstd(x)):
 		"""
-		self.get_parameter_array_from_summary(summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd)
+		self.get_parameter_array_from_summary(summary=None,normalize={'internal_var':'experiment'},normalization_function=lambda x: x/np.nanstd(x))
 		
 		Get the array of parameters, experiments, sessions and names
 		from the summary['theoretical'] dict.
@@ -464,13 +477,24 @@ class Analyzer():
 		Input:
 			summary: A summary dict or None. If None, the Analyzer's
 				summary instance is used instead.
-			normalize: Can be None or a dict that is passed to the method
-				self.normalize_parameters in order to normalize the
-				Fitter parameters before returning them.
+			normalize: None or a dict whos keys are parameter names. If
+				None, no normalization is performed. If it is a dict,
+				the values indicate the grouping method that will be used
+				to normalize the parameter values. Each group is then
+				divided by the output of a call to the normalization_function
+				on itself. Four methods are available:
+				'all': All parameters are taken into a single group.
+				'experiment': One group for each experiment is formed.
+				'session': One group for each session is formed.
+				'name': One group for each name is formed.
+				By default normalize is {'internal_var':'experiment'}
+				because the internal_var is completely different
+				for each experiment.
 			normalization_function: A callable that is passed to the
 				method self.normalize_parameters in order to
 				normalize the Fitter parameters before returning them.
 				This function is only used if normalize is not None.
+				Refer to self.normalize_parameters for more information.
 		
 		Output:
 			parameters: 2D numpy array. Axis=0 corresponds to different
@@ -524,18 +548,20 @@ class Analyzer():
 		self._sessions = np.array(self._sessions)
 		self._experiments = np.array(self._experiments)
 		if normalize:
-			self.normalize_parameters(parameters=self._parameters,
-									  parameter_names=self._parameter_names,
-									  names=self._names,
-									  sessions=self._sessions,
-									  experiments=self._experiments,
-									  normalize=normalize,
-									  normalization_function=normalization_function)
+			group_dict = {'all':None,
+						  'experiment':self._experiments,
+						  'session':self._sessions,
+						  'name':self._names}
+			for par in normalize.keys():
+				par_ind = self._parameter_names.index(par)
+				group = group_dict[normalize[par]]
+				self._parameters[:,par_ind] = self.normalize_parameters(parameters=self._parameters[:,par_ind],
+									  group=group, normalization_function=normalization_function)
 		return self._parameters,self._parameter_names,self._names,self._sessions,self._experiments
 	
-	def get_summary_stats_array(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=np.nanstd):
+	def get_summary_stats_array(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=lambda x: x/np.nanstd(x)):
 		"""
-		self.get_summary_stats_array(summary=None)
+		self.get_summary_stats_array(summary=None,normalize={'internal_var':'experiment'},normalization_function=lambda x: x/np.nanstd(x))
 		
 		Get the two numpy arrays of the summary statistics. One for the
 		experimental data and another for the theoretical data.
@@ -543,6 +569,24 @@ class Analyzer():
 		Input:
 			summary: A summary dict or None. If None, the Analyzer's
 				summary instance is used instead.
+			normalize: None or a dict whos keys are parameter names. If
+				None, no normalization is performed. If it is a dict,
+				the values indicate the grouping method that will be used
+				to normalize the parameter values. Each group is then
+				divided by the output of a call to the normalization_function
+				on itself. Four methods are available:
+				'all': All parameters are taken into a single group.
+				'experiment': One group for each experiment is formed.
+				'session': One group for each session is formed.
+				'name': One group for each name is formed.
+				By default normalize is {'internal_var':'experiment'}
+				because the internal_var is completely different
+				for each experiment.
+			normalization_function: A callable that is passed to the
+				method self.normalize_parameters in order to
+				normalize the Fitter parameters before returning them.
+				This function is only used if normalize is not None.
+				Refer to self.normalize_parameters for more information.
 		
 		Output:
 			(experimental,theoretical): Two numpy arrays with named
@@ -554,7 +598,62 @@ class Analyzer():
 				and subject name. These fields should be used to get the
 				corresponding experimental and theoretical entries.
 				
-		
+				List of experimental entries:
+				- experiment: Experiment
+				- name: Subject Name
+				- session: Session
+				- n: Number of trials
+				- auc: Area under to ROC curve
+				- multi_mod_index: Hartigan's dip test statistic
+				- rt_mean: Mean RT
+				- hit_rt_mean: Mean RT for the correct trials
+				- miss_rt_mean: Mean RT for the incorrect trials
+				- performance_mean: Mean performance
+				- confidence_mean: Mean confidence
+				- hit_confidence_mean: Mean confidence for the correct trials
+				- miss_confidence_mean: Mean confidence for the incorrect trials
+				- rt_std: Standard deviation of RT
+				- hit_rt_std: Standard deviation of RT for the correct trials
+				- miss_rt_std: Standard deviation of RT for the incorrect trials
+				- performance_std: Standard deviation of performance
+				- confidence_std: Standard deviation of confidence
+				- hit_confidence_std: Standard deviation of confidence for the correct trials
+				- miss_confidence_std: Standard deviation of confidence for the incorrect trials
+				- rt_median: Median RT
+				- hit_rt_median: Median RT for the correct trials
+				- miss_rt_median: Median RT for the incorrect trials
+				- confidence_median: Median confidence
+				- hit_confidence_median: Median confidence for the correct trials
+				- miss_confidence_median: Median confidence for the incorrect trials
+				
+				List of theoretical entries:
+				- experiment: Experiment
+				- name: Subject Name
+				- session: Session
+				- full_merit: Fitter full_merit value
+				- full_confidence_merit: Fitter full_confidence_merit value
+				- confidence_only_merit: Fitter confidence_only_merit value
+				- auc: Area under to ROC curve
+				- rt_mean: Mean RT
+				- hit_rt_mean: Mean RT for the correct trials
+				- miss_rt_mean: Mean RT for the incorrect trials
+				- performance_mean: Mean performance
+				- confidence_mean: Mean confidence
+				- hit_confidence_mean: Mean confidence for the correct trials
+				- miss_confidence_mean: Mean confidence for the incorrect trials
+				- rt_median: Median RT
+				- hit_rt_median: Median RT for the correct trials
+				- miss_rt_median: Median RT for the incorrect trials
+				- confidence_median: Median confidence
+				- hit_confidence_median: Median confidence for the correct trials
+				- miss_confidence_median: Median confidence for the incorrect trials
+				- cost: Fitter 'cost' parameter value
+				- internal_var: Fitter 'internal_var' parameter value
+				- phase_out_prob: Fitter 'phase_out_prob' parameter value
+				- dead_time: Fitter 'dead_time' parameter value
+				- dead_time_sigma: Fitter 'dead_time_sigma' parameter value
+				- high_confidence_threshold: Fitter 'high_confidence_threshold' parameter value
+				- confidence_map_slope: Fitter 'confidence_map_slope' parameter value
 		
 		"""
 		if summary is None:
@@ -584,12 +683,18 @@ class Analyzer():
 				else:
 					for par in teo[teo_k].keys():
 						par = str(par)
+						if par=='high_confidence_threshold':
+							val = teo[teo_k][par] if teo[teo_k][par]<=2. else np.nan
+						elif par=='confidence_map_slope':
+							val = teo[teo_k][par] if teo[teo_k][par]<=100. else np.nan
+						else:
+							val = teo[teo_k][par]
 						if par not in parameter_names:
 							parameter_names.append(par)
 							theoretical_ind_names.append(par)
-							theoretical.append([teo[teo_k][par]])
+							theoretical.append([val])
 						else:
-							theoretical[theoretical_ind_names.index(par)].append(teo[teo_k][par])
+							theoretical[theoretical_ind_names.index(par)].append(val)
 			for exp_k in exp.keys():
 				if exp_k=='experiment':
 					max_experiment_len = max([max_experiment_len,len(exp[exp_k])])
@@ -603,7 +708,7 @@ class Analyzer():
 						experimental[experimental_ind_names.index(exp_k)].append(exp[exp_k])
 				else:
 					for nested_key in exp[exp_k].keys():
-						composed_key = nested_key+{'means':'_mean','stds':'_std'}[exp_k]
+						composed_key = nested_key+{'means':'_mean','stds':'_std','medians':'_median'}[exp_k]
 						if composed_key not in experimental_ind_names:
 							experimental_ind_names.append(composed_key)
 							experimental.append([exp[exp_k][nested_key]])
@@ -625,7 +730,6 @@ class Analyzer():
 				teo_dtype.append((teo_ind,dtype_dict[teo_ind]))
 			except:
 				teo_dtype.append((teo_ind,'f'))
-		print(teo_dtype)
 		N = len(experimental[0])
 		experimental_ = []
 		theoretical_ = []
@@ -634,12 +738,21 @@ class Analyzer():
 			theoretical_.append(tuple([t[i] for t in theoretical]))
 		experimental = np.array(experimental_,exp_dtype)
 		theoretical = np.array(theoretical_,teo_dtype)
-		print(theoretical[parameter_names].shape)
+		
+		if normalize:
+			group_dict = {'all':None,
+						  'experiment':theoretical['experiment'],
+						  'session':theoretical['session'],
+						  'name':theoretical['name']}
+			for par in normalize.keys():
+				group = group_dict[normalize[par]]
+				theoretical[par] = self.normalize_parameters(parameters=theoretical[par],
+									  group=group, normalization_function=normalization_function)
 		return experimental,theoretical
 	
-	def normalize_parameters(self,parameters,parameter_names,names,sessions,experiments,normalize,normalization_function=np.nanstd):
+	def normalize_parameters(self,parameters,group=None,normalization_function=lambda x: x/np.nanstd(x)):
 		"""
-		self.normalize_parameters(parameters,parameter_names,names,sessions,experiments,normalize,normalization_function=np.nanstd)
+		self.normalize_parameters(parameters,group,normalization_function=lambda x: x/np.nanstd(x))
 		
 		The hierarchical clustering of parameters depends on the distance
 		between parameters where each parameter name is interpreted as
@@ -655,66 +768,41 @@ class Analyzer():
 		different grouping methods for different parameters.
 		
 		Input:
-			parameters: A 2D numpy array with the parameters. The
-				normalization will be performed inplace in this array.
-				The axis=0 corresponds to separate experiment, session
-				and subject name tuples. The axis=1 corresponds to
-				different parameter names.
-			parameter_names: A list with the parameter names matching
-				the positions they are located in the axis=1 of the
-				supplied parameters array
-			names: A 1D numpy array that indicates the subject name
-				that corresponds to each row of the parameters array.
-			sessions: A 1D numpy array that indicates the session
-				that corresponds to each row of the parameters array.
-			experiments: A 1D numpy array that indicates the experiment
-				that corresponds to each row of the parameters array.
-			normalize: A dict whos keys are parameter names. The values
-				indicate the grouping method that will be used to
-				normalize the parameter values. Each group is then divided
-				by the output of a call to the normalization_function on
-				itself. Four methods are available:
-				'all': All parameters are taken into a single group.
-				'experiment': One group for each experiment is formed.
-				'session': One group for each session is formed.
-				'name': One group for each name is formed.
-				By default normalize is {'internal_var':'experiment'}
-				because the internal_var is completely different
-				for each experiment.
+			parameters: A 1D numpy array with the parameter values for
+				a single parameter name.
+			group: Can be None or a 1D numpy array with the same
+				number of elements as the input 'parameters'. The
+				distinct values of 'group' define separate groups
+				and the normalization function is called separately
+				on each group. For example, the input 'group'
+				could be an array with the corresponding experiment of
+				each parameter value. Thus, the normalization_function
+				would be called once for each experiment on the separate
+				subsets of parameters that corresponded to each
+				experiment. If None, the normalization_function is
+				called on the entire 'parameters' array.
 			normalization_function: A callable that is called on each
-				group. Then each parameter value in the group is divided
-				by the output of this call.
+				group to normalize the parameter values. Default is
+				lambda x: x/numpy.nanstd(x). Other normalization_function
+				implementations must be able to broadcast numpy arrays,
+				receive a single numpy array as input and return another
+				numpy array with the same shape as the input array.
+				
 		
-		The normalization is performed inplace, in the instance's
-		_parameter attribute so no memory of the original parameter
-		values are retained.
+		Output:
+			normalized_parameters: A numpy array that is the result of
+				calling the normalization_function on each group.
 		
 		"""
-		for parameter in normalize.keys():
-			grouping_method = normalize[parameter]
-			par_ind = parameter_names.index(parameter)
-			if grouping_method=='all':
-				categories = ['all']
-				categories_inds = [np.ones(parameters.shape[0],dtype=np.bool)]
-			elif grouping_method=='experiment':
-				categories_inds = []
-				categories,inverse = np.unique(experiments,return_inverse=True)
-				for i,category in enumerate(categories):
-					categories_inds.append(inverse==i)
-			elif grouping_method=='session':
-				categories_inds = []
-				categories,inverse = np.unique(sessions,return_inverse=True)
-				for i,category in enumerate(categories):
-					categories_inds.append(inverse==i)
-			elif grouping_method=='name':
-				categories_inds = []
-				categories,inverse = np.unique(names,return_inverse=True)
-				for i,category in enumerate(categories):
-					categories_inds.append(inverse==i)
-			else:
-				raise ValueError('Unknown normalization grouping method: {0}'.format(grouping_method))
-			for i,category_ind in enumerate(categories_inds):
-				parameters[category_ind,par_ind]/=normalization_function(parameters[category_ind,par_ind])
+		if group is None:
+			return normalization_function(parameters)
+		else:
+			normalized_parameters = np.empty_like(parameters)
+			unique_group = np.unique(group)
+			for g in unique_group:
+				inds = group==g
+				normalized_parameters[inds] = normalization_function(parameters[inds])
+			return normalized_parameters
 	
 	def scatter_parameters(self,merge=None,show=False):
 		"""
@@ -1201,12 +1289,8 @@ class Analyzer():
 		"""
 		return self.spanner(branchsamples)
 
-def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
-				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
-				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
-				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
-				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
+def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
+	a = Analyzer(**analyzer_kwargs)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
 												  'confidence_map_slope':'all',\
 												  'cost':'all',\
@@ -1236,12 +1320,8 @@ def cluster_analysis(method='full_confidence', optimizer='cma', suffix='', cmap_
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		plt.show(True)
 
-def parameter_correlation(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
-				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
-				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
-				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
-				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
+def parameter_correlation(analyzer_kwargs={}):
+	a = Analyzer(**analyzer_kwargs)
 	parameters,parameter_names,names,sessions,experiments = \
 		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	#~ parameters,parameter_names,names,sessions,experiments = \
@@ -1346,12 +1426,8 @@ def correct_rho_pval(pvals):
 			pvals[j+k+1,j] = ps[counter]
 			counter+=1
 
-def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix='', cmap_meth='log_odds', override=False,\
-				n_clusters=2, affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
-				merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
-	a = Analyzer(method=method, optimizer=optimizer, suffix=suffix,
-				cmap_meth=cmap_meth, override=override, n_clusters=n_clusters,
-				affinity=affinity, linkage=linkage, pooling_func=pooling_func)
+def binary_confidence_analysis(analyzer_kwargs={}):
+	a = Analyzer(**analyzer_kwargs)
 	parameters,parameter_names,names,sessions,experiments = \
 		a.get_parameter_array_from_summary(normalize={'internal_var':'experiment'})
 	#~ parameters,parameter_names,names,sessions,experiments = \
@@ -1508,21 +1584,228 @@ def binary_confidence_analysis(method='full_confidence', optimizer='cma', suffix
 	
 	plt.show(True)
 
-def test():
-	a = Analyzer()
-	a.get_summary_stats_array()
+def correlation_analysis(analyzer_kwargs={}):
+	a = Analyzer(**analyzer_kwargs)
+	subj,model = a.get_summary_stats_array(normalize={'internal_var':'experiment'})
+	#~ subj,model = a.get_summary_stats_array(normalize={'internal_var':'experiment',\
+													  #~ 'confidence_map_slope':'all',\
+													  #~ 'cost':'all',\
+													  #~ 'high_confidence_threshold':'all',\
+													  #~ 'dead_time':'all',\
+													  #~ 'dead_time_sigma':'all',\
+													  #~ 'phase_out_prob':'all'})
+	print(model['hit_rt_mean']-model['miss_rt_mean'])
 	return
-	parameter_correlation()
+	
+	ue,c = np.unique(model['experiment'],return_inverse=True)
+	
+	# Correlation between parameters and mean confidence
+	plt.figure()
+	plt.subplot(231)
+	plt.scatter(model['high_confidence_threshold'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$C_{H}$')
+	plt.ylabel('Mean Confidence')
+	plt.subplot(232)
+	plt.scatter(model['confidence_map_slope'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$\alpha$')
+	plt.subplot(233)
+	plt.scatter(model['cost'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$c(t)$')
+	plt.subplot(245)
+	plt.scatter(model['phase_out_prob'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$p_{po}$')
+	plt.ylabel('Mean Confidence')
+	plt.subplot(246)
+	plt.scatter(model['internal_var'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$\sigma$')
+	plt.subplot(247)
+	plt.scatter(model['dead_time'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$\tau_{c}$')
+	plt.subplot(248)
+	plt.scatter(model['dead_time_sigma'],subj['confidence_mean'],c=c)
+	plt.xlabel(r'$\sigma_{c}$')
+	plt.suptitle('Correlation between parameters and mean confidence')
+	
+	# Correlation between parameters and mean RT
+	plt.figure()
+	plt.subplot(231)
+	plt.scatter(model['high_confidence_threshold'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$C_{H}$')
+	plt.ylabel('Mean RT')
+	plt.subplot(232)
+	plt.scatter(model['confidence_map_slope'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$\alpha$')
+	plt.subplot(233)
+	plt.scatter(model['cost'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$c(t)$')
+	plt.subplot(245)
+	plt.scatter(model['phase_out_prob'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$p_{po}$')
+	plt.ylabel('Mean RT')
+	plt.subplot(246)
+	plt.scatter(model['internal_var'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$\sigma$')
+	plt.subplot(247)
+	plt.scatter(model['dead_time'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$\tau_{c}$')
+	plt.subplot(248)
+	plt.scatter(model['dead_time_sigma'],subj['rt_mean'],c=c)
+	plt.xlabel(r'$\sigma_{c}$')
+	plt.suptitle('Correlation between parameters and mean RT')
+	
+	# Correlation between parameters and mean performance
+	plt.figure()
+	plt.subplot(231)
+	plt.scatter(model['high_confidence_threshold'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$C_{H}$')
+	plt.ylabel('Mean performance')
+	plt.subplot(232)
+	plt.scatter(model['confidence_map_slope'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$\alpha$')
+	plt.subplot(233)
+	plt.scatter(model['cost'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$c(t)$')
+	plt.subplot(245)
+	plt.scatter(model['phase_out_prob'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$p_{po}$')
+	plt.ylabel('Mean performance')
+	plt.subplot(246)
+	plt.scatter(model['internal_var'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$\sigma$')
+	plt.subplot(247)
+	plt.scatter(model['dead_time'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$\tau_{c}$')
+	plt.subplot(248)
+	plt.scatter(model['dead_time_sigma'],subj['performance_mean'],c=c)
+	plt.xlabel(r'$\sigma_{c}$')
+	plt.suptitle('Correlation between parameters and mean performance')
+	
+	from scipy.stats import linregress, ttest_rel, ttest_ind, ttest_1samp
+	# Agreement between data means and fit
+	f = plt.figure()
+	axs = {'rt':plt.subplot(231),'confidence':plt.subplot(232),
+		   'performance':plt.subplot(233),'hit_rt':plt.subplot(245),
+		   'miss_rt':plt.subplot(246),'hit_confidence':plt.subplot(247),
+		   'miss_confidence':plt.subplot(248)}
+	titles = {'rt':'Mean RT','confidence':'Mean confidence',
+			  'performance':'Mean performance','hit_rt':'Mean RT for hits',
+			  'miss_rt':'Mean RT for misses','hit_confidence':'Mean conf for hits',
+			  'miss_confidence':'Mean conf for misses'}
+	ylabels = {'rt':'Subject data','confidence':'','performance':'',
+			   'hit_rt':'Subject data','miss_rt':'',
+			   'hit_confidence':'','miss_confidence':''}
+	xlabels = {'rt':'','confidence':'','performance':'',
+			   'hit_rt':'Model data','miss_rt':'Model data',
+			   'hit_confidence':'Model data','miss_confidence':'Model data'}
+	for key in axs.keys():
+		ax = axs[key]
+		for i,exp in enumerate(ue):
+			color = plt.get_cmap('jet')(float(i)/float(len(ue)-1))
+			inds = c==i
+			label = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}[str(exp).strip('\x00')]
+			try:
+				ax.errorbar(model[key+'_mean'][inds],subj[key+'_mean'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
+			except:
+				ax.errorbar(model[key][inds],subj[key+'_mean'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
+		try:
+			slope,intercept,rvalue,_,stder = linregress(model[key+'_mean'],subj[key+'_mean'])
+			par,cov = linear_least_squares(model[key+'_mean'],subj[key+'_mean'],subj[key+'_std'])
+			tvalue,pvalue = ttest_1samp(subj[key+'_mean']-model[key+'_mean'],0.)
+		except:
+			slope,intercept,rvalue,_,stder = linregress(model[key],subj[key+'_mean'])
+			par,cov = linear_least_squares(model[key],subj[key+'_mean'],subj[key+'_std'])
+			tvalue,pvalue = ttest_1samp(subj[key+'_mean']-model[key],0.)
+		print(par,np.diag(cov)**0.5)
+		title = titles[key]
+		if key=='performance':
+			ax.legend(loc='best', fancybox=True, framealpha=0.5)
+		#~ if pvalue<0.05:
+			#~ title+=' *'
+			#~ if pvalue<0.005:
+				#~ title+='*'
+				#~ if pvalue<0.0005:
+					#~ title+='*'
+		ax.set_title(title)
+		ax.set_xlabel(xlabels[key])
+		ax.set_ylabel(ylabels[key])
+		xlim = np.array(ax.get_xlim())
+		ylim = np.array(ax.get_ylim())
+		xlim[0] = min([xlim[0],ylim[0]])
+		xlim[1] = max([xlim[1],ylim[1]])
+		ylim = xlim
+		ax.plot(xlim,intercept+slope*xlim,color='gray')
+		ax.plot(xlim,xlim,color='k')
+		ax.set_xlim(xlim)
+		ax.set_ylim(ylim)
+	plt.figure(f.number)
+	plt.suptitle('Agreement between data means and fit')
+	
+	# Agreement between data medians and fit
+	plt.figure()
+	axs = {'rt':plt.subplot(231),'confidence':plt.subplot(232),
+		   'hit_rt':plt.subplot(233),'miss_rt':plt.subplot(234),
+		   'hit_confidence':plt.subplot(235),'miss_confidence':plt.subplot(236)}
+	titles = {'rt':'Median RT','confidence':'Median confidence',
+			  'hit_rt':'Median RT for hits','miss_rt':'Median RT for misses',
+			  'hit_confidence':'Median conf for hits',
+			  'miss_confidence':'Median conf for misses'}
+	ylabels = {'rt':'Subject data','confidence':'',
+			   'hit_rt':'','miss_rt':'Subject data',
+			   'hit_confidence':'','miss_confidence':''}
+	xlabels = {'rt':'','confidence':'',
+			   'hit_rt':'','miss_rt':'Model data',
+			   'hit_confidence':'Model data','miss_confidence':'Model data'}
+	for key in axs.keys():
+		ax = axs[key]
+		for i,exp in enumerate(ue):
+			color = plt.get_cmap('jet')(float(i)/float(len(ue)-1))
+			inds = c==i
+			label = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}[str(exp).strip('\x00')]
+			ax.errorbar(model[key+'_median'][inds],subj[key+'_median'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
+		slope,intercept,rvalue,_,stder = linregress(model[key+'_median'],subj[key+'_median'])
+		par,cov = linear_least_squares(model[key+'_median'],subj[key+'_median'],subj[key+'_std'])
+		tvalue,pvalue = ttest_1samp(subj[key+'_median']-model[key+'_median'],0.)
+		#~ print(key,np.mean(subj[key+'_median']-model[key+'_median']),tvalue,pvalue)
+		print(par,np.diag(cov)**0.5)
+		title = titles[key]
+		if key=='hit_rt':
+			ax.legend(loc='best', fancybox=True, framealpha=0.5)
+		#~ if pvalue<0.05:
+			#~ title+=' *'
+			#~ if pvalue<0.005:
+				#~ title+='*'
+				#~ if pvalue<0.0005:
+					#~ title+='*'
+		ax.set_title(title)
+		ax.set_xlabel(xlabels[key])
+		ax.set_ylabel(ylabels[key])
+		xlim = np.array(ax.get_xlim())
+		ylim = np.array(ax.get_ylim())
+		xlim[0] = min([xlim[0],ylim[0]])
+		xlim[1] = max([xlim[1],ylim[1]])
+		ylim = xlim
+		ax.plot(xlim,intercept+slope*xlim,color='gray')
+		ax.plot(xlim,xlim,color='k')
+		ax.set_xlim(xlim)
+		ax.set_ylim(ylim)
+	plt.suptitle('Agreement between data medians and fit')
+	
+	plt.show(True)
+
+def test():
+	correlation_analysis()
+	return
+	#~ parameter_correlation()
 	return
 	#~ binary_confidence_analysis()
 	
-	#~ a = Analyzer()
+	a = Analyzer()
 	#~ subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 	#~ a.subjectSession_measures(subjects[0])
 	#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
-	#~ tree = a.cluster(merge='names')
+	tree = a.cluster(merge='names')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
-	#~ tree.show(tree_style=default_tree_style(mode='r'))
+	tree.show(tree_style=default_tree_style(mode='r'))
 	#~ tree = a.cluster(merge='sessions')
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
@@ -1530,47 +1813,47 @@ def test():
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
 	#~ tree.show(tree_style=default_tree_style(mode='c'))
 	#~ a.scatter_parameters()
-	#~ a.scatter_parameters(merge='names',show=True)
+	a.scatter_parameters(merge='names',show=True)
 	#~ a.scatter_parameters(merge='sessions')
-	#~ a.set_pooling_func(np.median)
-	#~ a.scatter_parameters(merge='names')
+	a.set_pooling_func(np.median)
+	a.scatter_parameters(merge='names',show=True)
 	#~ a.scatter_parameters(merge='sessions')
 	#~ unams,indnams = np.unique(a._names,return_inverse=True)
 	#~ uexps,indexps = np.unique(a._experiments,return_inverse=True)
 	#~ usess,indsess = np.unique(a._sessions,return_inverse=True)
 	
-	for un in unams:
-		inds = a._names==un
-		pars = a._parameters[inds]
-		cost = pars[:,a._parameter_names.index('cost')]
-		internal_var = pars[:,a._parameter_names.index('internal_var')]
-		phase_out_prob = pars[:,a._parameter_names.index('phase_out_prob')]
-		high_confidence_threshold = pars[:,a._parameter_names.index('high_confidence_threshold')]
-		confidence_map_slope = pars[:,a._parameter_names.index('confidence_map_slope')]
-		plt.figure(figsize=(10,10))
-		ax1 = plt.subplot(221)
-		ax2 = plt.subplot(222)
-		ax3 = plt.subplot(223)
-		ax4 = plt.subplot(224)
-		for us,marker in zip(usess,['o','s','D']):
-			inds2 = a._sessions[inds]==us
-			if any(inds2):
-				colors = [{'2AFC':'r','Auditivo':'g','Luminancia':'b'}[str(x).strip('\x00')] for x in a._experiments[inds][inds2]]
-				ax1.scatter(cost[inds2],internal_var[inds2],c=colors,s=20,label=us,marker=marker)
-				ax2.scatter(cost[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
-				ax3.scatter(internal_var[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
-				ax4.scatter(confidence_map_slope[inds2],high_confidence_threshold[inds2],c=colors,s=20,label=us,marker=marker)
-		ax1.set_xlabel('cost')
-		ax1.set_ylabel('internal_var')
-		ax2.set_xlabel('cost')
-		ax2.set_ylabel('phase_out_prob')
-		ax3.set_xlabel('internal_var')
-		ax3.set_ylabel('phase_out_prob')
-		ax3.legend()
-		ax4.set_xlabel('confidence_map_slope')
-		ax4.set_ylabel('high_confidence_threshold')
-		plt.suptitle('Subject: '+str(un))
-		plt.show(True)
+	#~ for un in unams:
+		#~ inds = a._names==un
+		#~ pars = a._parameters[inds]
+		#~ cost = pars[:,a._parameter_names.index('cost')]
+		#~ internal_var = pars[:,a._parameter_names.index('internal_var')]
+		#~ phase_out_prob = pars[:,a._parameter_names.index('phase_out_prob')]
+		#~ high_confidence_threshold = pars[:,a._parameter_names.index('high_confidence_threshold')]
+		#~ confidence_map_slope = pars[:,a._parameter_names.index('confidence_map_slope')]
+		#~ plt.figure(figsize=(10,10))
+		#~ ax1 = plt.subplot(221)
+		#~ ax2 = plt.subplot(222)
+		#~ ax3 = plt.subplot(223)
+		#~ ax4 = plt.subplot(224)
+		#~ for us,marker in zip(usess,['o','s','D']):
+			#~ inds2 = a._sessions[inds]==us
+			#~ if any(inds2):
+				#~ colors = [{'2AFC':'r','Auditivo':'g','Luminancia':'b'}[str(x).strip('\x00')] for x in a._experiments[inds][inds2]]
+				#~ ax1.scatter(cost[inds2],internal_var[inds2],c=colors,s=20,label=us,marker=marker)
+				#~ ax2.scatter(cost[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
+				#~ ax3.scatter(internal_var[inds2],phase_out_prob[inds2],c=colors,s=20,label=us,marker=marker)
+				#~ ax4.scatter(confidence_map_slope[inds2],high_confidence_threshold[inds2],c=colors,s=20,label=us,marker=marker)
+		#~ ax1.set_xlabel('cost')
+		#~ ax1.set_ylabel('internal_var')
+		#~ ax2.set_xlabel('cost')
+		#~ ax2.set_ylabel('phase_out_prob')
+		#~ ax3.set_xlabel('internal_var')
+		#~ ax3.set_ylabel('phase_out_prob')
+		#~ ax3.legend()
+		#~ ax4.set_xlabel('confidence_map_slope')
+		#~ ax4.set_ylabel('high_confidence_threshold')
+		#~ plt.suptitle('Subject: '+str(un))
+		#~ plt.show(True)
 
 def parse_input():
 	script_help = """ moving_bounds_fits.py help

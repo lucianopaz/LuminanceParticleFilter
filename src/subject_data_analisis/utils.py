@@ -709,3 +709,53 @@ def diptest(x, min_is_0=True, boot_pval=False, n_boot=2000):
         pval = 1. - np.interp(sD, y0 + fn * (y1 - y0), SIG)
 
     return D, pval
+
+def linear_least_squares(x,y,covy=None):
+	"""
+	linear_least_squares(x,y,covy=None)
+	
+	Perform a linear least squares fit between an array x and y, and
+	return the fitted parameters and the corresponding covariance
+	matrix
+	
+	Input:
+		x,y: Two 1D numpy arrays of the same shape. x is the independent
+			variable and y is the dependent variable.
+		covy: Can be None, a float, a 1D array or a 2D array. If None,
+			the fit is performed assuming covy is the identity matrix.
+			If a float, it is assumed to encode a constant standard
+			deviation for every 'y' datapoint. If a 1D array, it must
+			hold the standard deviations of each observed 'y'. It must
+			have the same number of elements as 'y'. If it is a 2D
+			array, it must have shape (len(y),len(y)) and hold the
+			covariance matrix of the observations 'y'.
+	
+	Output:
+		par: A 1D array of the fitted parameter values. The first element
+			is the slope and the second element is the intercept of the
+			linear fit.
+		cov: A 2D array with the covariance matrix of the fitted
+			parameter values.
+	
+	"""
+	x = x.flatten(order='K')
+	y = y.flatten(order='K')
+	assert x.shape==y.shape, "Inputs 'x' and 'y' must have the same number of elements"
+	if covy is None:
+		covy = np.ones((len(y),len(y)))
+	elif not isinstance(covy,np.ndarray):
+		covy = np.diag(float(covy)**2*np.ones(len(y)))
+	elif covy.ndim==1:
+		# If covy is a vector assume it encodes the std, not the variance
+		covy = np.diag(covy**2)
+	elif covy.ndim!=2:
+		raise ValueError("Input covy must be a None, a float, or a 1D or 2D numpy array")
+	assert (len(y),len(y))==covy.shape, "Inconsistent dimensions between the supplied 'covy' input and the 'x' and 'y' arrays."
+	covy = np.matrix(covy)
+	mat = np.ones((len(x),2))
+	mat[:,1] = x
+	mat = np.matrix(mat)
+	covyinv = np.linalg.inv(covy)
+	cov = np.linalg.inv(mat.transpose()*covyinv*mat)
+	pars = np.array(cov*mat.transpose()*covyinv*np.matrix(y.reshape((-1,1)))).flatten()
+	return pars,np.array(cov)
