@@ -212,9 +212,9 @@ def load_Fitter_from_file(fname):
 	f.close()
 	return fitter
 
-def Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds'):
+def Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds',fits_path='fits_cognition'):
 	"""
-	Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds')
+	Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_map_method='log_odds',fits_path='fits_cognition')
 	
 	Returns a string. Returns the formated filename for the supplied
 	experiment, method, name, session, optimizer, suffix and
@@ -222,29 +222,31 @@ def Fitter_filename(experiment,method,name,session,optimizer,suffix,confidence_m
 	
 	The output has two formats for backwards compatibility:
 	If confidence_map_method is 'log_odds' the output is
-	'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'
+	os.path.join('{fits_path}','{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl')
 	
 	If confidence_map_method is not 'log_odds' the output is
-	'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl'
+	os.path.join('{fits_path}','{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl')
 	
 	"""
 	if confidence_map_method=='log_odds':
-		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
-				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix)
+		return os.path.join(fits_path,'{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl'.format(
+				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix))
 	else:
-		return 'fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl'.format(
-				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix,confidence_map_method=confidence_map_method)
+		return os.path.join(fits_path,'{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{confidence_map_method}{suffix}.pkl'.format(
+				experiment=experiment,method=method,name=name,session=session,optimizer=optimizer,suffix=suffix,confidence_map_method=confidence_map_method))
 
 class Fitter:
 	#~ __module__ = os.path.splitext(os.path.basename(__file__))[0]
 	# Initer
 	def __init__(self,subjectSession,time_units='seconds',method='full_confidence',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
-				high_confidence_mapping_method='log_odds',binary_split_method='median'):
+				high_confidence_mapping_method='log_odds',binary_split_method='median',
+				fits_path='fits_cognition'):
 		"""
 		Fitter(subjectSession,time_units='seconds',method='full_confidence',optimizer='cma',\
 				decisionPolicyKwArgs={},suffix='',rt_cutoff=None,confidence_partition=100,\
-				high_confidence_mapping_method='log_odds',binary_split_method='median')
+				high_confidence_mapping_method='log_odds',binary_split_method='median',
+				fits_path='fits_cognition')
 		
 		Construct a Fitter instance that interfaces the fitting procedure
 		of the model's likelihood of the observed subjectSession data.
@@ -286,6 +288,8 @@ class Fitter:
 				reports. This is only used when calling the binary
 				confidence merit functions. To find the available split
 				methods refer to self.get_binary_confidence.
+			fits_path: The path to the directory where the fit results
+				should be saved.
 		
 		Output: A Fitter instance that can be used as an interface to
 			fit the model's parameters to the subjectSession data
@@ -302,7 +306,10 @@ class Fitter:
 		package_logger.debug('Creating Fitter instance for "{experiment}" experiment and "{name}" subject with sessions={session}'.format(
 						experiment=subjectSession.experiment,name=subjectSession.name,session=subjectSession.session))
 		self.logger = logging.getLogger("fits_cognition.Fitter")
+		self.fits_path = fits_path
+		self.logger.debug('Setted fits_path = %s',self.fits_path)
 		self.raw_data_dir = raw_data_dir
+		self.logger.debug('Setted raw_data_dir = %s',self.raw_data_dir)
 		self.set_experiment(subjectSession.experiment)
 		self.set_time_units(str(time_units))
 		self.set_rt_cutoff(rt_cutoff)
@@ -520,6 +527,10 @@ class Fitter:
 		self.set_time_units(state['time_units'])
 		self.set_rt_cutoff(state['rt_cutoff'])
 		self.raw_data_dir = state['raw_data_dir']
+		if 'fits_path' in state.keys():
+			self.fits_path = state['fits_path']
+		else:
+			self.fits_path = 'fits_cognition'
 		if 'confidence_partition' in state.keys():
 			self.confidence_partition = int(state['confidence_partition'])
 		else:
@@ -810,7 +821,8 @@ class Fitter:
 				 'confidence_partition':self.confidence_partition,
 				 'raw_data_dir':self.raw_data_dir,
 				 'high_confidence_mapping_method':self.high_confidence_mapping_method,
-				 'binary_split_method':self.binary_split_method}
+				 'binary_split_method':self.binary_split_method,
+				 'fits_path':self.fits_path}
 		if hasattr(self,'_start_point'):
 			state['_start_point'] = self._start_point
 		if hasattr(self,'_bounds'):
@@ -1025,7 +1037,7 @@ class Fitter:
 		"""
 		return Fitter_filename(experiment=self.experiment,method=self.method,name=self.subjectSession.get_name(),
 				session=self.subjectSession.get_session(),optimizer=self.optimizer,suffix=self.suffix,
-				confidence_map_method=self.high_confidence_mapping_method)
+				confidence_map_method=self.high_confidence_mapping_method,fits_path=self.fits_path)
 	
 	def get_jacobian_dx(self):
 		"""
@@ -3384,6 +3396,10 @@ def parse_input():
                           below 0.5 is cast as low confidence. If
                           'mean', every report below the mean confidence
                           is cast as low confidence. [Default 'median']
+ '--fits_path': The path to the directory where the fit results should
+                be saved or loaded from. This path can be absolute or
+                relative. Be aware that the default is relative to the
+                current directory. [Default 'fits_cognition']
  
  The following argument values must be supplied as JSON encoded strings.
  JSON dictionaries are written as '{"key":val,"key2":val2}'
@@ -3473,7 +3489,7 @@ def parse_input():
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
 				'start_point_from_fit_output':None,'override':False,'plot_handler_rt_cutoff':None,
 				'high_confidence_mapping_method':'log_odds','plot_binary':None,
-				'binary_split_method':'median'}
+				'binary_split_method':'median','fits_path':'fits_cognition'}
 	expecting_key = True
 	json_encoded_key = False
 	key = None
@@ -3520,6 +3536,9 @@ def parse_input():
 				expecting_key = False
 			elif arg=='-sf' or arg=='--suffix':
 				key = 'suffix'
+				expecting_key = False
+			elif arg=='--fits_path':
+				key = 'fits_path'
 				expecting_key = False
 			elif arg=='--rt_cutoff':
 				key = 'rt_cutoff'
@@ -3613,6 +3632,9 @@ def parse_input():
 		raise ValueError("The supplied high_confidence_mapping_method is unknown. Available values are 'log_odds' and 'belief'. Got {0} instead.".format(options['high_confidence_mapping_method']))
 	else:
 		options['high_confidence_mapping_method'] = options['high_confidence_mapping_method'].lower()
+	
+	if not os.path.isdir(options['fits_path']):
+		raise ValueError('Supplied an invalid fits_path value: {0}. The fits_path must be an existing directory.'.format(options['fits_path']))
 	
 	return options
 
@@ -3805,12 +3827,13 @@ if __name__=="__main__":
 			# Fit parameters if the user did not disable the fit flag
 			if options['fit']:
 				package_logger.debug('Flag "fit" was True')
-				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],\
-					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],\
-					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],\
-					   confidence_partition=options['confidence_partition'],\
+				fitter = Fitter(s,time_units=options['time_units'],method=options['method'],
+					   optimizer=options['optimizer'],decisionPolicyKwArgs=options['dpKwargs'],
+					   suffix=options['suffix'],rt_cutoff=options['rt_cutoff'],
+					   confidence_partition=options['confidence_partition'],
 					   high_confidence_mapping_method=options['high_confidence_mapping_method'],
-					   binary_split_method=options['binary_split_method'])
+					   binary_split_method=options['binary_split_method'],
+					   fits_path=options['fits_path'])
 				fname = fitter.get_save_file_name()
 				if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
 					# Set start point and fixed parameters to the user supplied values
@@ -3823,7 +3846,7 @@ if __name__=="__main__":
 						loaded_cmapmeth = options['start_point_from_fit_output']['cmapmeth']
 						fname = Fitter_filename(experiment=s.experiment,method=loaded_method,name=s.get_name(),\
 												session=s.get_session(),optimizer=loaded_optimizer,suffix=loaded_suffix,\
-												confidence_map_method=loaded_cmapmeth)
+												confidence_map_method=loaded_cmapmeth,fits_path=options['fits_path'])
 						package_logger.debug('Will load parameters from file: {0}'.format(fname))
 						fixed_parameters,start_point = prepare_fit_args(fitter,options,fname)
 					else:
@@ -3845,7 +3868,8 @@ if __name__=="__main__":
 				if options['load_plot_handler']:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
 							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix'],
-							confidence_map_method=options['high_confidence_mapping_method']).replace('.pkl','_plot_handler.pkl')
+							confidence_map_method=options['high_confidence_mapping_method'],
+							fits_path=options['fits_path']).replace('.pkl','_plot_handler.pkl')
 					package_logger.debug('Loading Fitter_plot_handler from file={0}'.format(fname))
 					try:
 						f = open(fname,'r')
@@ -3857,7 +3881,8 @@ if __name__=="__main__":
 				else:
 					fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
 							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix'],
-							confidence_map_method=options['high_confidence_mapping_method'])
+							confidence_map_method=options['high_confidence_mapping_method'],
+							fits_path=options['fits_path'])
 					# Try to load the fitted data from file 'fname' or continue to next subject
 					try:
 						package_logger.debug('Attempting to load fitter from file "{0}".'.format(fname))

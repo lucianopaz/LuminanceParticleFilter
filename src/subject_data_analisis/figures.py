@@ -1,7 +1,7 @@
 from __future__ import division
 from __future__ import print_function
 
-import sys, pickle
+import sys, pickle, analysis, utils
 import numpy as np
 import matplotlib as mt
 import matplotlib.gridspec as gridspec
@@ -14,7 +14,6 @@ import data_io_cognition as io_cog
 import cost_time as ct
 import moving_bounds_fits as mo
 import fits_cognition as fits
-import analysis
 from matplotlib import image as mpimg
 from matplotlib.colors import LogNorm
 from fits_cognition import Fitter_plot_handler
@@ -1087,6 +1086,29 @@ def auxiliary_2AFC_stimuli():
 	plt.gca().set_axis_off()
 	plt.savefig('../../figs/2AFC_distractor.png',bbox_inches='tight',dpi=200, transparent=True, pad_inches=0.)
 
+def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
+	fname+=suffix
+	a = analysis.Analyzer()
+	subj,model = a.get_summary_stats_array(normalize={'internal_var':'experiment'})
+	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope']
+	parameter_aliases = {'cost':r'$c$',
+						'internal_var':r'$\sigma^{2}$',
+						'phase_out_prob':r'$p_{po}$',
+						'high_confidence_threshold':r'$C_{H}$',
+						'confidence_map_slope':r'$\alpha$',
+						'dead_time':r'$\tau_{c}$',
+						'dead_time_sigma':r'$\sigma_{c}$'}
+	parameters = np.array([model[par] for par in parameter_names])
+	corrs,pvals = utils.corrcoef(parameters,method='pearson')
+	pvals = analysis.correct_rho_pval(pvals)
+	corrs[pvals>0.05] = np.nan
+	plt.figure(figsize=(8,6))
+	plt.imshow(corrs,aspect='auto',cmap='seismic',interpolation='none',extent=[0,len(corrs),0,len(corrs)],vmin=-1,vmax=1)
+	plt.xticks(np.arange(len(corrs))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=14)
+	plt.yticks(np.arange(len(corrs))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
+	cbar = plt.colorbar()
+	cbar.ax.set_ylabel('Correlation',fontsize=14)
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():
 	script_help = """ figures.py help

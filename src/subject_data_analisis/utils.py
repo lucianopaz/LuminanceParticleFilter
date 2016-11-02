@@ -263,13 +263,18 @@ def corrcoef(a,b=None,axis=0,method='pearson',nanhandling='pairwise'):
 	 b:           Optional input array. If 'b' is None, it is ignored. If
 	              it is not None, 'b' is treated as an additional variable
 	              of the array 'a'.
-	 axis:        Default is 0. axis determines which dimension holds the
-	              data samples. If axis is 0, the rows are assumed to hold
-	              separate data samples, and the columns are assumed to
-	              represent different variables associated to each sample.
-	              If axis is 1, this assumption is transposed. If axis is
-	              None, 'a' and 'b' are flattened before computing the
-	              correlation coeficient.
+	 axis:        Default is 0. The 'axis' input determines which axis
+	              of the supplied arrays holds different variables. If
+	              axis is 0, the different variables are assumed to be
+	              represented as the rows of the array, and the
+	              independent samples are assumed to be in the axis=1
+	              (the columns). If 'axis'=1, the array columns are
+	              assumed to represent different variables and the
+	              independent samples are assumed to be located in the
+	              axis=0 (the rows). If axis is None, 'a' and 'b' are
+	              flattened before computing the correlation coeficient
+	              and each element in 'a' and 'b' are treated as
+	              independent samples.
 	 method:      A string indicating the method that will be used to
 	              compute the correlation. Can be 'pearson', 'spearman'
 	              or 'kendall'. Refer to the functions pearsonr, spearmanr
@@ -289,16 +294,24 @@ def corrcoef(a,b=None,axis=0,method='pearson',nanhandling='pairwise'):
 		a = a.flatten()
 		if not b is None:
 			b = b.flatten()
-		axis=0
+		axis=1
 	if a.ndim>2:
 		raise ValueError("a must be a 1D or 2D numpy array")
 	if not b is None:
 		if b.ndim>2:
 			raise ValueError("b must be None or a 1D or 2D numpy array")
 		if axis==0:
-			a = np.hstack((a,b))
+			if a.ndim==1:
+				a = a[None,:]
+			if b.ndim==1:
+				b = b[None,:]
+			a = np.vstack((a,b))
 		else:
-			a = np.vstack((a,b)).T
+			if a.ndim==1:
+				a = a[:,None]
+			if b.ndim==1:
+				b = b[:,None]
+			a = np.hstack((a,b)).T
 	try:
 		calculator = {'pearson':stats.pearsonr,'spearman':stats.spearmanr,'kendall':stats.kendalltau}[str(method).lower()]
 	except:
@@ -584,131 +597,131 @@ def diptst(x,full_output=False, min_is_0=True, x_is_sorted=False, debug=0):
 		return dip
 
 def dip(x, full_output=False, min_is_0=True, x_is_sorted=False, debug=0):
-    """
-    Hartigan & Hartigan's dip statistic
+	"""
+	Hartigan & Hartigan's dip statistic
 
-    The dip statistic measures multimodality in a sample by the maximum
-    difference, over all sample points, between the empirical distribution
-    function, and the unimodal distribution function that minimizes that
-    maximum difference.
+	The dip statistic measures multimodality in a sample by the maximum
+	difference, over all sample points, between the empirical distribution
+	function, and the unimodal distribution function that minimizes that
+	maximum difference.
 
-    Arguments:
-    -----------
-    x:              [n,] array  containing the input data
+	Arguments:
+	-----------
+	x:              [n,] array  containing the input data
 
-    full_output:    boolean, see below
+	full_output:    boolean, see below
 
-    min_is_0:       boolean, if True the minimum value of the test statistic is
-                    allowed to be zero in cases where n <= 3 or all values in x
-                    are identical.
+	min_is_0:       boolean, if True the minimum value of the test statistic is
+					allowed to be zero in cases where n <= 3 or all values in x
+					are identical.
 
-    x_is_sorted:    boolean, if True x is assumed to already be sorted in
-                    ascending order
+	x_is_sorted:    boolean, if True x is assumed to already be sorted in
+					ascending order
 
-    debug:          int, 0 <= debug <= 3, print debugging messages
+	debug:          int, 0 <= debug <= 3, print debugging messages
 
-    Returns:
-    -----------
-    dip:    double, the dip statistic
+	Returns:
+	-----------
+	dip:    double, the dip statistic
 
-    [res]:  dict, returned if full_output == True. contains the following
-            fields:
+	[res]:  dict, returned if full_output == True. contains the following
+			fields:
 
-            xs:     sorted input data as doubles
-            n:      len(x)
-            dip:    dip statistic
-            lo:     indices of lower end of modal interval
-            hi:     indices of upper end of modal interval
-            xl:     lower end of modal interval
-            xu:     upper end of modal interval
-            gcm:    (last-used) indices of the greatest concave majorant
-            lcm:    (last-used) indices of the least concave majorant
+			xs:     sorted input data as doubles
+			n:      len(x)
+			dip:    dip statistic
+			lo:     indices of lower end of modal interval
+			hi:     indices of upper end of modal interval
+			xl:     lower end of modal interval
+			xu:     upper end of modal interval
+			gcm:    (last-used) indices of the greatest concave majorant
+			lcm:    (last-used) indices of the least concave majorant
 
-    Reference:
-    -----------
-        Hartigan, J. A., & Hartigan, P. M. (1985). The Dip Test of Unimodality.
-        The Annals of Statistics.
-    """
+	Reference:
+	-----------
+		Hartigan, J. A., & Hartigan, P. M. (1985). The Dip Test of Unimodality.
+		The Annals of Statistics.
+	"""
 
-    return diptst(x, full_output=full_output, min_is_0=min_is_0, x_is_sorted=x_is_sorted, debug=debug)
+	return diptst(x, full_output=full_output, min_is_0=min_is_0, x_is_sorted=x_is_sorted, debug=debug)
 
 def diptest(x, min_is_0=True, boot_pval=False, n_boot=2000):
-    """
-    Hartigan & Hartigan's dip test for unimodality.
+	"""
+	Hartigan & Hartigan's dip test for unimodality.
 
-    For X ~ F i.i.d., the null hypothesis is that F is a unimodal distribution.
-    The alternative hypothesis is that F is multimodal (i.e. at least bimodal).
-    Other than unimodality, the dip test does not assume any particular null
-    distribution.
+	For X ~ F i.i.d., the null hypothesis is that F is a unimodal distribution.
+	The alternative hypothesis is that F is multimodal (i.e. at least bimodal).
+	Other than unimodality, the dip test does not assume any particular null
+	distribution.
 
-    Arguments:
-    -----------
-    x:          [n,] array  containing the input data
+	Arguments:
+	-----------
+	x:          [n,] array  containing the input data
 
-    min_is_0:   boolean, see docstring for dip()
+	min_is_0:   boolean, see docstring for dip()
 
-    boot_pval:  if True the p-value is computed using bootstrap samples from a
-                uniform distribution, otherwise it is computed via linear
-                interpolation of the tabulated critical values in dip_crit.txt.
+	boot_pval:  if True the p-value is computed using bootstrap samples from a
+				uniform distribution, otherwise it is computed via linear
+				interpolation of the tabulated critical values in dip_crit.txt.
 
-    n_boot:     if boot_pval=True, this sets the number of bootstrap samples to
-                use for computing the p-value.
+	n_boot:     if boot_pval=True, this sets the number of bootstrap samples to
+				use for computing the p-value.
 
-    Returns:
-    -----------
-    dip:    double, the dip statistic
+	Returns:
+	-----------
+	dip:    double, the dip statistic
 
-    pval:   double, the p-value for the test
+	pval:   double, the p-value for the test
 
-    Reference:
-    -----------
-        Hartigan, J. A., & Hartigan, P. M. (1985). The Dip Test of Unimodality.
-        The Annals of Statistics.
+	Reference:
+	-----------
+		Hartigan, J. A., & Hartigan, P. M. (1985). The Dip Test of Unimodality.
+		The Annals of Statistics.
 
-    """
-    n = x.shape[0]
-    D = dip(x, full_output=False, min_is_0=min_is_0)
+	"""
+	n = x.shape[0]
+	D = dip(x, full_output=False, min_is_0=min_is_0)
 
-    if n <= 3:
-        warnings.warn('Dip test is not valid for n <= 3')
-        pval = 1.0
+	if n <= 3:
+		warnings.warn('Dip test is not valid for n <= 3')
+		pval = 1.0
 
-    elif boot_pval:
+	elif boot_pval:
 
-        # random uniform vectors
-        boot_x = np.random.rand(n_boot, n)
+		# random uniform vectors
+		boot_x = np.random.rand(n_boot, n)
 
-        # faster to pre-sort
-        boot_x.sort(axis=1)
-        boot_D = np.empty(n_boot)
+		# faster to pre-sort
+		boot_x.sort(axis=1)
+		boot_D = np.empty(n_boot)
 
-        for ii in xrange(n_boot):
-            boot_D[ii] = dip(boot_x[ii], full_output=False,
-                             min_is_0=min_is_0, x_is_sorted=True)
+		for ii in xrange(n_boot):
+			boot_D[ii] = dip(boot_x[ii], full_output=False,
+							 min_is_0=min_is_0, x_is_sorted=True)
 
-        pval = np.mean(D <= boot_D)
+		pval = np.mean(D <= boot_D)
 
-    else:
+	else:
 
-        i1 = N.searchsorted(n, side='left')
-        i0 = i1 - 1
+		i1 = N.searchsorted(n, side='left')
+		i0 = i1 - 1
 
-        # if n falls outside the range of tabulated sample sizes, use the
-        # critical values for the nearest tabulated n (i.e. treat them as
-        # 'asymptotic')
-        i0 = max(0, i0)
-        i1 = min(N.shape[0] - 1, i1)
+		# if n falls outside the range of tabulated sample sizes, use the
+		# critical values for the nearest tabulated n (i.e. treat them as
+		# 'asymptotic')
+		i0 = max(0, i0)
+		i1 = min(N.shape[0] - 1, i1)
 
-        # interpolate on sqrt(n)
-        n0, n1 = N[[i0, i1]]
-        fn = float(n - n0) / (n1 - n0)
-        y0 = np.sqrt(n0) * CV[i0]
-        y1 = np.sqrt(n1) * CV[i1]
-        sD = np.sqrt(n) * D
+		# interpolate on sqrt(n)
+		n0, n1 = N[[i0, i1]]
+		fn = float(n - n0) / (n1 - n0)
+		y0 = np.sqrt(n0) * CV[i0]
+		y1 = np.sqrt(n1) * CV[i1]
+		sD = np.sqrt(n) * D
 
-        pval = 1. - np.interp(sD, y0 + fn * (y1 - y0), SIG)
+		pval = 1. - np.interp(sD, y0 + fn * (y1 - y0), SIG)
 
-    return D, pval
+	return D, pval
 
 def linear_least_squares(x,y,covy=None):
 	"""
@@ -732,10 +745,11 @@ def linear_least_squares(x,y,covy=None):
 	
 	Output:
 		par: A 1D array of the fitted parameter values. The first element
-			is the slope and the second element is the intercept of the
+			is the intercept and the second element is the slope of the
 			linear fit.
 		cov: A 2D array with the covariance matrix of the fitted
-			parameter values.
+			parameter values. The order in which they appear is the same
+			as the order of the 'par' array output.
 	
 	"""
 	x = x.flatten(order='K')
@@ -759,3 +773,82 @@ def linear_least_squares(x,y,covy=None):
 	cov = np.linalg.inv(mat.transpose()*covyinv*mat)
 	pars = np.array(cov*mat.transpose()*covyinv*np.matrix(y.reshape((-1,1)))).flatten()
 	return pars,np.array(cov)
+
+def linear_least_squares_prediction(x,par,cov):
+	"""
+	linear_least_squares_prediction(x,par,cov)
+	
+	Get the predicted value and standard deviation for the supplied x,
+	and the linear least squares fitted value and covariance matrix
+	
+	Input:
+		x: A numpy array with the independent variable values where the
+			predicted 'y' value will be computed
+		par: The linear parameters as [float(intercept),float(slope)]
+		cov: The covariance matrix that corresponds to the fitted
+			parameters 'par'
+	
+	Output:
+		y: The predicted value as x*slope+intercept
+		sy: The standard deviation as sqrt(cov[1,1]*x**2+2*cov[0,1]*x+cov[0,0])
+	
+	"""
+	y = par[0]+par[1]*x
+	sy = np.sqrt((cov[1,1]*x+2*cov[0,1])*x+cov[0,0])
+	return y,sy
+
+def maximize_figure(fig=None):
+	import matplotlib as mt
+	from matplotlib import pyplot as plt
+	backend = mt.get_backend().lower()
+	current_figure = plt.gcf()
+	if fig is None:
+		fig = current_figure
+	# Change the current figure to the one to be maximized
+	plt.figure(fig.number)
+	manager = plt.get_current_fig_manager()
+	if backend in ['tkagg']:
+		manager.window.state('zoomed')
+	elif backend in ['wx','wxagg']:
+		manager.frame.Maximize(True)
+	elif backend in ['qt4agg','qt5agg']:
+		manager.window.showMaximized()
+	elif backend in ['gtkagg','gtk3agg','gtk','gtkcairo','gtk3cairo']:
+		manager.window.gtk_window_maximize()
+	elif backend=='macosx':
+		plt.figure(current_figure.number)
+		raise NotImplemented("Support for macosx backend is not implemented yet")
+	# Revert the current figure to the one prior to the call to maximize_figure
+	plt.figure(current_figure.number)
+
+def stats_battery():
+	stats.chisquare
+	stats.contingency.chi2_contingency
+	stats.contingency.power_divergence
+	stats.contingency.expected_freq
+	stats.entropy
+	stats.fisher_exact
+	stats.friedmanchisquare
+	stats.jarque_bera
+	stats.ks_2samp
+	stats.kstest
+	stats.kruskal
+	stats.kurtosistest
+	stats.levene
+	stats.linregress
+	stats.mannwhitneyu
+	stats.mood
+	stats.morestats.bartlett
+	stats.wilcoxon
+	stats.skewtest
+	stats.normaltest
+	stats.pearsonr
+	stats.spearmanr
+	stats.ttest_1samp
+	stats.ttest_ind
+	stats.ttest_rel
+	
+	
+	
+	
+	

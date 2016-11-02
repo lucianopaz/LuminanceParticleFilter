@@ -1288,7 +1288,130 @@ class Analyzer():
 		
 		"""
 		return self.spanner(branchsamples)
-
+	
+	def parameter_correlation(self,used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x)):
+		"""
+		self.parameter_correlation(used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x))
+		
+		Compute the correlation matrix between parameters from the
+		parameter values for each experiment, session and subject name.
+		
+		Input:
+			used_parameters: A list with the parameters that will be
+				used to compute the correlations.
+			method: The method used to compute the correlation matrix.
+				Refer to utils.corrcoef for more information.
+			nanhandling: The nan handling policy used to compute the
+				correlation matrix. Refer to utils.corrcoef for more
+				information.
+			correct_multiple_comparison_pvalues: A bool. If True, the
+				pvalues are corrected for multiple comparisons using the
+				Holm-Bonferroni method. If it is False, no correction is
+				applied.
+			normalize: None or a dict that indicates if and how the
+				parameter values should be normalized. Refer to
+				self.get_summary_stats_array for more information.
+			normalization_function: A callable that is used to normalize
+				the parameter values. Refer to
+				self.get_summary_stats_array for more information.
+		
+		Output:
+			corrs: A 2D numpy array that holds the correlation values.
+				These range from -1 to 1, where 1 indicates full positive
+				correlation, -1 indicates full negative correlation and
+				0 indicates no correlation. The order in which
+				parameters appear in the supplied 'used_parameters'
+				controls the order in which they appear in the corrs and
+				pvals arrays.
+			pvals: A 2D numpy array that holds the correlation statistic's
+				p-value. Typically, p-values below 0.05 are considered
+				indicative of significant correlation.
+		
+		"""
+		subj,model = a.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		parameters = np.array([model[par] for par in used_parameters])
+		corrs,pvals = utils.corrcoef(parameters,method=method,nanhandling=nanhandling)
+		if correct_multiple_comparison_pvalues:
+			pvals = correct_rho_pval(pvals)
+		return corrs,pvals
+	
+	def correlate_parameters_with_stats(self,used_statistics=['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index'],
+							  used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x)):
+		"""
+		self.parameter_correlation(used_statistics=['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index'],
+							  used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x))
+		
+		Compute the correlation matrix between parameters from the
+		parameter values for each experiment, session and subject name.
+		
+		Input:
+			used_statistics: A list with the subject summary statistics
+				that will be correlated with the used_parameters.
+			used_parameters: A list with the parameters that will be
+				used to compute the correlations.
+			method: The method used to compute the correlation matrix.
+				Refer to utils.corrcoef for more information.
+			nanhandling: The nan handling policy used to compute the
+				correlation matrix. Refer to utils.corrcoef for more
+				information.
+			correct_multiple_comparison_pvalues: A bool. If True, the
+				pvalues are corrected for multiple comparisons using the
+				Holm-Bonferroni method. If it is False, no correction is
+				applied.
+			normalize: None or a dict that indicates if and how the
+				parameter values should be normalized. Refer to
+				self.get_summary_stats_array for more information.
+			normalization_function: A callable that is used to normalize
+				the parameter values. Refer to
+				self.get_summary_stats_array for more information.
+		
+		Output:
+			corrs: A 2D numpy array that holds the correlation values.
+				These range from -1 to 1, where 1 indicates full positive
+				correlation, -1 indicates full negative correlation and
+				0 indicates no correlation. The axis=0 indices (rows)
+				correspond to different subject statistics and the axis=1
+				(columns) correspond to the different used parameters.
+				The order in which stats and parameters appear in the
+				supplied 'used_statistics' and 'used_parameters' controls
+				the order in which they appear in the corrs and pvals
+				arrays.
+			pvals: A 2D numpy array that holds the correlation statistic's
+				p-value. Typically, p-values below 0.05 are considered
+				indicative of significant correlation.
+		
+		"""
+		subj,model = a.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		subj_stats = np.array([subj[s] for s in used_statistics])
+		parameters = np.array([model[par] for par in used_parameters])
+		corrs = []
+		pvals = []
+		for subj_stat in subj_stats:
+			corr,pval = utils.corrcoef(subj_stat,parameters,method=method,nanhandling=nanhandling)
+			corrs.extend(corr[0,1:])
+			pvals.extend(pval[0,1:])
+		corrs = np.array(corrs)
+		pvals = np.array(pvals)
+		if correct_multiple_comparison_pvalues:
+			pvals = utils.holm_bonferroni(pvals)
+		return corrs,pvals
+	
 def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(**analyzer_kwargs)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
@@ -1347,8 +1470,8 @@ def parameter_correlation(analyzer_kwargs={}):
 	c1s = []
 	c2s = []
 	used_parameter_names_dict = {\
-			'all': copy.copy(parameter_names),\
-			#~ 'all': ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],\
+			#~ 'all': ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope','dead_time','dead_time_sigma'],\
+			'all': ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],\
 			'decision': ['cost','internal_var','phase_out_prob'],\
 			'confidence': ['high_confidence_threshold','confidence_map_slope']}
 	for i,used_parameters in enumerate(['all','decision','confidence']):
@@ -1361,7 +1484,7 @@ def parameter_correlation(analyzer_kwargs={}):
 		c1,pval1 = utils.corrcoef(p1,method='pearson')
 		#~ np.fill_diagonal(c1, np.nan)
 		#~ np.fill_diagonal(pval1, np.nan)
-		correct_rho_pval(pval1)
+		pval1 = correct_rho_pval(pval1)
 		c1[pval1>0.05] = np.nan
 		c1s.append(c1)
 		
@@ -1370,7 +1493,7 @@ def parameter_correlation(analyzer_kwargs={}):
 		c2,pval2 = utils.corrcoef(p2,method='pearson')
 		#~ np.fill_diagonal(c2, np.nan)
 		#~ np.fill_diagonal(pval2, np.nan)
-		correct_rho_pval(pval2)
+		pval2 = correct_rho_pval(pval2)
 		c2[pval2>0.05] = np.nan
 		c2s.append(c2)
 		
@@ -1414,17 +1537,20 @@ def parameter_correlation(analyzer_kwargs={}):
 	plt.show(True)
 
 def correct_rho_pval(pvals):
+	out = np.empty_like(pvals)
+	out[:,:] = pvals[:,:]
 	ps = []
 	for rowind,row in enumerate(pvals):
-		for pval in pvals[rowind+1:]:
+		for pval in row[rowind+1:]:
 			ps.append(pval)
 	ps = utils.holm_bonferroni(np.array(ps))
 	counter = 0
 	for j,pj in enumerate(pvals):
 		for k,pk in enumerate(pvals[j+1:]):
-			pvals[j,j+k+1] = ps[counter]
-			pvals[j+k+1,j] = ps[counter]
+			out[j,j+k+1] = ps[counter]
+			out[j+k+1,j] = ps[counter]
 			counter+=1
+	return out
 
 def binary_confidence_analysis(analyzer_kwargs={}):
 	a = Analyzer(**analyzer_kwargs)
@@ -1594,90 +1720,72 @@ def correlation_analysis(analyzer_kwargs={}):
 													  #~ 'dead_time':'all',\
 													  #~ 'dead_time_sigma':'all',\
 													  #~ 'phase_out_prob':'all'})
-	print(model['hit_rt_mean']-model['miss_rt_mean'])
-	return
 	
 	ue,c = np.unique(model['experiment'],return_inverse=True)
 	
+	parameter_names = ['cost','internal_var','phase_out_prob','dead_time','dead_time_sigma','high_confidence_threshold','confidence_map_slope']
+	parameter_aliases = {'cost':r'$c$',
+						'internal_var':r'$\sigma^{2}$',
+						'phase_out_prob':r'$p_{po}$',
+						'high_confidence_threshold':r'$C_{H}$',
+						'confidence_map_slope':r'$\alpha$',
+						'dead_time':r'$\tau_{c}$',
+						'dead_time_sigma':r'$\sigma_{c}$'}
 	# Correlation between parameters and mean confidence
 	plt.figure()
-	plt.subplot(231)
-	plt.scatter(model['high_confidence_threshold'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$C_{H}$')
-	plt.ylabel('Mean Confidence')
-	plt.subplot(232)
-	plt.scatter(model['confidence_map_slope'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$\alpha$')
-	plt.subplot(233)
-	plt.scatter(model['cost'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$c(t)$')
-	plt.subplot(245)
-	plt.scatter(model['phase_out_prob'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$p_{po}$')
-	plt.ylabel('Mean Confidence')
-	plt.subplot(246)
-	plt.scatter(model['internal_var'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$\sigma$')
-	plt.subplot(247)
-	plt.scatter(model['dead_time'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$\tau_{c}$')
-	plt.subplot(248)
-	plt.scatter(model['dead_time_sigma'],subj['confidence_mean'],c=c)
-	plt.xlabel(r'$\sigma_{c}$')
+	axs = {'cost':plt.subplot(231),
+			'internal_var':plt.subplot(232),
+			'phase_out_prob':plt.subplot(233),
+			'high_confidence_threshold':plt.subplot(245),
+			'confidence_map_slope':plt.subplot(246),
+			'dead_time':plt.subplot(247),
+			'dead_time_sigma':plt.subplot(248)}
+	ylabels = {'cost':'Mean confidence',
+			'internal_var':'',
+			'phase_out_prob':'',
+			'high_confidence_threshold':'Mean confidence',
+			'confidence_map_slope':'',
+			'dead_time':'',
+			'dead_time_sigma':''}
+	for par in parameter_names:
+		ax = axs[par]
+		ax.scatter(model[par],subj['confidence_mean'],c=c)
+		ax.set_xlabel(parameter_aliases[par])
+		ax.set_ylabel(ylabels[par])
 	plt.suptitle('Correlation between parameters and mean confidence')
 	
 	# Correlation between parameters and mean RT
 	plt.figure()
-	plt.subplot(231)
-	plt.scatter(model['high_confidence_threshold'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$C_{H}$')
-	plt.ylabel('Mean RT')
-	plt.subplot(232)
-	plt.scatter(model['confidence_map_slope'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$\alpha$')
-	plt.subplot(233)
-	plt.scatter(model['cost'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$c(t)$')
-	plt.subplot(245)
-	plt.scatter(model['phase_out_prob'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$p_{po}$')
-	plt.ylabel('Mean RT')
-	plt.subplot(246)
-	plt.scatter(model['internal_var'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$\sigma$')
-	plt.subplot(247)
-	plt.scatter(model['dead_time'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$\tau_{c}$')
-	plt.subplot(248)
-	plt.scatter(model['dead_time_sigma'],subj['rt_mean'],c=c)
-	plt.xlabel(r'$\sigma_{c}$')
+	axs = {'cost':plt.subplot(231),
+			'internal_var':plt.subplot(232),
+			'phase_out_prob':plt.subplot(233),
+			'high_confidence_threshold':plt.subplot(245),
+			'confidence_map_slope':plt.subplot(246),
+			'dead_time':plt.subplot(247),
+			'dead_time_sigma':plt.subplot(248)}
+	ylabels['cost'] = ylabels['high_confidence_threshold'] = 'Mean RT'
+	for par in parameter_names:
+		ax = axs[par]
+		ax.scatter(model[par],subj['rt_mean'],c=c)
+		ax.set_xlabel(parameter_aliases[par])
+		ax.set_ylabel(ylabels[par])
 	plt.suptitle('Correlation between parameters and mean RT')
 	
 	# Correlation between parameters and mean performance
 	plt.figure()
-	plt.subplot(231)
-	plt.scatter(model['high_confidence_threshold'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$C_{H}$')
-	plt.ylabel('Mean performance')
-	plt.subplot(232)
-	plt.scatter(model['confidence_map_slope'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$\alpha$')
-	plt.subplot(233)
-	plt.scatter(model['cost'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$c(t)$')
-	plt.subplot(245)
-	plt.scatter(model['phase_out_prob'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$p_{po}$')
-	plt.ylabel('Mean performance')
-	plt.subplot(246)
-	plt.scatter(model['internal_var'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$\sigma$')
-	plt.subplot(247)
-	plt.scatter(model['dead_time'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$\tau_{c}$')
-	plt.subplot(248)
-	plt.scatter(model['dead_time_sigma'],subj['performance_mean'],c=c)
-	plt.xlabel(r'$\sigma_{c}$')
+	axs = {'cost':plt.subplot(231),
+			'internal_var':plt.subplot(232),
+			'phase_out_prob':plt.subplot(233),
+			'high_confidence_threshold':plt.subplot(245),
+			'confidence_map_slope':plt.subplot(246),
+			'dead_time':plt.subplot(247),
+			'dead_time_sigma':plt.subplot(248)}
+	ylabels['cost'] = ylabels['high_confidence_threshold'] = 'Mean performance'
+	for par in parameter_names:
+		ax = axs[par]
+		ax.scatter(model[par],subj['performance_mean'],c=c)
+		ax.set_xlabel(parameter_aliases[par])
+		ax.set_ylabel(ylabels[par])
 	plt.suptitle('Correlation between parameters and mean performance')
 	
 	from scipy.stats import linregress, ttest_rel, ttest_ind, ttest_1samp
@@ -1703,22 +1811,11 @@ def correlation_analysis(analyzer_kwargs={}):
 			color = plt.get_cmap('jet')(float(i)/float(len(ue)-1))
 			inds = c==i
 			label = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}[str(exp).strip('\x00')]
-			try:
-				ax.errorbar(model[key+'_mean'][inds],subj[key+'_mean'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
-			except:
-				ax.errorbar(model[key][inds],subj[key+'_mean'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
-		try:
-			slope,intercept,rvalue,_,stder = linregress(model[key+'_mean'],subj[key+'_mean'])
-			par,cov = linear_least_squares(model[key+'_mean'],subj[key+'_mean'],subj[key+'_std'])
-			tvalue,pvalue = ttest_1samp(subj[key+'_mean']-model[key+'_mean'],0.)
-		except:
-			slope,intercept,rvalue,_,stder = linregress(model[key],subj[key+'_mean'])
-			par,cov = linear_least_squares(model[key],subj[key+'_mean'],subj[key+'_std'])
-			tvalue,pvalue = ttest_1samp(subj[key+'_mean']-model[key],0.)
-		print(par,np.diag(cov)**0.5)
+			ax.errorbar(model[key+'_mean'][inds],subj[key+'_mean'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
+		slope,intercept,rvalue,_,stder = linregress(model[key+'_mean'],subj[key+'_mean'])
+		par,cov = utils.linear_least_squares(model[key+'_mean'],subj[key+'_mean'],subj[key+'_std'])
+		tvalue,pvalue = ttest_1samp(subj[key+'_mean']-model[key+'_mean'],0.)
 		title = titles[key]
-		if key=='performance':
-			ax.legend(loc='best', fancybox=True, framealpha=0.5)
 		#~ if pvalue<0.05:
 			#~ title+=' *'
 			#~ if pvalue<0.005:
@@ -1733,27 +1830,33 @@ def correlation_analysis(analyzer_kwargs={}):
 		xlim[0] = min([xlim[0],ylim[0]])
 		xlim[1] = max([xlim[1],ylim[1]])
 		ylim = xlim
-		ax.plot(xlim,intercept+slope*xlim,color='gray')
-		ax.plot(xlim,xlim,color='k')
+		xlsq = np.linspace(xlim[0],xlim[1],1000)
+		ylsq,sylsq = utils.linear_least_squares_prediction(xlsq,par,cov)
+		ax.plot(xlsq,ylsq,color='gray',linewidth=2)
+		ax.fill_between(xlsq,ylsq-2*sylsq,ylsq+2*sylsq,facecolor='gray',alpha=0.4,interpolate=True)
+		ax.plot(xlim,xlim,color='k',linewidth=2)
 		ax.set_xlim(xlim)
 		ax.set_ylim(ylim)
+		if key=='rt':
+			ax.legend(loc='best', fancybox=True, framealpha=0.5)
 	plt.figure(f.number)
-	plt.suptitle('Agreement between data means and fit')
+	utils.maximize_figure()
+	plt.suptitle('Agreement between data means and fit',fontsize=18)
 	
 	# Agreement between data medians and fit
 	plt.figure()
-	axs = {'rt':plt.subplot(231),'confidence':plt.subplot(232),
-		   'hit_rt':plt.subplot(233),'miss_rt':plt.subplot(234),
-		   'hit_confidence':plt.subplot(235),'miss_confidence':plt.subplot(236)}
+	axs = {'rt':plt.subplot(221),'confidence':plt.subplot(222),
+		   'hit_rt':plt.subplot(245),'miss_rt':plt.subplot(246),
+		   'hit_confidence':plt.subplot(247),'miss_confidence':plt.subplot(248)}
 	titles = {'rt':'Median RT','confidence':'Median confidence',
 			  'hit_rt':'Median RT for hits','miss_rt':'Median RT for misses',
 			  'hit_confidence':'Median conf for hits',
 			  'miss_confidence':'Median conf for misses'}
 	ylabels = {'rt':'Subject data','confidence':'',
-			   'hit_rt':'','miss_rt':'Subject data',
+			   'hit_rt':'Subject data','miss_rt':'',
 			   'hit_confidence':'','miss_confidence':''}
 	xlabels = {'rt':'','confidence':'',
-			   'hit_rt':'','miss_rt':'Model data',
+			   'hit_rt':'Model data','miss_rt':'Model data',
 			   'hit_confidence':'Model data','miss_confidence':'Model data'}
 	for key in axs.keys():
 		ax = axs[key]
@@ -1762,13 +1865,12 @@ def correlation_analysis(analyzer_kwargs={}):
 			inds = c==i
 			label = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}[str(exp).strip('\x00')]
 			ax.errorbar(model[key+'_median'][inds],subj[key+'_median'][inds],subj[key+'_std'][inds],linestyle='',marker='o',color=color,label=label)
-		slope,intercept,rvalue,_,stder = linregress(model[key+'_median'],subj[key+'_median'])
-		par,cov = linear_least_squares(model[key+'_median'],subj[key+'_median'],subj[key+'_std'])
+		#~ slope,intercept,rvalue,_,stder = linregress(model[key+'_median'],subj[key+'_median'])
+		par,cov = utils.linear_least_squares(model[key+'_median'],subj[key+'_median'],subj[key+'_std'])
 		tvalue,pvalue = ttest_1samp(subj[key+'_median']-model[key+'_median'],0.)
 		#~ print(key,np.mean(subj[key+'_median']-model[key+'_median']),tvalue,pvalue)
-		print(par,np.diag(cov)**0.5)
 		title = titles[key]
-		if key=='hit_rt':
+		if key=='rt':
 			ax.legend(loc='best', fancybox=True, framealpha=0.5)
 		#~ if pvalue<0.05:
 			#~ title+=' *'
@@ -1784,19 +1886,75 @@ def correlation_analysis(analyzer_kwargs={}):
 		xlim[0] = min([xlim[0],ylim[0]])
 		xlim[1] = max([xlim[1],ylim[1]])
 		ylim = xlim
-		ax.plot(xlim,intercept+slope*xlim,color='gray')
-		ax.plot(xlim,xlim,color='k')
+		xlsq = np.linspace(xlim[0],xlim[1],1000)
+		ylsq,sylsq = utils.linear_least_squares_prediction(xlsq,par,cov)
+		ax.plot(xlsq,ylsq,color='gray',linewidth=2)
+		ax.fill_between(xlsq,ylsq-2*sylsq,ylsq+2*sylsq,facecolor='gray',alpha=0.4,interpolate=True)
+		ax.plot(xlim,xlim,color='k',linewidth=2)
 		ax.set_xlim(xlim)
 		ax.set_ylim(ylim)
-	plt.suptitle('Agreement between data medians and fit')
+	utils.maximize_figure()
+	plt.suptitle('Agreement between data medians and fit',fontsize=18)
 	
+	# Correlation between parameters and: mean RT, performance, mean confidence, AUC and multi mod index
+	studied_parameters = [par for par in parameter_names if par not in ['dead_time','dead_time_sigma']]
+	parameters = np.array([model[par] for par in studied_parameters])
+	group_width = 0.9
+	bar_width = group_width/5
+	bar_pos = np.arange(parameters.shape[0])
+	group_center = bar_pos+0.5*group_width
+	plt.figure()
+	colors = ['r','g','b','y','m']
+	studied_stats = ['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index']
+	stat_aliases = {'rt_mean':'Mean RT','performance_mean':'Performance',
+					'confidence_mean':'Mean Confidence',
+					'auc':'AUC','multi_mod_index':"Hartigan's DIP"}
+	bars = []
+	pvals = []
+	signs = []
+	ax1 = plt.subplot(211)
+	ax2 = plt.subplot(212)
+	for i,stat in enumerate(studied_stats):
+		corr,pval = utils.corrcoef(subj[stat],parameters)
+		corr = corr[0,1:]
+		pval = pval[0,1:]
+		pvals.append(pval)
+		bars.append(ax1.bar(bar_pos+i*bar_width,np.abs(corr),bar_width,color=colors[i]))
+		ax2.bar(bar_pos+i*bar_width,corr,bar_width,color=colors[i])
+		signs.append(np.sign(corr))
+	pvals = np.array(pvals)
+	sh = pvals.shape
+	pvals = utils.holm_bonferroni(pvals.reshape((-1))).reshape(sh)
+	for rects,pval,sign in zip(bars,pvals,signs):
+		for rect,p,si in zip(rects,pval,sign):
+			significance_mark = ''
+			if p<0.05:
+				significance_mark+='*'
+				if p<0.005:
+					significance_mark+='*'
+					if p<0.0005:
+						significance_mark+='*'
+			height = rect.get_height()
+			x = rect.get_x() + rect.get_width()/2.
+			ax1.text(rect.get_x() + rect.get_width()/2., height, significance_mark,ha='center', va='bottom')
+			ax2.text(rect.get_x() + rect.get_width()/2., height*si, significance_mark,ha='center', va='bottom' if si>=0 else 'top')
+	ax1.set_xticks(group_center)
+	ax2.set_xticks(group_center)
+	ax1.set_xticklabels([parameter_aliases[par] for par in studied_parameters],fontsize=16)
+	ax2.set_xticklabels([parameter_aliases[par] for par in studied_parameters],fontsize=16)
+	ax1.set_ylabel('Absolute correlation')
+	ax2.set_ylabel('Correlation')
+	ax1.legend([r[0] for r in bars],[stat_aliases[stat] for stat in studied_stats],loc='best', fancybox=True, framealpha=0.5)
+	ax2.plot(ax2.get_xlim(),[0,0],'k')
+	utils.maximize_figure()
 	plt.show(True)
 
 def test():
-	correlation_analysis()
+	parameter_correlation()
+	#~ correlation_analysis()
 	return
 	#~ parameter_correlation()
-	return
+	#~ return
 	#~ binary_confidence_analysis()
 	
 	a = Analyzer()
