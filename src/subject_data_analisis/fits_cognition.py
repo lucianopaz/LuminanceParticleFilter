@@ -3471,12 +3471,16 @@ def parse_input():
  '-f' or '--start_point_from_fit_output': A flag that tells the script to set the unspecified start_points
                        equal to the results of a previously saved fitting round. After the flag
                        the user must pass a dictionary of the form:
-                       '{"method":"value","optimizer":"value","suffix":"value"}' where the values
-                       must be the corresponding method, optimizer and suffix used by the
+                       '{"method":"value","optimizer":"value","suffix":"value","cmapmeth":"value"}'
+                       where the values must be the corresponding method, optimizer,
+                       suffix and high_confidence_mapping_method used by the
                        previous fitting round. The script will then try to load the fitted parameters
                        from the file:
-                       fits_cognition/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl
-                       where the experiment, name and session are taken from the subjectSession that
+                       {fits_path}/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}{suffix}.pkl
+                       or {fits_path}/{experiment}_fit_{method}_subject_{name}_session_{session}_{optimizer}_cmapmeth_{cmapmeth}{suffix}.pkl
+                       depending on the cmapmeth value. The fits_path value will
+                       be the one supplied with the option --fits_path.
+                       The experiment, name and session are taken from the subjectSession that
                        is currently being fitted, and the method, optimizer and suffix are the
                        values passed in the previously mentioned dictionary.
   

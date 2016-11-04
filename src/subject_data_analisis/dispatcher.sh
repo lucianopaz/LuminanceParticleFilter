@@ -57,13 +57,6 @@ echo "python fits_cognition.py -t $task -nt $ntasks -m $method -e $experiment \
 --binary_split_method $binary_split_method \
 --fixed_parameters $fixed_parameters \
 --optimizer_kwargs $optimizer_kwargs \
---start_point_from_fit_output $start_point_from_fit_output"
-
-#~ '-t' or '--task': Integer that identifies the task number when running multiple tasks
-                   #~ in parallel. By default it is one based but this behavior can be
-                   #~ changed with the option --task_base. [Default 1]
- #~ '-nt' or '--ntasks': Integer that identifies the number tasks working in parallel [Default 1]
- #~ '--save_plot_handler': This flag takes no value. If present, the plot_handler is saved.
- #~ '-v' or '--verbose': Activates info messages (by default only warnings and errors
-                      #~ are printed). 
+--start_point_from_fit_output $start_point_from_fit_output \
+--save_plot_handler -v"
 exit 0
