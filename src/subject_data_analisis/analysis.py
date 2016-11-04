@@ -1336,7 +1336,7 @@ class Analyzer():
 				indicative of significant correlation.
 		
 		"""
-		subj,model = a.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		subj,model = self.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
 		parameters = np.array([model[par] for par in used_parameters])
 		corrs,pvals = utils.corrcoef(parameters,method=method,nanhandling=nanhandling)
 		if correct_multiple_comparison_pvalues:
@@ -1397,7 +1397,7 @@ class Analyzer():
 				indicative of significant correlation.
 		
 		"""
-		subj,model = a.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		subj,model = self.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
 		subj_stats = np.array([subj[s] for s in used_statistics])
 		parameters = np.array([model[par] for par in used_parameters])
 		corrs = []
@@ -1410,7 +1410,7 @@ class Analyzer():
 		pvals = np.array(pvals)
 		if correct_multiple_comparison_pvalues:
 			pvals = utils.holm_bonferroni(pvals)
-		return corrs,pvals
+		return corrs.reshape((len(used_statistics),len(used_parameters))),pvals.reshape((len(used_statistics),len(used_parameters)))
 	
 def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(**analyzer_kwargs)

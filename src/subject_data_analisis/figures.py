@@ -28,6 +28,49 @@ def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalig
 				verticalalignment=verticalalignment, horizontalalignment=horizontalalignment,
 				**kwargs)
 
+def grouped_bar_plot(values,ax=None,ebars=None,annotations=None,colors=None,
+					group_width=0.9,group_member_names=None,group_names=None,
+					barkwargs={},ebarkwargs={},annotkwargs={},colormap='rainbow'):
+	nmembers,ngroups = values.shape
+	bar_width = group_width/nmembers
+	bar_pos = np.arange(ngroups)
+	group_center = bar_pos+0.5*group_width
+	if colors is None:
+		if isinstance(colormap,str):
+			colormap = plt.get_cmap(colormap)
+		colors = [colormap(x) for x in np.linspace(0,1,ngroups)]
+	all_positive_values = np.all(values>=0)
+	all_bars = []
+	all_ebars = []
+	all_texts = []
+	if ax is None:
+		ax = plt.gca()
+	for i,vals in enumerate(values):
+		all_bars.append(ax.bar(bar_pos+i*bar_width,vals,bar_width,color=colors[i],**barkwargs))
+		heights = vals
+		if not ebars is None:
+			all_ebars.append(ax.errorbar(bar_pos+(i+0.5)*bar_width,vals,ebars[i],color=colors[i],marker='',linestyle='',**ebarkwargs))
+			heights+= (ebars[i]*np.sign(vals))
+		if not annotations is None:
+			texts = []
+			for j,ann in enumerate(annotations[i]):
+				texts.append(ax.text(bar_pos[j]+(i+0.5)*bar_width,heights[j],ann, ha='center', va='bottom' if heights[j]>=0 else 'top',**annotkwargs))
+			all_texts.append(texts)
+	ax.set_xticks(group_center)
+	if group_names:
+		ax.set_xticklabels(group_names)
+	else:
+		ax.set_xticklabels(np.arange(ngroups)+1)
+	if group_member_names:
+		ax.legend([r[0] for r in all_bars],group_member_names,loc='best', fancybox=True, framealpha=0.5)
+	if not all_positive_values:
+		ax.plot(ax.get_xlim(),[0,0],'k')
+	else:
+		ylim = ax.get_ylim()
+		ax.set_ylim([0,ylim[1]])
+	
+	return all_bars,all_ebars,all_texts
+
 def value_and_bounds_sketch(fname='value_and_bounds_sketch',suffix='.svg'):
 	fname+=suffix
 	mo.set_time_units('seconds')
@@ -1089,8 +1132,8 @@ def auxiliary_2AFC_stimuli():
 def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 	fname+=suffix
 	a = analysis.Analyzer()
-	subj,model = a.get_summary_stats_array(normalize={'internal_var':'experiment'})
 	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope']
+	stats_names = ['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index']
 	parameter_aliases = {'cost':r'$c$',
 						'internal_var':r'$\sigma^{2}$',
 						'phase_out_prob':r'$p_{po}$',
@@ -1098,17 +1141,43 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 						'confidence_map_slope':r'$\alpha$',
 						'dead_time':r'$\tau_{c}$',
 						'dead_time_sigma':r'$\sigma_{c}$'}
-	parameters = np.array([model[par] for par in parameter_names])
-	corrs,pvals = utils.corrcoef(parameters,method='pearson')
-	pvals = analysis.correct_rho_pval(pvals)
-	corrs[pvals>0.05] = np.nan
-	plt.figure(figsize=(8,6))
-	plt.imshow(corrs,aspect='auto',cmap='seismic',interpolation='none',extent=[0,len(corrs),0,len(corrs)],vmin=-1,vmax=1)
-	plt.xticks(np.arange(len(corrs))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=14)
-	plt.yticks(np.arange(len(corrs))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
+	stats_aliases = {'rt_mean':'Mean RT',
+					'performance_mean':'Performance',
+					'confidence_mean':'Mean Confidence',
+					'auc':'AUC',
+					'multi_mod_index':"Hartigan's dip"}
+	method = 'spearman'
+	corrs1,pvals1 = a.parameter_correlation(parameter_names,method=method,correct_multiple_comparison_pvalues=True)
+	corrs2,pvals2 = a.correlate_parameters_with_stats(stats_names,parameter_names,method=method,correct_multiple_comparison_pvalues=True)
+	corrs1[pvals1>0.05] = np.nan
+	annotations = []
+	for pval in pvals2:
+		t = []
+		for p in pval:
+			mark = ''
+			if p<0.05:
+				mark+= '*'
+				if p<0.005:
+					mark+= '*'
+					if p<0.0005:
+						mark+= '*'
+			t.append(mark)
+		annotations.append(t)
+	plt.figure(figsize=(14,8))
+	ax2 = plt.subplot(121)
+	grouped_bar_plot(corrs2,ax=ax2,annotations=annotations,#colors=['r','g','b','y','m'],
+					group_member_names=[stats_aliases[s] for s in stats_names],
+					group_names=[parameter_aliases[p] for p in parameter_names])
+	[tick.label.set_fontsize(16) for tick in ax2.xaxis.get_major_ticks()]
+	plt.ylabel('Correlation')
+	plt.subplot(122)
+	plt.imshow(corrs1,aspect='auto',cmap='seismic',interpolation='none',extent=[0,len(corrs1),0,len(corrs1)],vmin=-1,vmax=1)
+	plt.xticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=14)
+	plt.yticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
 	cbar = plt.colorbar()
 	cbar.ax.set_ylabel('Correlation',fontsize=14)
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	plt.show(True)
+	#~ plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():
 	script_help = """ figures.py help
@@ -1131,6 +1200,7 @@ def parse_input():
  '--cluster_hierarchy'
  '--confidence_mapping'
  '--fits_cognition'
+ '--parameter_correlation'
  
  '--show': Show the matplotlib figures after all have been created
  '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
@@ -1138,8 +1208,9 @@ def parse_input():
 	options =  {'bounds_vs_cost':False,'rt_fit':False,'value_and_bounds_sketch':False,
 				'confidence_sketch':False,'decision_rt_sketch':False,'bounds_vs_T_n_dt_sketch':False,
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
-				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,\
-				'confidence_mapping':False,'fits_cognition':False,'binary_confidence':False}
+				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,
+				'confidence_mapping':False,'fits_cognition':False,'binary_confidence':False,
+				'parameter_correlation':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -1163,6 +1234,7 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
+	parameter_correlation()
 	opts = parse_input()
 	for k in opts.keys():
 		if k not in ['suffix','show'] and opts[k]:
