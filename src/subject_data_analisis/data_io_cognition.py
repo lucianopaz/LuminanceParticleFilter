@@ -2,11 +2,13 @@
 #-*- coding: UTF-8 -*-
 """ Package for loading the behavioral dataset """
 
-from __future__ import division
-from __future__ import print_function
+from __future__ import division, print_function, absolute_import, unicode_literals
+
 import numpy as np
 from scipy import io as io
-import os, itertools, sys, random, re, scipy.integrate
+import os, itertools, sys, random, re, scipy.integrate, logging
+
+package_logger = logging.getLogger("data_io_cognition")
 
 class SubjectSession:
 	def __init__(self,name,session,experiment,data_dir):
@@ -40,13 +42,20 @@ class SubjectSession:
 				also be a list of the same len.
 		
 		"""
+		package_logger.debug('Creating SubjectSession instance')
+		self.logger = logging.getLogger("data_io_cognition.SubjectSession")
+		self.logger.debug('Inputs name:{name}, session: {session}, experiment: {experiment}, data_dir: {data_dir}'.format(
+						name=name,session=session,experiment=experiment,data_dir=data_dir))
 		try:
 			self.session = int(session)
 			self._single_session = True
 		except:
 			self.session = [int(s) for s in session]
 			self._single_session = False
+		self.logger.debug('Is single session? {0}'.format(self._single_session))
+		self.logger.debug("Instance's session: {0}".format(self.session))
 		self.experiment = str(experiment)
+		self.logger.debug("Instance's experiment: {0}".format(self.experiment))
 		if isinstance(data_dir,list):
 			self.name = [str(n) for n in name]
 			self.data_dir = [str(d) for d in data_dir]
@@ -63,6 +72,10 @@ class SubjectSession:
 			self.data_dir = str(data_dir)
 			self._map_data_dir_name = {self.data_dir:self.name}
 			self._single_data_dir = True
+		self.logger.debug('Is single data_dir? {0}'.format(self._single_data_dir))
+		self.logger.debug("Instance's name: {0}".format(self.name))
+		self.logger.debug("Instance's data_dir: {0}".format(self.data_dir))
+		self.logger.debug("Instance's _map_data_dir_name: {0}".format(self._map_data_dir_name))
 	
 	def get_name(self):
 		"""
@@ -328,6 +341,10 @@ def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_ses
 	list of anonimized subjectSession objects.
 	
 	"""
+	package_logger.debug('Getting list of unique SubjectSession instances')
+	package_logger.debug('Input arg filter_by_experiment = {0}'.format(filter_by_experiment))
+	package_logger.debug('Input arg filter_by_session = {0}'.format(filter_by_session))
+	must_disable_and_reenable_logging = package_logger.isEnabledFor('DEBUG')
 	output = []
 	experiments = [d for d in os.listdir(raw_data_dir) if os.path.isdir(os.path.join(raw_data_dir,d))]
 	for experiment in experiments:
@@ -353,7 +370,11 @@ def unique_subject_sessions(raw_data_dir,filter_by_experiment=None,filter_by_ses
 				if filter_by_session:
 					if session!=filter_by_session:
 						continue
+				if must_disable_and_reenable_logging:
+					logging.disable('DEBUG')
 				output.append(SubjectSession(name,session,experiment,subject_dir))
+				if must_disable_and_reenable_logging:
+					logging.disable(logging.NOTSET)
 	return anonimize_subjects(output)
 
 def anonimize_subjects(subjectSessions):
@@ -364,6 +385,7 @@ def anonimize_subjects(subjectSessions):
 	a numerical id that overrides their original names.
 	
 	"""
+	package_logger.debug('Anonimizing {0} SubjectSession instances'.format(len(subjectSessions)))
 	names = []
 	for ss in subjectSessions:
 		if ss._single_data_dir:
@@ -399,6 +421,7 @@ def filter_subjects_list(subjectSessions,criteria='all_experiments'):
 	Output: A list of subjectSessions that satisfy the criteria.
 	
 	"""
+	package_logger.debug('Filtering list of SubjectSession instances using criteria: {0}'.format(criteria))
 	criteria = str(criteria).lower()
 	output = []
 	if criteria=='all_experiments':
@@ -429,6 +452,7 @@ def filter_subjects_list(subjectSessions,criteria='all_experiments'):
 		output = [s for s in subjectSessions if s.experiment==experiment]
 	else:
 		raise ValueError('The specified criteria: "{0}" is not implemented'.format(criteria))
+	package_logger.debug('Filter input length {0}. Output length {1}'.format(len(subjectSessions),len(output)))
 	return output
 
 def merge_data_by_experiment(subjectSessions,filter_by_experiment=None,filter_by_session=None,return_column_headers=False):
@@ -475,6 +499,7 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 	Output: a list of SubjectSession instances.
 	
 	"""
+	package_logger.debug('Merging SubjectSession instances with merge method: {0}'.format(merge))
 	merge = merge.lower()
 	if merge=='all':
 		names = {}

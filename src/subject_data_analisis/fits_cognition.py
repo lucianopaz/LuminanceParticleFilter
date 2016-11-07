@@ -1,5 +1,5 @@
-from __future__ import division
-from __future__ import print_function
+#-*- coding: UTF-8 -*-
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 import enum, os, sys, math, scipy, pickle, warnings, json, logging, logging.config, copy, re
 import scipy.signal
@@ -3494,10 +3494,21 @@ def parse_input():
 				'start_point_from_fit_output':None,'override':False,'plot_handler_rt_cutoff':None,
 				'high_confidence_mapping_method':'log_odds','plot_binary':None,
 				'binary_split_method':'median','fits_path':'fits_cognition'}
+	if '-g' in sys.argv or '--debug' in sys.argv:
+		options['debug'] = True
+		logging.basicConfig(level=logging.DEBUG)
+	elif '-v' in sys.argv or '--verbose' in sys.argv:
+		options['verbose'] = True
+		logging.basicConfig(level=logging.INFO)
+		logging.disable('DEBUG')
+	else:
+		logging.basicConfig(level=logging.WARNING)
+		logging.disable('INFO')
 	expecting_key = True
 	json_encoded_key = False
 	key = None
 	for i,arg in enumerate(sys.argv[1:]):
+		package_logger.debug('Argument {0} found in position {1}'.format(arg,i))
 		if expecting_key:
 			if arg=='-t' or arg=='--task':
 				key = 'task'
@@ -3523,9 +3534,9 @@ def parse_input():
 			elif arg=='--show':
 				options['show'] = True
 			elif arg=='-g' or arg=='--debug':
-				options['debug'] = True
+				continue
 			elif arg=='-v' or arg=='--verbose':
-				options['verbose'] = True
+				continue
 			elif arg=='--fit':
 				options['fit'] = True
 			elif arg=='--no-fit':
@@ -3607,6 +3618,13 @@ def parse_input():
 				options[key] = eval(arg)
 			else:
 				options[key] = arg
+	if options['debug']:
+		options['debug'] = True
+		options['optimizer_kwargs']['disp'] = True
+	elif options['verbose']:
+		options['optimizer_kwargs']['disp'] = True
+	else:
+		options['optimizer_kwargs']['disp'] = False
 	if not expecting_key:
 		raise RuntimeError("Expected a value after encountering key '{0}' but no value was supplied".format(arg))
 	if options['task_base'] not in [0,1]:
@@ -3639,6 +3657,8 @@ def parse_input():
 	
 	if not os.path.isdir(options['fits_path']):
 		raise ValueError('Supplied an invalid fits_path value: {0}. The fits_path must be an existing directory.'.format(options['fits_path']))
+	
+	package_logger.debug('Parsed options: {0}'.format(options))
 	
 	return options
 
@@ -3801,17 +3821,6 @@ def prepare_fit_args(fitter,options,fname):
 if __name__=="__main__":
 	# Parse input from sys.argv
 	options = parse_input()
-	if options['debug']:
-		options['optimizer_kwargs']['disp'] = True
-		logging.basicConfig(level=logging.DEBUG)
-	elif options['verbose']:
-		options['optimizer_kwargs']['disp'] = True
-		logging.basicConfig(level=logging.INFO)
-		logging.disable('DEBUG')
-	else:
-		options['optimizer_kwargs']['disp'] = False
-		logging.basicConfig(level=logging.WARNING)
-		logging.disable('INFO')
 	task = options['task']
 	ntasks = options['ntasks']
 	

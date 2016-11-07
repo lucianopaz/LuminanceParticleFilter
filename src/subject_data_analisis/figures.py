@@ -1,7 +1,7 @@
-from __future__ import division
-from __future__ import print_function
+#-*- coding: UTF-8 -*-
+from __future__ import division, print_function, absolute_import, unicode_literals
 
-import sys, pickle, analysis, utils
+import sys, pickle
 import numpy as np
 import matplotlib as mt
 import matplotlib.gridspec as gridspec
@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import ticker
 from mpl_toolkits.mplot3d import Axes3D
+import analysis, utils
 import data_io as io
 import data_io_cognition as io_cog
 import cost_time as ct

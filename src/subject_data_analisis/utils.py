@@ -1,8 +1,7 @@
 #!/usr/bin/python
 #-*- coding: UTF-8 -*-
+from __future__ import division, print_function, absolute_import, unicode_literals
 
-from __future__ import division
-from __future__ import print_function
 import numpy as np
 from scipy import optimize
 from scipy import stats

@@ -1,11 +1,12 @@
-from __future__ import division
-from __future__ import print_function
+#-*- coding: UTF-8 -*-
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 import numpy as np
 import data_io_cognition as io
 import cost_time as ct
 import fits_cognition as fits
 from fits_cognition import Fitter
+import utils
 import matplotlib as mt
 from matplotlib import pyplot as plt
 from matplotlib import colors as mt_colors
@@ -14,7 +15,6 @@ import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools
 from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.stats as stats
-import utils
 try:
 	from diptest.diptest import dip
 except:
