@@ -7,10 +7,11 @@ import numpy as np
 from utils import normpdf,average_downsample
 
 class Location(enum.Enum):
+	unknown = -1
 	facu = 0
 	home = 1
 	cluster = 2
-	unknown = 3
+	cecar = 3
 
 opsys,computer_name,kern,bla,bits = os.uname()
 if opsys.lower().startswith("linux"):
@@ -18,6 +19,8 @@ if opsys.lower().startswith("linux"):
 		loc = Location.facu
 	elif computer_name.startswith("sge") or computer_name.startswith("slurm"):
 		loc = Location.cluster
+	elif computer_name.startswith("odin"):
+		loc = Location.cecar
 elif opsys.lower().startswith("darwin"):
 	loc = Location.home
 else:
@@ -29,6 +32,8 @@ elif loc==Location.home:
 	raw_data_dir='/Users/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.cluster:
 	raw_data_dir='/homedtic/lpaz/inference/raw_data/raw_data'
+elif loc==Location.cecar:
+	raw_data_dir='/home/lpaz/bayes_cognition/raw_data/raw_data'
 elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
 
@@ -36,7 +41,7 @@ try:
 	with warnings.catch_warnings():
 		warnings.simplefilter("ignore")
 		import matplotlib as mt
-	if loc==Location.cluster:
+	if loc==Location.cluster or loc==Location.cecar:
 		mt.use('Agg')
 	from matplotlib import pyplot as plt
 	from matplotlib.backends.backend_pdf import PdfPages
@@ -1203,7 +1208,7 @@ class Fitter:
 						fun = lambda a: (np.mean(self.performance)-np.sum(self.mu_prob/(1.+np.exp(-0.596*self.mu/a))))**2
 						res = minimize(fun,1000.,method='Nelder-Mead')
 					self.__default_start_point__['internal_var'] = res.x[0]**2
-				except Exception, e:
+				except Exception as e:
 					self.logger.warning('Could not fit internal_var from data')
 					self.__default_start_point__['internal_var'] = 1500. if self.time_units=='seconds' else 1.5
 			if not 'phase_out_prob' in self.__default_start_point__.keys() or self.__default_start_point__['phase_out_prob'] is None:

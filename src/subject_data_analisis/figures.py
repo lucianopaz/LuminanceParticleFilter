@@ -37,7 +37,7 @@ def grouped_bar_plot(values,ax=None,ebars=None,annotations=None,colors=None,
 	bar_pos = np.arange(ngroups)
 	group_center = bar_pos+0.5*group_width
 	if colors is None:
-		if isinstance(colormap,str):
+		if isinstance(colormap,basestring):
 			colormap = plt.get_cmap(colormap)
 		colors = [colormap(x) for x in np.linspace(0,1,ngroups)]
 	all_positive_values = np.all(values>=0)
@@ -693,21 +693,24 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	m = ct.DecisionPolicy(model_var=0.,prior_mu_var=4990.24,n=101,T=10.,dt=mo.ISI,reward=1,penalty=0,iti=1.5,tp=0.)
 	
 	model_vars = 10.**np.linspace(-4,4,17)
-	#~ model_vars = [1e-4,1e-3,1e-2,1e-1,1,1e2,1e3,1e4]
 	s1_colors = [plt.get_cmap('YlGn')(x) for x in np.linspace(0,1,len(model_vars))]
 	s2_colors = [plt.get_cmap('YlOrRd')(x) for x in np.linspace(0,1,len(model_vars))]
-	#~ s1_colors = [plt.get_cmap('brg')(x) for x in np.linspace(0,0.5,len(model_vars))]
-	#~ s2_colors = [plt.get_cmap('brg')(x) for x in np.linspace(1,0.5,len(model_vars))]
 	mus = np.array([0.1,0.5,1.,2.,5.,10.,15.,25.,50.,100.])
 	
 	plt.figure(figsize=(14,7))
 	gs1 = gridspec.GridSpec(2, 1,left=0.1, right=0.5,hspace=0.08)
 	gs2 = gridspec.GridSpec(1, 1,left=0.505, right=0.52)
-	gs3 = gridspec.GridSpec(1, 1,left=0.65, right=0.95)
+	gs3 = gridspec.GridSpec(2, 1,left=0.65, right=0.95,hspace=0.08)
 	ax1 = plt.subplot(gs1[0])
 	ax2 = plt.subplot(gs1[1])
 	performance = np.zeros((len(model_vars),len(mus)))
 	evidence = np.zeros_like(performance)
+	mean_rt = np.zeros_like(performance)
+	hit_mean_rt = np.zeros_like(performance)
+	miss_mean_rt = np.zeros_like(performance)
+	#~ std_rt = np.zeros_like(performance)
+	#~ hit_std_rt = np.zeros_like(performance)
+	#~ miss_std_rt = np.zeros_like(performance)
 	for i,(v,c1,c2) in enumerate(zip(model_vars,s1_colors,s2_colors)):
 		m.set_internal_var(v)
 		xub,xlb = m.xbounds()
@@ -719,6 +722,12 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 			rt = m.rt(mu,bounds=(xub,xlb))
 			evidence[i,j] = mu/np.sqrt(v)
 			performance[i,j] = np.sum(rt[0])*m.dt
+			mean_rt[i,j] = np.sum(rt*m.t*m.dt)
+			hit_mean_rt[i,j] = np.sum(rt[0]*m.t)/np.sum(rt[0])
+			miss_mean_rt[i,j] = np.sum(rt[1]*m.t)/np.sum(rt[1])
+			#~ std_rt[i,j] = np.sqrt(np.sum(rt*(m.t-mean_rt[i,j])**2*m.dt))
+			#~ hit_std_rt[i,j] = np.sqrt(np.sum(rt[0]*(m.t-hit_mean_rt[i,j])**2)/np.sum(rt[0]))
+			#~ miss_std_rt[i,j] = np.sqrt(np.sum(rt[1]*(m.t-miss_mean_rt[i,j])**2)/np.sum(rt[1]))
 	ax1.set_ylabel('$x(t)$ Bounds',fontsize=16)
 	ax1.tick_params(labelbottom=False)
 	ax2.set_ylabel('$g$ Bounds',fontsize=16)
@@ -736,32 +745,48 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	cbar_ax.xaxis.set_ticks([])
 	plt.ylabel('$\sigma^{2}$ [Hz]',fontsize=16)
 	
-	evidence = evidence.flatten()
-	performance = performance.flatten()
-	if any(np.isnan(performance)):
-		evidence = evidence[np.logical_not(np.isnan(performance))]
-		performance = performance[np.logical_not(np.isnan(performance))]
+	evidence_ = evidence.flatten()
+	performance_ = performance.flatten()
+	valid = np.logical_not(np.isnan(performance_))
+	if not all(valid):
+		evidence_ = evidence_[valid]
+		performance_ = performance_[valid]
 	fun = lambda x,a: 1./(1.+np.exp(a*x))
 	from scipy.optimize import curve_fit
-	popt,pcov = curve_fit(fun, evidence, performance)
+	popt,pcov = curve_fit(fun, evidence_, performance_)
 	try:
 		print('Par = {0}+-{1}'.format(popt[0],np.sqrt(pcov[0][0])))
 	except:
 		print('Par = {0}+-{1}'.format(popt,np.sqrt(pcov)))
 	
 	ax = plt.subplot(gs3[0])
-	plt.plot(evidence,performance,'o',label='Simulations',color='k')
+	for ev,perf,color in zip(evidence,performance,s1_colors):
+		plt.plot(ev,perf,color=color,linestyle='',marker='o')
+	l1 = plt.Line2D([0,0],[0,0],color='k',linestyle='',marker='o',label='Simulations')
+	
+	#~ plt.plot(evidence.flatten(),performance.flatten(),'o',label='Simulations',color='k')
 	x = np.linspace(0,100,10000)
-	plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt))
-	plt.xlim([0,10])
+	l2, = plt.plot(x,fun(x,popt),'-r',label=r'$1/\left[1+\exp\left(%1.4f x\right)\right]$'%(popt))
+	#~ plt.xlim([0,10])
 	plt.ylabel('Performance',fontsize=16)
+	#~ plt.xlabel(r'$\mu/\sigma$',fontsize=18)
+	plt.legend([l1,l2],[l1.get_label(),l2.get_label()],loc='best', fancybox=True, framealpha=0.5)
+	ax.tick_params(labelbottom=False)
+	
+	rt_ax = plt.subplot(gs3[1],sharex=ax)
+	for ev,mrt,color in zip(evidence,mean_rt,s1_colors):
+		plt.plot(ev,mrt*1e3,color=color,linestyle='',marker='o')
+	#~ for ev,hmrt,mmrt,color1,color2 in zip(evidence,hit_mean_rt,miss_mean_rt,s1_colors,s2_colors):
+		#~ plt.plot(ev,hmrt*1e3,color=color1,linestyle='',marker='o')
+		#~ plt.plot(ev,mmrt*1e3,color=color2,linestyle='',marker='o')
+	plt.xlim([0,16])
+	plt.ylabel('FPT [ms]',fontsize=16)
 	plt.xlabel(r'$\mu/\sigma$',fontsize=18)
-	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
 	place_axes_subfig_label(ax1,'A',horizontal=-0.07,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.08,fontsize='24')
-	place_axes_subfig_label(ax,'C',horizontal=-0.1,vertical=1.02,fontsize='24')
-	
+	place_axes_subfig_label(ax,'C',horizontal=-0.1,vertical=1.05,fontsize='24')
+	place_axes_subfig_label(rt_ax,'D',horizontal=-0.1,vertical=1.05,fontsize='24')
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg'):
@@ -1177,8 +1202,7 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 	plt.yticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
 	cbar = plt.colorbar()
 	cbar.ax.set_ylabel('Correlation',fontsize=14)
-	plt.show(True)
-	#~ plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():
 	script_help = """ figures.py help
@@ -1235,7 +1259,6 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
-	parameter_correlation()
 	opts = parse_input()
 	for k in opts.keys():
 		if k not in ['suffix','show'] and opts[k]:

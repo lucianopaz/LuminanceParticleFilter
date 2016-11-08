@@ -721,15 +721,15 @@ class Analyzer():
 		exp_dtype = []
 		for exp_ind in experimental_ind_names:
 			try:
-				exp_dtype.append((exp_ind,dtype_dict[exp_ind]))
+				exp_dtype.append((str(exp_ind),dtype_dict[exp_ind]))
 			except:
-				exp_dtype.append((exp_ind,'f'))
+				exp_dtype.append((str(exp_ind),'f'))
 		teo_dtype = []
 		for teo_ind in theoretical_ind_names:
 			try:
-				teo_dtype.append((teo_ind,dtype_dict[teo_ind]))
+				teo_dtype.append((str(teo_ind),dtype_dict[teo_ind]))
 			except:
-				teo_dtype.append((teo_ind,'f'))
+				teo_dtype.append((str(teo_ind),'f'))
 		N = len(experimental[0])
 		experimental_ = []
 		theoretical_ = []
@@ -1456,7 +1456,7 @@ def parameter_correlation(analyzer_kwargs={}):
 													  #~ 'dead_time_sigma':'all',\
 													  #~ 'phase_out_prob':'all'})
 	
-	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
+	dtype = [(str('parameters'),'O'),(str('name'),'i'),(str('session'),'i'),(str('experiment'),experiments.dtype)]
 	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
 	sort_array = np.array(sort_array,dtype=dtype)
 	sort_array.sort(order=['experiment', 'session','name'])

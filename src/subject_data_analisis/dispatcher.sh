@@ -49,6 +49,11 @@ if [ -z "$2" ]; then
 else
 	number_of_processes=$2
 fi
+if [ -z "$3" ]; then
+	python="python2.7"
+else
+	python=$3
+fi
 
 methods=("full_confidence" "confidence_only") # full, full_confidence, confidence_only, binary_confidence_only or full_binary_confidence
 optimizer="cma" # cma, basinhopping or scipy.optimize.minimize or scipy.optimize.minimize_scalar methods
@@ -84,7 +89,7 @@ else
 	ntasks=$(($number_of_processes-$available_batch_size))
 fi
 method=${methods[$batch_index]}
-command="python fits_cognition.py -t $task -nt $ntasks -m $method -e $experiment \
+command="$python fits_cognition.py -t $task -nt $ntasks -m $method -e $experiment \
 --optimizer $optimizer --units $units --plot_handler_rt_cutoff $plot_handler_rt_cutoff \
 --high_confidence_mapping_method $high_confidence_mapping_method \
 --binary_split_method $binary_split_method \
