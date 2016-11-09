@@ -4,6 +4,7 @@ from __future__ import division, print_function, absolute_import, unicode_litera
 import sys, pickle
 import numpy as np
 import matplotlib as mt
+#~ mt.use('Agg')
 import matplotlib.gridspec as gridspec
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -1190,18 +1191,20 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 			t.append(mark)
 		annotations.append(t)
 	plt.figure(figsize=(14,8))
-	ax2 = plt.subplot(121)
-	grouped_bar_plot(corrs2,ax=ax2,annotations=annotations,#colors=['r','g','b','y','m'],
+	ax1 = plt.subplot(121)
+	grouped_bar_plot(corrs2,ax=ax1,annotations=annotations,#colors=['r','g','b','y','m'],
 					group_member_names=[stats_aliases[s] for s in stats_names],
 					group_names=[parameter_aliases[p] for p in parameter_names])
-	[tick.label.set_fontsize(16) for tick in ax2.xaxis.get_major_ticks()]
-	plt.ylabel('Correlation')
-	plt.subplot(122)
-	plt.imshow(corrs1,aspect='auto',cmap='seismic',interpolation='none',extent=[0,len(corrs1),0,len(corrs1)],vmin=-1,vmax=1)
+	[tick.label.set_fontsize(16) for tick in ax1.xaxis.get_major_ticks()]
+	plt.ylabel('Correlation',fontsize=18)
+	ax2 = plt.subplot(122)
+	plt.imshow(corrs1,aspect='auto',cmap='seismic',interpolation='nearest',extent=[0,len(corrs1),0,len(corrs1)],vmin=-1,vmax=1)
 	plt.xticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=14)
 	plt.yticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
 	cbar = plt.colorbar()
 	cbar.ax.set_ylabel('Correlation',fontsize=14)
+	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.03,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.08,vertical=1.03,fontsize='24')
 	plt.savefig('../../figs/'+fname,bbox_inches='tight')
 
 def parse_input():
