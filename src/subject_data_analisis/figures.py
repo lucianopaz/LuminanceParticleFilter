@@ -5,7 +5,7 @@ import sys, pickle
 import numpy as np
 import matplotlib as mt
 #~ mt.use('Agg')
-import matplotlib.gridspec as gridspec
+from matplotlib import gridspec
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import ticker
@@ -19,6 +19,23 @@ import fits_cognition as fits
 from matplotlib import image as mpimg
 from matplotlib.colors import LogNorm
 from fits_cognition import Fitter_plot_handler
+from mpl_toolkits.axes_grid.inset_locator import inset_axes
+
+def savefig(fname,extension,figure=None):
+	if figure is None:
+		figure = plt.gcf()
+		restore_current_figure = False
+	else:
+		cf = plt.gcf()
+		plt.figure(figure.number)
+		restore_current_figure = True
+	if extension!='.pdf':
+		plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	else:
+		with PdfPages('../../figs/'+fname) as saver:
+			saver.savefig(plt.gcf(),bbox_inches='tight')
+	if restore_current_figure:
+		plt.figure(cf.number)
 
 def place_axes_subfig_label(ax,label,horizontal=-0.05,vertical=1.05,verticalalignment='top',horizontalalignment='right',**kwargs):
 	if isinstance(ax,Axes3D):
@@ -141,7 +158,7 @@ def value_and_bounds_sketch(fname='value_and_bounds_sketch',suffix='.svg'):
 	plt.ylabel(r'$x(t)$ bound')
 	plt.xlabel('T [s]')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def bounds_vs_cost(fname='bounds_cost',suffix='.svg',n_costs=20,maxcost=1.,prior_mu_var=4990.24,n=101,T=10.,dt=None,reward=1,penalty=0,iti=1.5,tp=0.):
 	fname+=suffix
@@ -179,7 +196,7 @@ def bounds_vs_cost(fname='bounds_cost',suffix='.svg',n_costs=20,maxcost=1.,prior
 	cbar_ax.xaxis.set_ticks([])
 	
 	plt.ylabel('Cost [Hz]',fontsize=16)
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def rt_fit(fname='rt_fit',suffix='.svg'):
 	fname+=suffix
@@ -331,7 +348,7 @@ def rt_fit(fname='rt_fit',suffix='.svg'):
 	place_axes_subfig_label(ax1,'A',horizontal=-0.12,vertical=1.02,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def prior_sketch(fname='prior_sketch',suffix='.svg'):
 	fname+=suffix
@@ -356,7 +373,46 @@ def prior_sketch(fname='prior_sketch',suffix='.svg'):
 	plt.ylabel('Prob density',fontsize=16)
 	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
+
+def cognition_prior_sketch(fname='cognition_prior_sketch',suffix='.svg'):
+	fname+=suffix
+	from scipy import stats
+	mo.set_time_units('seconds')
+	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	subjects = io_cog.merge_subjectSessions(subjects,merge='all')
+	
+	experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
+	col_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
+	plot_gs = gridspec.GridSpec(1, 3,left=0.08, right=0.98,wspace=0.25)
+	
+	plt.figure(figsize=(15,8))
+	for s in subjects:
+		exp = s.experiment
+		data = s.load_data()[:,0]
+		if exp=='Luminancia':
+			data-=50
+		data = np.concatenate((data,-data),axis=0)
+		col = col_index[exp]
+		main_ax = plt.subplot(plot_gs[col-1])
+		main_ax.hist(data,bins=25,normed=True,color='sage',label=r'$\mu$ distribution')
+		xlim = main_ax.get_xlim()
+		x = np.linspace(xlim[0],xlim[1],1000)
+		main_ax.plot(x,stats.norm.pdf(x,0,np.std(data)),linewidth=2,color='darkred',label='Conjugate prior')
+		
+		inset_ax = inset_axes(main_ax, width="30%", height="25%", loc=1)
+		exp_scheme = mpimg.imread('../../figs/'+exp+'.png')
+		inset_ax.imshow(exp_scheme)
+		inset_ax.set_axis_off()
+		if col==1:
+			main_ax.set_ylabel('Prob density',fontsize=16)
+			main_ax.set_xlabel(r'$\mu$ [au]',fontsize=18)
+		elif col==2:
+			main_ax.set_xlabel(r'$\mu$ [Hz]',fontsize=18)
+			main_ax.legend(loc='upper left', fancybox=True, framealpha=0.5)
+		else:
+			main_ax.set_xlabel(r'$\mu \left[\frac{\mathrm{cd}}{\mathrm{m}^{2}\mathrm{s}}\right]$',fontsize=18)
+	savefig(fname,suffix)
 
 def confidence_sketch(fname='confidence_sketch',suffix='.svg'):
 	fname+=suffix
@@ -403,7 +459,7 @@ def confidence_sketch(fname='confidence_sketch',suffix='.svg'):
 	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.09,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.09,vertical=1.09,fontsize='24')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	fname+=suffix
@@ -425,7 +481,7 @@ def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	
 	mo.set_time_units('seconds')
 	
-	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI,cost=0.1,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
+	m = ct.DecisionPolicy(model_var=mo.model_var,prior_mu_var=prior_mu_var,n=101,T=10.,dt=mo.ISI*0.1,cost=0.1,reward=1.,penalty=0.,iti=1.5,tp=0.,store_p=False)
 	dead_time = 0.3
 	dead_time_sigma = 0.4
 	phase_out_prob = 0.05
@@ -484,11 +540,11 @@ def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	plt.figure(figsize=(12,6))
 	gs1 = gridspec.GridSpec(3, 1, left=0.05, right=0.32,hspace=0, height_ratios=[2,1,1])
 	gs2 = gridspec.GridSpec(1, 1, left=0.38, right=0.51, bottom=0.27, top=0.52)
-	gs3 = gridspec.GridSpec(1, 1, left=0.65, right=0.95)
+	gs3 = gridspec.GridSpec(1, 1, left=0.59, right=0.89)
 	ax1 = plt.subplot(gs1[0,0])
 	plt.step(edges[:-1],difusion_sim_hit_hist,where='pre',color='b',linewidth=1,label='Simulation')
 	plt.plot(m.t,difusion_teo_rt[0],color='b',linewidth=3,label='Theoretical')
-	plt.ylabel('Up RT dist')
+	plt.ylabel(r'$H_{1}$ RT dist')
 	ax1.spines['top'].set_visible(False)
 	ax1.spines['right'].set_visible(False)
 	ax1.get_xaxis().tick_bottom()
@@ -505,7 +561,7 @@ def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	ax3.get_xaxis().tick_bottom()
 	ax3.get_yaxis().tick_left()
 	ax3.tick_params(labelleft=True)
-	plt.ylabel('Down RT dist')
+	plt.ylabel(r'$H_{2}$ RT dist')
 	plt.xlabel('T [s]')
 	
 	max_b = np.max(xb)
@@ -578,7 +634,7 @@ def decision_rt_sketch(fname='decision_rt_sketch',suffix='.svg'):
 	plt.xlabel('T [s]')
 	plt.title('Response time')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	fname+=suffix
@@ -658,7 +714,7 @@ def bounds_vs_T_n_dt_sketch(fname='bounds_vs_T_n_dt_sketch',suffix='.svg'):
 	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='24')
 	place_axes_subfig_label(ax3,'C',horizontal=-0.05,vertical=1.02,fontsize='24')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
 	fname+=suffix
@@ -686,7 +742,7 @@ def vexplore_drop_sketch(fname='vexplore_drop_sketch',suffix='.svg'):
 	place_axes_subfig_label(ax1,'A',horizontal=-0.15,vertical=1.02,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.15,vertical=1.02,fontsize='24')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	fname+=suffix
@@ -788,7 +844,7 @@ def bounds_vs_var(fname='bounds_vs_var',suffix='.svg'):
 	place_axes_subfig_label(ax2,'B',horizontal=-0.08,fontsize='24')
 	place_axes_subfig_label(ax,'C',horizontal=-0.1,vertical=1.05,fontsize='24')
 	place_axes_subfig_label(rt_ax,'D',horizontal=-0.1,vertical=1.05,fontsize='24')
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg'):
 	fname+=suffix
@@ -864,7 +920,7 @@ def cluster_hierarchy(fname='cluster_hierarchy',suffix='.svg'):
 	place_axes_subfig_label(ax1,'A',horizontal=0.16,vertical=1.02,fontsize='30')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.05,vertical=1.02,fontsize='30')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	fname+=suffix
@@ -872,65 +928,98 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 	subjects = io_cog.merge_subjectSessions(io_cog.filter_subjects_list(subjects,'experiment_Luminancia'),merge='all')
 	subject = subjects[0]
+
+	fitter = fits.Fitter(subject,method='full_cognition',decisionPolicyKwArgs={'n':201,'dt':1e-3,'T':1.},high_confidence_mapping_method='belief')
+	fitter.set_fixed_parameters({'high_confidence_threshold': 0.53,'dead_time_sigma': 0.3,'confidence_map_slope':20})
+	parameters = fitter.default_start_point()
+	fitter.dp.set_cost(parameters['cost'])
+	fitter.dp.set_internal_var(parameters['internal_var'])
+	fpt = fitter.dp.rt(0,fitter.dp.xbounds())
+	H_c_ind = np.argmin(np.abs(fitter.dp.log_odds()[0]-1.2))
+	belief_H_c = 2*fitter.dp.bounds[0][H_c_ind]-1-0.5/parameters['confidence_map_slope']
+	logodds_H_c = fitter.dp.log_odds()[0][H_c_ind]
+	fitter.set_fixed_parameters({'high_confidence_threshold': belief_H_c,'dead_time_sigma': 0.3})
 	
-	fitter = fits.Fitter(subject,method='full_cognition',decisionPolicyKwArgs={'n':201,'dt':1e-3,'T':1.})
-	parameters = fitter.get_parameters_dict()
-	parameters['high_confidence_threshold'] = 1.2
-	parameters['dead_time_sigma'] = 0.3
-	bin_map = fitter.high_confidence_mapping(parameters['high_confidence_threshold'],np.inf)
-	cont_map = fitter.high_confidence_mapping(parameters['high_confidence_threshold'],parameters['confidence_map_slope'])
+	belief_map = fitter.high_confidence_mapping_belief(belief_H_c,parameters['confidence_map_slope'])
+	bin_map = fitter.high_confidence_mapping_log_odds(logodds_H_c,np.inf)
+	logodds_map = fitter.high_confidence_mapping_log_odds(logodds_H_c,parameters['confidence_map_slope'])
+	
 	plt.figure(figsize=(14,6))
-	ax1 = plt.subplot(121)
+	gs1 = gridspec.GridSpec(1, 1,left=0.05, right=0.28)
+	gs2 = gridspec.GridSpec(2, 2,left=0.33, right=0.91,hspace=0.07,wspace=0.21)
+	gs3 = gridspec.GridSpec(1, 1,left=0.92, right=0.935)
+	ax1 = plt.subplot(gs1[0])
 	plt.plot(fitter.dp.t,bin_map[0],'r',label='Binary',linewidth=2)
-	plt.plot(fitter.dp.t,cont_map[0],'b',label='Continuous',linewidth=2)
+	plt.plot(fitter.dp.t,belief_map[0],'b',label=r'$\mathcal{C}_{s}(t)$', linewidth=2)
+	plt.plot(fitter.dp.t,logodds_map[0],'g',label=r'$\mathcal{C}_{\mathcal{L}_{o}}(t)$', linewidth=2)
 	plt.legend(loc='best', fancybox=True, framealpha=0.5)
 	plt.gca().set_xlim([0,0.4])
-	plt.xlabel('T [s]')
-	plt.ylabel(r'$M(C(\theta_{+}(t)))$',fontsize='13')
-	xytext_bin = [fitter.dp.t[(bin_map[0]==0).nonzero()[0][0]],0.8]
-	xytext_cont = [fitter.dp.t[np.argmin(np.abs(cont_map[0]-0.2))+2],0.2]
+	plt.xlabel('T [s]',fontsize=16)
+	plt.ylabel('Confidence map',fontsize=16)
+	#~ xytext_bin = [fitter.dp.t[(bin_map[0]==0).nonzero()[0][0]],0.8]
+	#~ xytext_cont = [fitter.dp.t[np.argmin(np.abs(logodds_map[0]-0.2))+2],0.2]
 	
-	fpt = fitter.dp.rt(0,fitter.dp.xbounds())
 	bin_pdf = fitter.rt_confidence_pdf(fpt,parameters,bin_map)
 	t = np.arange(0,bin_pdf.shape[-1],dtype=np.float)*fitter.dp.dt
 	
-	gs = gridspec.GridSpec(2, 1,left=0.54, right=0.94,hspace=0.25)
-	ax2 = plt.subplot(gs[0])
+	ax2 = plt.subplot(gs2[:,0])
 	#~ plt.imshow(bin_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1])
 	plt.plot(t,bin_pdf[0][-1],color='forestgreen',label='high confidence',linewidth=2)
 	plt.plot(t,bin_pdf[0][0],color='mediumpurple',label='low confidence',linewidth=2)
-	plt.ylabel('Prob density')
-	plt.xlabel('T [s]')
+	plt.ylabel('Prob density',fontsize=16)
+	plt.xlabel('T [s]',fontsize=16)
 	plt.legend(loc='best', fancybox=True, framealpha=0.5)
+	plt.title('Binary confidence',fontsize=20)
 	
+	lo_cont_pdf = fitter.rt_confidence_pdf(fpt,parameters,logodds_map)[0]
+	b_cont_pdf = fitter.rt_confidence_pdf(fpt,parameters,belief_map)[0]
 	vmin = 1e-5
+	vmax = max([np.max(lo_cont_pdf),np.max(b_cont_pdf)])
 	
-	cont_pdf = fitter.rt_confidence_pdf(fpt,parameters,cont_map)
-	ax3 = plt.subplot(gs[1])
+	ax3 = plt.subplot(gs2[0,1])
 	if not vmin is None:
-		cont_pdf[cont_pdf<vmin] = vmin
-	plt.imshow(cont_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1],\
-				vmin=vmin,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
-	plt.xlabel('T [s]')
-	plt.ylabel(r'$M(C(g))$',fontsize='13')
-	cbar = plt.colorbar()
-	cbar.set_label('Prob density')
+		lo_cont_pdf[lo_cont_pdf<vmin] = vmin
+	plt.imshow(lo_cont_pdf,aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1],\
+				vmin=vmin,vmax=vmax,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
+	plt.ylabel(r'$\mathcal{C}_{\mathcal{L}_{o}}$',fontsize='18')
+	plt.title('Continuous confidence',fontsize=20)
+	ax3.tick_params(labelbottom=False)
 	
-	ax1.annotate('', xy=[-0.12,0.8], xytext=xytext_bin,
-				size=10, va="center", ha="center",
-				xycoords=(ax2,'axes fraction'), textcoords=('data'),
-				arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
+	ax4 = plt.subplot(gs2[1,1])
+	if not vmin is None:
+		b_cont_pdf[b_cont_pdf<vmin] = vmin
+	plt.imshow(b_cont_pdf,aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1],\
+				vmin=vmin,vmax=vmax,cmap=plt.get_cmap('gray_r'),norm=LogNorm())
+	plt.xlabel('T [s]',fontsize=16)
+	plt.ylabel(r'$\mathcal{C}_{s}$',fontsize='18')
 	
-	ax1.annotate('', xy=[-0.17,0.2], xytext=xytext_cont,
-				size=10, va="center", ha="center",
-				xycoords=(ax3,'axes fraction'), textcoords=('data'),
-				arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
 	
-	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.05,fontsize='24')
-	place_axes_subfig_label(ax2,'B',horizontal=-0.08,vertical=1.12,fontsize='24')
+	cbar_ax = plt.subplot(gs3[0])
+	plt.imshow(10**(np.linspace(np.log10(vmin),np.log10(vmax),1000))[:,None],aspect='auto',cmap='gray',norm=LogNorm(),
+				interpolation='none',extent=[0,1,np.log10(vmin),np.log10(vmax)],vmin=vmin,vmax=vmax)
+	cbar_ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(r'$10^{%1.0f}$'))
+	cbar_ax.yaxis.set_label_position("right")
+	cbar_ax.set_ylabel('Prob density',fontsize=16)
+	cbar_ax.yaxis.set_label_position("right")
+	cbar_ax.tick_params(bottom=False,top=False,labelbottom=False,labelleft=False,labelright=True,labelsize=14)
+	
+	
+	
+	#~ ax1.annotate('', xy=[-0.12,0.8], xytext=xytext_bin,
+				#~ size=10, va="center", ha="center",
+				#~ xycoords=(ax2,'axes fraction'), textcoords=('data'),
+				#~ arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
+	#~ 
+	#~ ax1.annotate('', xy=[-0.17,0.2], xytext=xytext_cont,
+				#~ size=10, va="center", ha="center",
+				#~ xycoords=(ax3,'axes fraction'), textcoords=('data'),
+				#~ arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
+	
+	place_axes_subfig_label(ax1,'A',horizontal=-0.11,vertical=1.05,fontsize='24')
+	place_axes_subfig_label(ax2,'B',horizontal=-0.11,vertical=1.05,fontsize='24')
 	place_axes_subfig_label(ax3,'C',horizontal=-0.11,vertical=1.12,fontsize='24')
 	
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def fits_cognition(fname='fits_cognition',suffix='.svg'):
 	fname+=suffix
@@ -1003,18 +1092,18 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 		aximg.imshow(exp_scheme)
 		aximg.set_axis_off()
 		plt.title(exp_name)
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def binary_confidence(fname='binary_confidence',suffix='.svg'):
 	fname+=suffix
 	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 	fitter_plot_handler = None
 	binary_split_method = 'mean'
-	suffix = '' if binary_split_method=='median' else '_'+binary_split_method+'split'
+	fname_suffix = '' if binary_split_method=='median' else '_'+binary_split_method+'split'
 	for i,s in enumerate(subjects):
 		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_binary_confidence',
 				name=s.get_name(),session=s.get_session(),optimizer='basinhopping',
-				suffix=suffix,confidence_map_method='belief').replace('.pkl','_plot_handler.pkl')
+				suffix=fname_suffix,confidence_map_method='belief').replace('.pkl','_plot_handler.pkl')
 		try:
 			f = open(handler_fname,'r')
 			temp = pickle.load(f)
@@ -1107,7 +1196,7 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 			plt.title('Confidence distribution')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		elif row==3:
-			plt.xlabel('Confidence')
+			plt.xlabel('T [s]')
 		
 		mdt = model['t_array'][1]-model['t_array'][0]
 		axconf2 = plt.subplot(plot_gs[row-1,2])
@@ -1120,7 +1209,7 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 			plt.title('Conditional confidence distribution')
 			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		elif row==3:
-			plt.xlabel('Confidence')
+			plt.xlabel('T [s]')
 		
 		aximg = plt.subplot(exp_scheme_gs[row-1])
 		
@@ -1128,7 +1217,157 @@ def binary_confidence(fname='binary_confidence',suffix='.svg'):
 		aximg.imshow(exp_scheme)
 		aximg.set_axis_off()
 		plt.title(exp_name)
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
+
+def fits_cognition_mixture(fname='fits_cognition_mixture',suffix='.svg'):
+	fname+=suffix
+	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
+	c_fitter_plot_handler = None
+	b_fitter_plot_handler = None
+	binary_split_method = 'mean'
+	'' if binary_split_method=='median' else '_'+binary_split_method+'split'
+	for i,s in enumerate(subjects):
+		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
+				session=s.get_session(),optimizer='cma',suffix='').replace('.pkl','_plot_handler.pkl')
+		try:
+			f = open(handler_fname,'r')
+			temp = pickle.load(f)
+			f.close()
+		except:
+			continue
+		if c_fitter_plot_handler is None:
+			c_fitter_plot_handler = temp
+		else:
+			c_fitter_plot_handler+= temp
+	c_fitter_plot_handler = c_fitter_plot_handler.merge('all')
+	c_fitter_plot_handler.normalize()
+	for i,s in enumerate(subjects):
+		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_binary_confidence',
+				name=s.get_name(),session=s.get_session(),optimizer='basinhopping',
+				suffix='' if binary_split_method=='median' else '_'+binary_split_method+'split',
+				confidence_map_method='belief').replace('.pkl','_plot_handler.pkl')
+		try:
+			f = open(handler_fname,'r')
+			temp = pickle.load(f)
+			f.close()
+		except:
+			continue
+		if b_fitter_plot_handler is None:
+			b_fitter_plot_handler = temp
+		else:
+			b_fitter_plot_handler+= temp
+	b_fitter_plot_handler = b_fitter_plot_handler.merge('all')
+	b_fitter_plot_handler.normalize()
+	
+	experiment_alias = {'2AFC':'Contrast','Auditivo':'Auditory','Luminancia':'Luminance'}
+	row_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
+	plot_gs = gridspec.GridSpec(3, 3,left=0.20, right=0.98,hspace=0.20,wspace=0.18)
+	exp_scheme_gs = gridspec.GridSpec(3, 1,left=0., right=0.14,hspace=0.25)
+	plt.figure(figsize=(14,11))
+	for experiment in c_fitter_plot_handler.keys():
+		subj = c_fitter_plot_handler[experiment]['experimental']
+		cmodel = c_fitter_plot_handler[experiment]['theoretical']
+		bmodel = b_fitter_plot_handler[experiment]['theoretical']
+		row = row_index[experiment]
+		exp_name = experiment_alias[experiment]
+		
+		dt = subj['t_array'][1]-subj['t_array'][0]
+		dc = subj['c_array'][1]-subj['c_array'][0]
+		if len(subj['t_array'])==len(subj['rt'][0]):
+			subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
+			subj_c_array = np.hstack((subj['c_array']-0.5*dc,subj['c_array'][-1:]+0.5*dc))
+		else:
+			subj_t_array = subj['t_array']
+			subj_c_array = subj['c_array']
+		subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+		subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
+		subj_performance = np.sum(subj['rt'][0])*dt
+		if binary_split_method=='median':
+			subj_split_ind = (np.cumsum(np.sum(subj['confidence'],axis=0))>=0.5).nonzero()[0][0]
+			if bmodel['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (np.cumsum(np.sum(bmodel['confidence'],axis=0))>=0.5).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		elif binary_split_method=='half':
+			subj_split_ind = (subj['c_array']>=0.5).nonzero()[0][0]
+			if bmodel['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (bmodel['c_array']>=0.5).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		elif binary_split_method=='mean':
+			if len(subj['c_array'])>(subj['confidence'].shape[1]):
+				c_array = np.array([0.5*(e1+e0) for e1,e0 in zip(subj['c_array'][1:],subj['c_array'][:-1])])
+			else:
+				c_array = subj['c_array']
+			subj_split_ind = (c_array>=np.sum(subj['confidence']*c_array)).nonzero()[0][0]
+			if bmodel['confidence'].shape[1]>2:
+				self.logger.debug('Model confidence data is not natively binary. Binarizing now...')
+				model_split_ind = (bmodel['c_array']>=np.sum(bmodel['confidence']*bmodel['c_array'])).nonzero()[0][0]
+			else:
+				model_split_ind = 1
+		subj_lowconf_rt = np.array([np.sum(subj['hit_histogram'][:subj_split_ind],axis=0)*subj_performance,
+									np.sum(subj['miss_histogram'][:subj_split_ind],axis=0)*(1-subj_performance)])
+		subj_highconf_rt = np.array([np.sum(subj['hit_histogram'][subj_split_ind:],axis=0)*subj_performance,
+									np.sum(subj['miss_histogram'][subj_split_ind:],axis=0)*(1-subj_performance)])
+		model_performance = np.sum(bmodel['rt'][0])*(bmodel['t_array'][1]-bmodel['t_array'][0])
+		model_low_rt = np.array([np.sum(bmodel['hit_histogram'][:model_split_ind],axis=0)*model_performance,
+								np.sum(bmodel['miss_histogram'][:model_split_ind],axis=0)*(1-model_performance)])
+		model_high_rt = np.array([np.sum(bmodel['hit_histogram'][model_split_ind:],axis=0)*model_performance,
+								np.sum(bmodel['miss_histogram'][model_split_ind:],axis=0)*(1-model_performance)])
+		if len(subj['t_array'])==len(subj['rt'][0]):
+			subj_t_array = np.hstack((subj['t_array']-0.5*dt,subj['t_array'][-1:]+0.5*dt))
+		else:
+			subj_t_array = subj['t_array']
+		subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
+		subj_lowconf_rt = np.hstack((subj_lowconf_rt,np.array([subj_lowconf_rt[:,-1]]).T))
+		subj_highconf_rt = np.hstack((subj_highconf_rt,np.array([subj_highconf_rt[:,-1]]).T))
+		
+		axrt = plt.subplot(plot_gs[row-1,0])
+		axrt.step(subj_t_array,subj_rt[0],'b',label='Subject P(RT,hit)',where='post')
+		axrt.step(subj_t_array,subj_rt[1],'r',label='Subject P(RT,miss)',where='post')
+		axrt.plot(cmodel['t_array'],cmodel['rt'][0],'b',label='Model P(RT,hit)',linewidth=3)
+		axrt.plot(cmodel['t_array'],cmodel['rt'][1],'r',label='Model P(RT,miss)',linewidth=3)
+		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		plt.ylabel('Prob density',fontsize=16)
+		if row==1:
+			plt.title('RT distribution',fontsize=20)
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('T [s]',fontsize=16)
+		
+		axcconf = plt.subplot(plot_gs[row-1,1])
+		axcconf.step(subj_c_array,subj_confidence[0],'b',label='Subject P(conf,hit)',where='post')
+		axcconf.step(subj_c_array,subj_confidence[1],'r',label='Subject P(conf,miss)',where='post')
+		axcconf.plot(cmodel['c_array'],cmodel['confidence'][0],'b',label='Model P(conf,hit)',linewidth=3)
+		axcconf.plot(cmodel['c_array'],cmodel['confidence'][1],'r',label='Model P(conf,miss)',linewidth=3)
+		axcconf.set_yscale('log')
+		if row==1:
+			plt.title('Confidence distribution',fontsize=20)
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('Confidence',fontsize=16)
+			
+		axbconf = plt.subplot(plot_gs[row-1,2])
+		axbconf.step(subj_t_array,np.sum(subj_lowconf_rt,axis=0),'mediumpurple',label='Subject P(RT,low)',where='post')
+		axbconf.step(subj_t_array,np.sum(subj_highconf_rt,axis=0),'forestgreen',label='Subject P(RT,high)',where='post')
+		axbconf.plot(bmodel['t_array'],np.sum(model_low_rt,axis=0),'mediumpurple',label='Model P(RT,low)',linewidth=3)
+		axbconf.plot(bmodel['t_array'],np.sum(model_high_rt,axis=0),'forestgreen',label='Model P(RT,high)',linewidth=3)
+		axbconf.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
+		if row==1:
+			plt.title('Binary confidence',fontsize=20)
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
+		elif row==3:
+			plt.xlabel('T [s]',fontsize=16)
+		
+		aximg = plt.subplot(exp_scheme_gs[row-1])
+		
+		exp_scheme = mpimg.imread('../../figs/'+experiment+'.png')
+		aximg.imshow(exp_scheme)
+		aximg.set_axis_off()
+		plt.title(exp_name,fontsize=20)
+		savefig(fname,suffix)
 
 def auxiliary_2AFC_stimuli():
 	x = np.array([np.linspace(-1,1,1000)])
@@ -1191,21 +1430,26 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 			t.append(mark)
 		annotations.append(t)
 	plt.figure(figsize=(14,8))
-	ax1 = plt.subplot(121)
+	gs1 = gridspec.GridSpec(1, 2,left=0.10, right=0.88, wspace=0.15)
+	gs2 = gridspec.GridSpec(1, 1,left=0.90, right=0.92)
+	ax1 = plt.subplot(gs1[0])
 	grouped_bar_plot(corrs2,ax=ax1,annotations=annotations,#colors=['r','g','b','y','m'],
 					group_member_names=[stats_aliases[s] for s in stats_names],
 					group_names=[parameter_aliases[p] for p in parameter_names])
 	[tick.label.set_fontsize(16) for tick in ax1.xaxis.get_major_ticks()]
 	plt.ylabel('Correlation',fontsize=18)
-	ax2 = plt.subplot(122)
+	ax2 = plt.subplot(gs1[1])
 	plt.imshow(corrs1,aspect='auto',cmap='seismic',interpolation='nearest',extent=[0,len(corrs1),0,len(corrs1)],vmin=-1,vmax=1)
-	plt.xticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=14)
-	plt.yticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=14)
-	cbar = plt.colorbar()
-	cbar.ax.set_ylabel('Correlation',fontsize=14)
+	plt.xticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=16)
+	plt.yticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names][::-1],fontsize=16)
+	cbar_ax = plt.subplot(gs2[0])
+	plt.imshow(np.linspace(1,-1,1000)[:,None],aspect='auto',cmap='seismic',interpolation='none',extent=[0,1,-1,1],vmin=-1,vmax=1)
+	cbar_ax.set_ylabel('Correlation',fontsize=18)
+	cbar_ax.yaxis.set_label_position("right")
+	cbar_ax.tick_params(bottom=False,top=False,labelbottom=False,labelleft=False,labelright=True)
 	place_axes_subfig_label(ax1,'A',horizontal=-0.08,vertical=1.03,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.08,vertical=1.03,fontsize='24')
-	plt.savefig('../../figs/'+fname,bbox_inches='tight')
+	savefig(fname,suffix)
 
 def parse_input():
 	script_help = """ figures.py help
@@ -1229,6 +1473,8 @@ def parse_input():
  '--confidence_mapping'
  '--fits_cognition'
  '--parameter_correlation'
+ '--fits_cognition_mixture'
+ '--cognition_prior_sketch'
  
  '--show': Show the matplotlib figures after all have been created
  '--suffix': The suffix to append at the end of the figure filenames [Default = '.svg']
@@ -1238,7 +1484,8 @@ def parse_input():
 				'prior_sketch':False,'vexplore_drop_sketch':False,'show':False,'suffix':'.svg',
 				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,
 				'confidence_mapping':False,'fits_cognition':False,'binary_confidence':False,
-				'parameter_correlation':False}
+				'parameter_correlation':False,'fits_cognition_mixture':False,
+				'cognition_prior_sketch':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -1259,6 +1506,8 @@ def parse_input():
 			options[arg[2:]] = True
 		else:
 			raise RuntimeError("Unknown option: {opt} encountered in position {pos}. Refer to the help to see the list of options".format(opt=arg,pos=i+1))
+	if not options['suffix'].startswith('.'):
+		options['suffix'] = '.'+options['suffix']
 	return options
 
 if __name__=="__main__":

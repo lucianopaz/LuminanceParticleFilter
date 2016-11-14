@@ -1817,9 +1817,9 @@ class Fitter:
 		with warnings.catch_warnings():
 			warnings.simplefilter("ignore")
 			phigh = confidence_map_slope*(belief-high_confidence_threshold)
+			phigh[np.isnan(phigh)] = 0.5
 			phigh[phigh>1] = 1
 			phigh[phigh<0] = 0
-			phigh[high_confidence_threshold==belief] = 0.5
 		
 		if _dt:
 			if _nT%self.dp.nT==0:
@@ -2854,10 +2854,10 @@ class Fitter_plot_handler():
 						orig = self[key_aliaser(other_key)][category][required_data]
 						added = other[other_key][category][required_data]
 						if len(torig)<len(tadded):
-							summed = added+np.pad(orig, ((0,0),(0,len(tadded)-len(torig))),'constant',constant_values=(0., 0.))
+							summed = added+np.pad(orig, ((0,0),(0,len(tadded)-len(torig))),str('constant'),constant_values=(0., 0.))
 							self[key_aliaser(other_key)][category][required_data] = summed
 						elif len(torig)>len(tadded):
-							summed = orig+np.pad(added, ((0,0),(0,len(torig)-len(tadded))),'constant',constant_values=(0., 0.))
+							summed = orig+np.pad(added, ((0,0),(0,len(torig)-len(tadded))),str('constant'),constant_values=(0., 0.))
 							self[key_aliaser(other_key)][category][required_data] = summed
 						else:
 							self[key_aliaser(other_key)][category][required_data]+= added

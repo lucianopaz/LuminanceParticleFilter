@@ -41,9 +41,9 @@
      inkscape:window-height="1000"
      id="namedview2034"
      showgrid="false"
-     inkscape:zoom="0.65454545"
-     inkscape:cx="489.19366"
-     inkscape:cy="165.46953"
+     inkscape:zoom="0.92566705"
+     inkscape:cx="520.23182"
+     inkscape:cy="333.2694"
      inkscape:window-x="65"
      inkscape:window-y="24"
      inkscape:window-maximized="1"
@@ -7000,7 +7000,7 @@
    id="tspan5799"
    dx="115.80839">θ<tspan
    id="tspan5801"
-   style="font-size:12.48017597px;baseline-shift:sub">+</tspan>(t)</tspan></textPath></text>
+   style="font-size:12.48017597px;baseline-shift:sub">1</tspan>(t)</tspan></textPath></text>
     <text
        sodipodi:linespacing="125%"
        id="text5803"
@@ -7012,7 +7012,7 @@
    id="tspan5805"
    dx="117.5369">θ<tspan
    style="font-size:12.48017597px;baseline-shift:sub"
-   id="tspan5807">-</tspan>(t)</tspan></textPath></text>
+   id="tspan5807">2</tspan>(t)</tspan></textPath></text>
     <text
        xml:space="preserve"
        style="font-size:19.20000076px;font-style:normal;font-weight:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;font-family:Sans"
@@ -7024,7 +7024,7 @@
    id="tspan5811"
    dx="63.089668">Samples reach θ<tspan
    id="tspan5813"
-   style="font-size:12.48017597px;baseline-shift:sub">+</tspan>(t)</tspan></textPath></text>
+   style="font-size:12.48017597px;baseline-shift:sub">x1</tspan>(t)</tspan></textPath></text>
     <text
        sodipodi:linespacing="125%"
        id="text5815"
@@ -7036,7 +7036,7 @@
    id="tspan5817"
    dx="69.139336">Samples reach θ<tspan
    style="font-size:12.48017597px;baseline-shift:sub"
-   id="tspan5819">-</tspan>(t)</tspan></textPath></text>
+   id="tspan5819">x2</tspan>(t)</tspan></textPath></text>
     <text
        xml:space="preserve"
        style="font-size:16px;font-style:normal;font-weight:normal;text-align:center;line-height:125%;letter-spacing:0px;word-spacing:0px;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;font-family:Sans"

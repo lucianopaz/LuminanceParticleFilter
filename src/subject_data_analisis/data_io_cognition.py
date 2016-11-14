@@ -422,7 +422,7 @@ def filter_subjects_list(subjectSessions,criteria='all_experiments'):
 	
 	"""
 	package_logger.debug('Filtering list of SubjectSession instances using criteria: {0}'.format(criteria))
-	criteria = str(criteria).lower()
+	criteria = str(criteria)
 	output = []
 	if criteria=='all_experiments':
 		names = [s.get_name() for s in subjectSessions]
@@ -556,6 +556,7 @@ def merge_subjectSessions(subjectSessions,merge='all'):
 		output = [SubjectSession(data_dirs[key]['name'],data_dirs[key]['session'],data_dirs[key]['experiment'],data_dirs[key]['data']) for key in data_dirs.keys()]
 	else:
 		ValueError('Unknown merge criteria "{0}"'.format(merge))
+	package_logger.debug('Merge results. Input length: {0} --- Output length: {1}'.format(len(subjectSessions),len(output)))
 	return output
 
 def increase_histogram_count(d,n):
