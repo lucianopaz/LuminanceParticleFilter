@@ -57,7 +57,7 @@ def grouped_bar_plot(values,ax=None,ebars=None,annotations=None,colors=None,
 	if colors is None:
 		if isinstance(colormap,basestring):
 			colormap = plt.get_cmap(colormap)
-		colors = [colormap(x) for x in np.linspace(0,1,ngroups)]
+		colors = [colormap(x) for x in np.linspace(0,1,nmembers)]
 	all_positive_values = np.all(values>=0)
 	all_bars = []
 	all_ebars = []
@@ -386,7 +386,7 @@ def cognition_prior_sketch(fname='cognition_prior_sketch',suffix='.svg'):
 	col_index = {'2AFC':1,'Auditivo':2,'Luminancia':3}
 	plot_gs = gridspec.GridSpec(1, 3,left=0.08, right=0.98,wspace=0.25)
 	
-	plt.figure(figsize=(15,8))
+	plt.figure(figsize=(15,7))
 	for s in subjects:
 		exp = s.experiment
 		data = s.load_data()[:,0]
@@ -405,7 +405,7 @@ def cognition_prior_sketch(fname='cognition_prior_sketch',suffix='.svg'):
 		inset_ax.imshow(exp_scheme)
 		inset_ax.set_axis_off()
 		if col==1:
-			main_ax.set_ylabel('Prob density',fontsize=16)
+			main_ax.set_ylabel('Probability density',fontsize=16)
 			main_ax.set_xlabel(r'$\mu$ [au]',fontsize=18)
 		elif col==2:
 			main_ax.set_xlabel(r'$\mu$ [Hz]',fontsize=18)
@@ -1398,7 +1398,7 @@ def auxiliary_2AFC_stimuli():
 def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 	fname+=suffix
 	a = analysis.Analyzer()
-	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope']
+	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope','dead_time','dead_time_sigma']
 	stats_names = ['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index']
 	parameter_aliases = {'cost':r'$c$',
 						'internal_var':r'$\sigma^{2}$',
@@ -1438,6 +1438,7 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 					group_names=[parameter_aliases[p] for p in parameter_names])
 	[tick.label.set_fontsize(16) for tick in ax1.xaxis.get_major_ticks()]
 	plt.ylabel('Correlation',fontsize=18)
+	ax1.set_ylim([-1,1])
 	ax2 = plt.subplot(gs1[1])
 	plt.imshow(corrs1,aspect='auto',cmap='seismic',interpolation='nearest',extent=[0,len(corrs1),0,len(corrs1)],vmin=-1,vmax=1)
 	plt.xticks(np.arange(len(corrs1))+0.5,[parameter_aliases[p] for p in parameter_names],rotation=60,fontsize=16)
