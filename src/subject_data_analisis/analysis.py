@@ -1435,7 +1435,14 @@ def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_m
 		tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'))
 	tree.render('../../figs/confidence_cluster.'+extension,tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'), layout=default_tree_layout,\
 				dpi=300, units='mm', w=150)
+	decision_parameters=['cost','internal_var','phase_out_prob']
 	
+	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters,filter_nans=filter_nans)
+	tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='D+C Hierarchy'))
+	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters+['dead_time','dead_time_sigma'],filter_nans=filter_nans)
+	tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='All par Hierarchy'))
+	
+	show=False
 	if show:
 		a.controlled_scatter(scattered_parameters=decision_parameters,merge=merge)
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
@@ -1950,8 +1957,9 @@ def correlation_analysis(analyzer_kwargs={}):
 	plt.show(True)
 
 def test():
-	parameter_correlation()
+	#~ parameter_correlation()
 	#~ correlation_analysis()
+	cluster_analysis(show=True)
 	return
 	#~ parameter_correlation()
 	#~ return
