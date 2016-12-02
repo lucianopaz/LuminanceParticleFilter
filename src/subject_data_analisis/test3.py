@@ -18,36 +18,53 @@ class Foo:
 		self.mu0 = float(mu0)
 	
 	def _compat_views(self,*args):
-		if not all([a.ndim==args[0].ndim for a in args]):
-			raise RuntimeError("Input args must have the same number of dimensions")
-		ndim = args[0].ndim
-		args_ind = '['+','.join([':']*ndim)+',None]'
-		args_view = [eval('a'+args_ind) for a in args]
-		if len(args_view)==1:
-			args_view = args_view[0]
+		ndim = None
+		for a in args:
+			if isinstance(a,np.ndarray):
+				if ndim is None:
+					ndim = a.ndim
+				else:
+					ndim = max([ndim,a.ndim])
+		if ndim is None or ndim==0:
+			if len(args)==1:
+				return args,self.v,self.p
+			else:
+				return tuple(args),self.v,self.p
 		else:
-			args_view = tuple(args_view)
-		inner_ind = '['+','.join(['None']*ndim)+',:]'
-		v,p = tuple([eval('i'+inner_ind) for i in [self.v,self.p]])
-		return args_view,v,p
+			args_view = []
+			for a in args:
+				if isinstance(a,np.ndarray):
+					if a.ndim>0:
+						args_ind = '['+','.join([':']*a.ndim)+','+','.join(['None']*(ndim+1-a.ndim))+']'
+						args_view.append(eval('a'+args_ind))
+					else:
+						args_view.append(a)
+				else:
+					args_view.append(a)
+			inner_ind = '['+','.join(['None']*ndim)+',:]'
+			v,p = tuple([eval('i'+inner_ind) for i in [self.v,self.p]])
+			if len(args)==1:
+				return args_view[0],v,p
+			else:
+				return tuple(args_view),v,p
 	
 	def vt(self,t):
-		t,v,p = self._compat_views(t)
+		t,v,p = self._compat_views(np.array(t))
 		return (1/(t/v+1/self.v0))
 	
 	def mut(self,t,x):
-		x,v,p = self._compat_views(x)
+		x,v,p = self._compat_views(np.array(x))
 		return (x/v + self.mu0/self.v0)*self.vt(t)
 	
 	def x2g(self,t,x):
-		(x_,t_),v,p = self._compat_views(x,t)
+		(x_,t_),v,p = self._compat_views(np.array(x),np.array(t))
 		_vt = self.vt(t)
 		_st = np.sqrt(_vt)
 		_mut = self.mut(t,x)
 		return np.sum(p*_st*normcdf(_mut/_st),axis=-1)/np.sum(p*_st,axis=-1)
 	
 	def dx2g(self,t,x):
-		(x_,t_),v,p = self._compat_views(x,t)
+		(x_,t_),v,p = self._compat_views(np.array(x),np.array(t))
 		_vt = self.vt(t)
 		_st = np.sqrt(_vt)
 		_mut = self.mut(t,x)
@@ -66,8 +83,10 @@ dg = foo.dx2g(t,x)
 
 numg = np.zeros_like(g)
 for i in range(g.shape[1]):
-	numg[:,i] = cumtrapz(dg[:,i],x[:,0],axis=0,initial=g[0,i])+g[0,i]
+	numg[:,i] = cumtrapz(dg[:,i],x[:,0],axis=0,initial=0)+g[0,i]
 numdg = np.vstack(((g[1,:]-g[0,:])/dx,0.5*(g[2:,:]-g[:-2,:])/dx,(g[-1,:]-g[-2,:])/dx))
+
+print(np.max(np.abs(g-numg)),np.max(np.abs(dg-numdg)))
 
 plt.figure()
 plt.subplot(211)
@@ -91,14 +110,51 @@ plt.ylabel(r'$\frac{\partial G(x)}{\partial x}$ error')
 
 # Root finding
 
-xts = np.array([-10,-0.7,3.,15.6842])
+xts = np.linspace(-10,10,1001)
 t = np.array([1.])
 gts = foo.x2g(t,xts)
 jac = lambda x: foo.dx2g(t,x)
 
-for gt,xt in zip(gts,xts):
+import time
+
+start_hybr = time.clock()
+hybr_error = np.zeros_like(xts)
+for i,gt in enumerate(gts):
 	f = lambda x: foo.x2g(t,x)-gt
-	out = opt.root(f,0.,jac=jac,method='hybr')
-	print(gt,xt,out.x,out.fun)
+	if i>0:
+		out = opt.root(f,out.x,jac=jac,method='hybr')
+	else:
+		out = opt.root(f,0.,jac=jac,method='hybr')
+	hybr_error[i] = np.abs(xts[i]-out.x)
+end_hybr = time.clock()
+
+start_lm = time.clock()
+lm_error = np.zeros_like(xts)
+for i,gt in enumerate(gts):
+	f = lambda x: foo.x2g(t,x)-gt
+	if i>0:
+		out = opt.root(f,out.x,jac=jac,method='lm')
+	else:
+		out = opt.root(f,0.,jac=jac,method='lm')
+	lm_error[i] = np.abs(xts[i]-out.x)
+end_lm = time.clock()
+
+start_newton = time.clock()
+newton_error = np.zeros_like(xts)
+for i,gt in enumerate(gts):
+	f = lambda x: foo.x2g(t,x)-gt
+	if i>0:
+		out = opt.newton(f, out, fprime=jac)
+	else:
+		out = opt.newton(f, 0., fprime=jac)
+	newton_error[i] = np.abs(xts[i]-out)
+end_newton = time.clock()
+
+print('Hybr')
+print(end_hybr-start_hybr,np.max(hybr_error))
+print('Lm')
+print(end_lm-start_lm,np.max(lm_error))
+print('Newton')
+print(end_newton-start_newton,np.max(newton_error))
 
 plt.show(True)

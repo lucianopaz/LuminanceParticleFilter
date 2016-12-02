@@ -5,8 +5,7 @@ from __future__ import division, print_function, absolute_import, unicode_litera
 import numpy as np
 from scipy import optimize
 from scipy import stats
-import math
-import warnings
+import math, os, warnings
 
 
 a = np.array([ 0.886226899, -1.645349621,  0.914624893, -0.140543331])
@@ -86,6 +85,21 @@ def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
 
 def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
 	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
+
+def unique_rows(a,**kwargs):
+	if a.ndim!=2:
+		raise ValueError('Input array must be a two dimensional array')
+	b = np.ascontiguousarray(a).view(np.dtype((np.void, a.dtype.itemsize * a.shape[1])))
+	return_index = kwargs.pop('return_index', False)
+	out = np.unique(b, return_index=True, **kwargs)
+	idx = out[1]
+	uvals = a[idx]
+	if (not return_index) and (len(out) == 2):
+		return uvals
+	elif return_index:
+		return (uvals,) + out[1:]
+	else:
+		return (uvals,) + out[2:]
 
 def average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float):
 	"""
@@ -341,6 +355,197 @@ def corrcoef(a,b=None,axis=0,method='pearson',nanhandling='pairwise'):
 		else:
 			raise ValueError("nanhandling must be None, 'complete' or 'pairwise'. Got {0} instead.".format(nanhandling))
 	return rho,pval
+
+def linear_least_squares(x,y,covy=None):
+	"""
+	linear_least_squares(x,y,covy=None)
+	
+	Perform a linear least squares fit between an array x and y, and
+	return the fitted parameters and the corresponding covariance
+	matrix
+	
+	Input:
+		x,y: Two 1D numpy arrays of the same shape. x is the independent
+			variable and y is the dependent variable.
+		covy: Can be None, a float, a 1D array or a 2D array. If None,
+			the fit is performed assuming covy is the identity matrix.
+			If a float, it is assumed to encode a constant standard
+			deviation for every 'y' datapoint. If a 1D array, it must
+			hold the standard deviations of each observed 'y'. It must
+			have the same number of elements as 'y'. If it is a 2D
+			array, it must have shape (len(y),len(y)) and hold the
+			covariance matrix of the observations 'y'.
+	
+	Output:
+		par: A 1D array of the fitted parameter values. The first element
+			is the intercept and the second element is the slope of the
+			linear fit.
+		cov: A 2D array with the covariance matrix of the fitted
+			parameter values. The order in which they appear is the same
+			as the order of the 'par' array output.
+	
+	"""
+	x = x.flatten(order='K')
+	y = y.flatten(order='K')
+	assert x.shape==y.shape, "Inputs 'x' and 'y' must have the same number of elements"
+	if covy is None:
+		covy = np.ones((len(y),len(y)))
+	elif not isinstance(covy,np.ndarray):
+		covy = np.diag(float(covy)**2*np.ones(len(y)))
+	elif covy.ndim==1:
+		# If covy is a vector assume it encodes the std, not the variance
+		covy = np.diag(covy**2)
+	elif covy.ndim!=2:
+		raise ValueError("Input covy must be a None, a float, or a 1D or 2D numpy array")
+	assert (len(y),len(y))==covy.shape, "Inconsistent dimensions between the supplied 'covy' input and the 'x' and 'y' arrays."
+	covy = np.matrix(covy)
+	mat = np.ones((len(x),2))
+	mat[:,1] = x
+	mat = np.matrix(mat)
+	covyinv = np.linalg.inv(covy)
+	cov = np.linalg.inv(mat.transpose()*covyinv*mat)
+	pars = np.array(cov*mat.transpose()*covyinv*np.matrix(y.reshape((-1,1)))).flatten()
+	return pars,np.array(cov)
+
+def linear_least_squares_prediction(x,par,cov):
+	"""
+	linear_least_squares_prediction(x,par,cov)
+	
+	Get the predicted value and standard deviation for the supplied x,
+	and the linear least squares fitted value and covariance matrix
+	
+	Input:
+		x: A numpy array with the independent variable values where the
+			predicted 'y' value will be computed
+		par: The linear parameters as [float(intercept),float(slope)]
+		cov: The covariance matrix that corresponds to the fitted
+			parameters 'par'
+	
+	Output:
+		y: The predicted value as x*slope+intercept
+		sy: The standard deviation as sqrt(cov[1,1]*x**2+2*cov[0,1]*x+cov[0,0])
+	
+	"""
+	y = par[0]+par[1]*x
+	sy = np.sqrt((cov[1,1]*x+2*cov[0,1])*x+cov[0,0])
+	return y,sy
+
+def maximize_figure(fig=None):
+	import matplotlib as mt
+	from matplotlib import pyplot as plt
+	backend = mt.get_backend().lower()
+	current_figure = plt.gcf()
+	if fig is None:
+		fig = current_figure
+	# Change the current figure to the one to be maximized
+	plt.figure(fig.number)
+	manager = plt.get_current_fig_manager()
+	if backend in ['tkagg']:
+		manager.window.state('zoomed')
+	elif backend in ['wx','wxagg']:
+		manager.frame.Maximize(True)
+	elif backend in ['qt4agg','qt5agg']:
+		manager.window.showMaximized()
+	elif backend in ['gtkagg','gtk3agg','gtk','gtkcairo','gtk3cairo']:
+		manager.window.gtk_window_maximize()
+	elif backend=='macosx':
+		plt.figure(current_figure.number)
+		raise NotImplemented("Support for macosx backend is not implemented yet")
+	# Revert the current figure to the one prior to the call to maximize_figure
+	plt.figure(current_figure.number)
+
+def parse_options_file():
+	def clean_str(s):
+		return s.partition('#')[0].strip(' \t\n\r')
+	def array_parser(x):
+		x = x.strip(' \t\n\r')
+		if x.startswith('[') and x.endswith(']'):
+			return np.array([float(xx) for xx in x[1:-1].split(',')])
+		else:
+			raise ValueError('Supplied value {0} is not an ordinary float or list.'.format(x))
+	def external_var_handler(x):
+		try:
+			return float(x)
+		except:
+			return array_parser(x)
+	def time_available_to_respond_handler(x):
+		try:
+			return float(x)
+		except ValueError:
+			if x.lower()=='none':
+				return float('inf')
+			else:
+				raise ValueError('Cannot interpret value given to time_available_to_respond')
+	options = {u'raw_data_dir':None,
+				u'experiment_details':{}}
+	valid_decision_policy_keys = ['tp','T','iti','dt','external_var','n','reward','penalty','prior_var_prob']
+	valid_fitter_keys = ['rt_cutoff','distractor','forced_non_decision_time','ISI','rt_measured_from_stim_end','time_available_to_respond']
+	valid_experiment_details_keys = valid_decision_policy_keys+valid_fitter_keys
+	key_value_handler = {'tp':lambda x:float(x),
+						 'ISI':lambda x:float(x),
+						 'T':lambda x:float(x),
+						 'iti':lambda x:float(x),
+						 'dt':lambda x:float(x),
+						 'reward':lambda x:float(x),
+						 'penalty':lambda x:float(x),
+						 'n':lambda x:int(x),
+						 'external_var':external_var_handler,
+						 'rt_cutoff':lambda x:float(x),
+						 'distractor':lambda x:float(x),
+						 'forced_non_decision_time':lambda x:float(x),
+						 'prior_var_prob':array_parser,
+						 'rt_measured_from_stim_end': lambda x: True if x.lower() in ['1','true'] else False,
+						 'time_available_to_respond': time_available_to_respond_handler}
+	with open('fits_options.txt','r') as f:
+		in_experiment = False
+		experiment_name = None
+		for lineno,line in enumerate(f):
+			line = clean_str(line)
+			if len(line)==0:
+				continue
+			if not in_experiment:
+				if line.startswith('raw_data_dir:'):
+					options['raw_data_dir'] = str(line.replace('raw_data_dir:','').strip(' \t\n\r'))
+				elif line.startswith('begin experiment'):
+					in_experiment = True
+					experiment_name = str(line.replace('begin experiment','').strip(' \t\n\r'))
+					if len(experiment_name)==0:
+						raise IOError('Invalid options file. Encountered empty experiment name. Line number {0}'.format(lineno+1))
+					elif not experiment_name in options['experiment_details'].keys():
+						options['experiment_details'][experiment_name] = {'DecisionPolicy':{},'Fitter':{}}
+					else:
+						raise IOError('Invalid options file. Encountered a repeated begin experiment statement for experiment "{1}". Line number {0}'.format(lineno+1,experiment_name))
+				elif line.startswith('end experiment'):
+					raise IOError('Invalid options file. Encountered end experiment statement without corresponding open. Line number {0}'.format(lineno+1))
+				elif line.startswith(tuple(valid_experiment_details_keys)):
+					raise IOError('Invalid options file. Encountered experiment detail that does not corresponds to any experiment. Line number {0}'.format(lineno+1))
+			else:
+				if line.startswith('raw_data_dir:'):
+					raise IOError('Invalid options file. Encountered raw_data_dir declaration inside experiment details declaration. Line number {0}'.format(lineno+1))
+				elif line.startswith('begin experiment'):
+					raise IOError('Invalid options file. Encountered begin experiment statement without having closed the previous experiment details section. Line number {0}'.format(lineno+1))
+				elif line.startswith('end experiment'):
+					closed_experiment = line.replace('end experiment','').strip(' \t\n\r')
+					if closed_experiment!=experiment_name:
+						raise IOError('Invalid options file. Attempting to close experiment {0} but the open experiment is {1}. Line number {2}'.format(closed_experiment,experiment_name,lineno+1))
+					else:
+						in_experiment = False
+						experiment_name = None
+				else:
+					key,_,value = line.partition(':')
+					if not key in valid_experiment_details_keys:
+						raise IOError('Invalid options file. Encountered invalid key {0} at line {1}. Valid key names are:\n {2}\n'.format(key,lineno+1,valid_experiment_details_keys))
+					elif len(value)==0:
+						raise IOError('Invalid options file. Encountered experiment detail key with empty value. Line number {0}'.format(lineno+1))
+					if key in valid_decision_policy_keys:
+						options['experiment_details'][experiment_name]['DecisionPolicy'][key] = key_value_handler[key](value)
+					elif key in valid_fitter_keys:
+						options['experiment_details'][experiment_name]['Fitter'][key] = key_value_handler[key](value)
+		if in_experiment:
+			raise IOError('Invalid options file. Encountered end of file but experiment "{0}" was not closed'.format(experiment_name))
+	if not os.path.isdir(options['raw_data_dir']):
+		raise IOError('Options file supplies non existant raw_data_dir: {0}'.format(options['raw_data_dir']))
+	return options
 
 """
 The following diptst, dip and diptest functions were taken from
@@ -721,104 +926,6 @@ def diptest(x, min_is_0=True, boot_pval=False, n_boot=2000):
 		pval = 1. - np.interp(sD, y0 + fn * (y1 - y0), SIG)
 
 	return D, pval
-
-def linear_least_squares(x,y,covy=None):
-	"""
-	linear_least_squares(x,y,covy=None)
-	
-	Perform a linear least squares fit between an array x and y, and
-	return the fitted parameters and the corresponding covariance
-	matrix
-	
-	Input:
-		x,y: Two 1D numpy arrays of the same shape. x is the independent
-			variable and y is the dependent variable.
-		covy: Can be None, a float, a 1D array or a 2D array. If None,
-			the fit is performed assuming covy is the identity matrix.
-			If a float, it is assumed to encode a constant standard
-			deviation for every 'y' datapoint. If a 1D array, it must
-			hold the standard deviations of each observed 'y'. It must
-			have the same number of elements as 'y'. If it is a 2D
-			array, it must have shape (len(y),len(y)) and hold the
-			covariance matrix of the observations 'y'.
-	
-	Output:
-		par: A 1D array of the fitted parameter values. The first element
-			is the intercept and the second element is the slope of the
-			linear fit.
-		cov: A 2D array with the covariance matrix of the fitted
-			parameter values. The order in which they appear is the same
-			as the order of the 'par' array output.
-	
-	"""
-	x = x.flatten(order='K')
-	y = y.flatten(order='K')
-	assert x.shape==y.shape, "Inputs 'x' and 'y' must have the same number of elements"
-	if covy is None:
-		covy = np.ones((len(y),len(y)))
-	elif not isinstance(covy,np.ndarray):
-		covy = np.diag(float(covy)**2*np.ones(len(y)))
-	elif covy.ndim==1:
-		# If covy is a vector assume it encodes the std, not the variance
-		covy = np.diag(covy**2)
-	elif covy.ndim!=2:
-		raise ValueError("Input covy must be a None, a float, or a 1D or 2D numpy array")
-	assert (len(y),len(y))==covy.shape, "Inconsistent dimensions between the supplied 'covy' input and the 'x' and 'y' arrays."
-	covy = np.matrix(covy)
-	mat = np.ones((len(x),2))
-	mat[:,1] = x
-	mat = np.matrix(mat)
-	covyinv = np.linalg.inv(covy)
-	cov = np.linalg.inv(mat.transpose()*covyinv*mat)
-	pars = np.array(cov*mat.transpose()*covyinv*np.matrix(y.reshape((-1,1)))).flatten()
-	return pars,np.array(cov)
-
-def linear_least_squares_prediction(x,par,cov):
-	"""
-	linear_least_squares_prediction(x,par,cov)
-	
-	Get the predicted value and standard deviation for the supplied x,
-	and the linear least squares fitted value and covariance matrix
-	
-	Input:
-		x: A numpy array with the independent variable values where the
-			predicted 'y' value will be computed
-		par: The linear parameters as [float(intercept),float(slope)]
-		cov: The covariance matrix that corresponds to the fitted
-			parameters 'par'
-	
-	Output:
-		y: The predicted value as x*slope+intercept
-		sy: The standard deviation as sqrt(cov[1,1]*x**2+2*cov[0,1]*x+cov[0,0])
-	
-	"""
-	y = par[0]+par[1]*x
-	sy = np.sqrt((cov[1,1]*x+2*cov[0,1])*x+cov[0,0])
-	return y,sy
-
-def maximize_figure(fig=None):
-	import matplotlib as mt
-	from matplotlib import pyplot as plt
-	backend = mt.get_backend().lower()
-	current_figure = plt.gcf()
-	if fig is None:
-		fig = current_figure
-	# Change the current figure to the one to be maximized
-	plt.figure(fig.number)
-	manager = plt.get_current_fig_manager()
-	if backend in ['tkagg']:
-		manager.window.state('zoomed')
-	elif backend in ['wx','wxagg']:
-		manager.frame.Maximize(True)
-	elif backend in ['qt4agg','qt5agg']:
-		manager.window.showMaximized()
-	elif backend in ['gtkagg','gtk3agg','gtk','gtkcairo','gtk3cairo']:
-		manager.window.gtk_window_maximize()
-	elif backend=='macosx':
-		plt.figure(current_figure.number)
-		raise NotImplemented("Support for macosx backend is not implemented yet")
-	# Revert the current figure to the one prior to the call to maximize_figure
-	plt.figure(current_figure.number)
 
 def stats_battery():
 	stats.chisquare

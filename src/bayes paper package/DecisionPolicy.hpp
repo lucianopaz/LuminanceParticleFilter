@@ -42,9 +42,9 @@ inline double erfinv(double y) {
 			x = (((1.641345311*z+3.429567803)*z-1.624906493)*z-1.970840454)/((1.637067800*z+3.543889200)*z+1.0);
 		}
 		// Polish to full accuracy
+		x-= (erf(x) - y) / (1.128379167 * exp(-x*x));
+		x-= (erf(x) - y) / (1.128379167 * exp(-x*x));
 	}
-	x-= (erf(x) - y) / (1.128379167 * exp(-x*x));
-	x-= (erf(x) - y) / (1.128379167 * exp(-x*x));
 	return x;
 }
 

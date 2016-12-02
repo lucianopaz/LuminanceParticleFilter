@@ -14,11 +14,66 @@
 
 DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	int prior_type;
+	int n_model_var = 1;
+	bool known_variance;
 	PyObject* py_prior_mu_mean = NULL;
 	PyObject* py_prior_mu_var = NULL;
 	PyObject* py_mu_prior = NULL;
 	PyObject* py_weight_prior = NULL;
 	PyObject* py_model_var = PyObject_GetAttrString(py_dp,"model_var");
+	PyObject* py_prior_var_prob = NULL;
+	double* unknown_model_var_array = NULL;
+	double* prior_var_prob = NULL;
+	double known_model_var_value = -1.;
+	if (!PyArray_Check(py_model_var)){
+		known_variance = true;
+		known_model_var_value = PyFloat_AsDouble(py_model_var);
+		if (PyErr_Occurred()!=NULL){
+			Py_XDECREF(py_model_var);
+			return NULL;
+		}
+		Py_XDECREF(py_model_var);
+	} else {
+		if (PyArray_NDIM((PyArrayObject*)py_model_var)!=1){
+			PyErr_SetString(PyExc_ValueError,"DecisionPolicy instance's attribute 'model_var' must be a float or a 1D numpy array.");
+			Py_XDECREF(py_model_var);
+			return NULL;
+		} else {
+			n_model_var = (int)PyArray_SHAPE((PyArrayObject*)py_model_var)[0];
+			if (n_model_var==1){
+				known_variance = true;
+				known_model_var_value = ((double*)PyArray_DATA((PyArrayObject*)py_model_var))[0];
+				Py_XDECREF(py_model_var);
+			} else {
+				known_variance = false;
+				py_prior_var_prob = PyObject_GetAttrString(py_dp,"prior_var_prob");
+				if (py_prior_var_prob==NULL){
+					Py_XDECREF(py_model_var);
+					PyErr_SetString(PyExc_AttributeError,"DecisionPolicy with unknown variance must have attribute 'prior_var_prob'. No such attribute was found.");
+					return NULL;
+				} else if (!PyArray_Check(py_prior_var_prob)){
+					Py_XDECREF(py_model_var);
+					Py_XDECREF(py_prior_var_prob);
+					PyErr_SetString(PyExc_ValueError,"DecisionPolicy instance's attribute 'prior_var_prob' must be a 1D numpy array.");
+					return NULL;
+				} else if (PyArray_NDIM((PyArrayObject*)py_prior_var_prob)!=1){
+					Py_XDECREF(py_model_var);
+					Py_XDECREF(py_prior_var_prob);
+					PyErr_SetString(PyExc_ValueError,"DecisionPolicy instance's attribute 'prior_var_prob' must be a 1D numpy array.");
+					return NULL;
+				} else if (PyArray_SHAPE((PyArrayObject*)py_prior_var_prob)[0]!=n_model_var){
+					Py_XDECREF(py_model_var);
+					Py_XDECREF(py_prior_var_prob);
+					PyErr_SetString(PyExc_ValueError,"DecisionPolicy instance's attribute 'prior_var_prob' must have the same shape as attribute 'model_var'.");
+					return NULL;
+				}
+				unknown_model_var_array = (double*)PyArray_DATA((PyArrayObject*)py_model_var);
+				prior_var_prob = (double*)PyArray_DATA((PyArrayObject*)py_prior_var_prob);
+				Py_XDECREF(py_model_var);
+				Py_XDECREF(py_prior_var_prob);
+			}
+		}
+	}
 	PyObject* py_prior_type = PyObject_GetAttrString(py_dp,"prior_type");
 	if (py_prior_type==NULL){
 		prior_type = 1;
@@ -30,6 +85,10 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 		py_prior_mu_mean = PyObject_GetAttrString(py_dp,"prior_mu_mean");
 		py_prior_mu_var = PyObject_GetAttrString(py_dp,"prior_mu_var");
 	} else {
+		if (!known_variance){
+			PyErr_SetString(PyExc_ValueError,"Unknown variance with discrete symmetric prior is not yet supported.");
+			return NULL;
+		}
 		py_mu_prior = PyObject_GetAttrString(py_dp,"mu_prior");
 		py_weight_prior = PyObject_GetAttrString(py_dp,"weight_prior");
 	}
@@ -42,13 +101,12 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	PyObject* py_tp = PyObject_GetAttrString(py_dp,"tp");
 	PyObject* py_cost = PyObject_GetAttrString(py_dp,"cost");
 	
-	if (py_model_var==NULL || py_n==NULL || py_dt==NULL || py_T==NULL ||
+	if (py_n==NULL || py_dt==NULL || py_T==NULL ||
 		py_reward==NULL || py_penalty==NULL || py_iti==NULL || py_tp==NULL ||
 		py_cost==NULL ||
 		(prior_type==1 && (py_prior_mu_mean==NULL || py_prior_mu_var==NULL)) ||
 		(prior_type==2 && (py_mu_prior==NULL || py_weight_prior==NULL))){
 		PyErr_SetString(PyExc_ValueError, "Could not parse all decisionPolicy property values");
-		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
 		Py_XDECREF(py_mu_prior);
@@ -63,7 +121,6 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 		Py_XDECREF(py_cost);
 		return NULL;
 	}
-	double model_var = PyFloat_AsDouble(py_model_var);
 	int n = int(PyInt_AS_LONG(py_n));
 	double dt = PyFloat_AsDouble(py_dt);
 	double T = PyFloat_AsDouble(py_T);
@@ -128,7 +185,6 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	}
 	// Check if an error occured while getting the c typed values from the python objects
 	if (PyErr_Occurred()!=NULL){
-		Py_XDECREF(py_model_var);
 		Py_XDECREF(py_prior_mu_mean);
 		Py_XDECREF(py_prior_mu_var);
 		Py_XDECREF(py_mu_prior);
@@ -145,7 +201,6 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	}
 	
 	
-	Py_DECREF(py_model_var);
 	Py_XDECREF(py_prior_mu_mean);
 	Py_XDECREF(py_prior_mu_var);
 	Py_XDECREF(py_mu_prior);
@@ -159,13 +214,21 @@ DecisionPolicyDescriptor* get_descriptor(PyObject* py_dp){
 	Py_DECREF(py_tp);
 	Py_DECREF(py_cost);
 	
+	DecisionPolicyDescriptor* out;
 	if (prior_type==1){
-		return new DecisionPolicyDescriptor(model_var, prior_mu_mean, prior_mu_var,
-						n, dt, T, reward, penalty, iti, tp, cost, owns_cost);
+		if (known_variance){
+			out = new DecisionPolicyDescriptor(known_model_var_value, prior_mu_mean, prior_mu_var,
+							n, dt, T, reward, penalty, iti, tp, cost, owns_cost);
+		} else {
+			out = new DecisionPolicyDescriptor(n_model_var, unknown_model_var_array,
+							prior_var_prob, prior_mu_mean, prior_mu_var, n, dt, T, reward,
+							penalty, iti, tp, cost, owns_cost);
+		}
 	} else {
-		return new DecisionPolicyDescriptor(model_var, n_prior, mu_prior, weight_prior,
+		out = new DecisionPolicyDescriptor(known_model_var_value, n_prior, mu_prior, weight_prior,
 						n, dt, T, reward, penalty, iti, tp, cost, owns_cost);
 	}
+	return out;
 }
 
 /* method xbounds(decisionPolicy, tolerance=1e-12, set_rho=True, set_bounds=True, return_values=False, root_bounds=None) */
@@ -623,7 +686,9 @@ error_cleanup:
 static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	PyObject* py_dp;
 	PyObject* py_bounds = Py_None;
-	double mu, rho;
+	PyObject* py_model_var = Py_None;
+	PyObject* py_rho;
+	double mu, rho, model_var;
 	bool must_decref_py_bounds = false;
 	PyArrayObject* py_xub, *py_xlb;
 	
@@ -633,8 +698,8 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	DecisionPolicy* dp;
 	DecisionPolicyDescriptor* dpd;
 	
-	static char* kwlist[] = {"decPol", "mu", "bounds", NULL};
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "Od|O", kwlist, &py_dp, &mu, &py_bounds))
+	static char* kwlist[] = {"decPol", "mu", "model_var", "bounds", NULL};
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "Od|OO", kwlist, &py_dp, &mu, &py_model_var, &py_bounds))
 		return NULL;
 	
 	dpd = get_descriptor(py_dp);
@@ -643,16 +708,26 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 		return NULL;
 	}
 	npy_intp py_nT[1] = {dpd->nT};
+	if (py_model_var==Py_None){
+		if (dpd->known_variance()){
+			model_var = dpd->model_var[0];
+		} else {
+			PyErr_SetString(PyExc_ValueError, "When the DecisionPolicy instance has unknown variance (many discrete prior variances), this method's 'model_var' input becomes mandatory");
+			goto early_error_cleanup;
+		}
+	} else {
+		model_var = PyFloat_AsDouble(py_model_var);
+	}
 	
-	PyObject* py_rho = PyObject_GetAttrString(py_dp,"rho");
+	py_rho = PyObject_GetAttrString(py_dp,"rho");
 	if (py_rho==NULL){
 		PyErr_SetString(PyExc_ValueError, "decisionPolicy instance has no rho value set");
-		return NULL;
+		goto early_error_cleanup;
 	}
 	rho = PyFloat_AsDouble(py_rho);
 	if (PyErr_Occurred()!=NULL){
 		Py_XDECREF(py_rho);
-		return NULL;
+		goto early_error_cleanup;
 	}
 	Py_DECREF(py_rho);
 	
@@ -691,7 +766,7 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 	PyTuple_SET_ITEM(py_out, 0, py_g1); // Steals a reference
 	PyTuple_SET_ITEM(py_out, 1, py_g2); // Steals a reference
 		
-	dp->rt(mu,(double*) PyArray_DATA((PyArrayObject*) py_g1),
+	dp->rt(mu,model_var,(double*) PyArray_DATA((PyArrayObject*) py_g1),
 			 (double*) PyArray_DATA((PyArrayObject*) py_g2),
 			 (double*) PyArray_DATA((PyArrayObject*) py_xub),
 			 (double*) PyArray_DATA((PyArrayObject*) py_xlb));
@@ -707,7 +782,6 @@ static PyObject* dpmod_rt(PyObject* self, PyObject* args, PyObject* keywds){
 
 error_cleanup:
 	delete(dp);
-	delete(dpd);
 	if (must_decref_py_bounds){
 		Py_XDECREF(py_bounds);
 		// The elements in py_bounds are also decref'ed so only calling
@@ -716,18 +790,292 @@ error_cleanup:
 	Py_XDECREF(py_g1);
 	Py_XDECREF(py_g2);
 	Py_XDECREF(py_out);
+	goto early_error_cleanup;
+
+early_error_cleanup:
+	delete(dpd);
 	return NULL;
+}
+
+/* method rt(decisionPolicy, mu, bounds=None) */
+static PyObject* dpmod_fpt_conf_matrix(PyObject* self, PyObject* args, PyObject* keywds){
+	/***
+	* This method takes the confidence report as a function of time (CR)
+	* and converts it to a matrix. This matrix is filled with zeroes
+	* except for the entries that are touched by the plot of CR. The
+	* value of each entry is given by the first passage time probability
+	* density (FPT).
+	* 
+	* fpt_conf_matrix(self,first_passage_time, confidence_response, confidence_partition=100)
+	* 
+	* Input:
+	* 	first_passage_time: A 2D numpy array of doubles with the FPT.
+	* 		Axis=0 represents different responses and axis=1 time. The
+	* 		shape of axis=1 must be equal to self.nT.
+	* 	confidence_response: A 2D numpy array of doubles with the CR.
+	* 		It must have the same shape as the first_passage_time input.
+	* 	confidence_partition: An int that determines the number of
+	* 		discrete confidence report values, uniformly distributed in
+	* 		the interval [0,1], that will be used to construct the
+	* 		output array.
+	* 
+	* Output: A 3D numpy array of shape:
+	* 	(first_passage_time.shape[0],confidence_partition,first_passage_time.shape[1])
+	* 	The values are such that np.sum(output,axis=1)==first_passage_time
+	* 	and calling imshow(output[0]>0,origin='lower') and
+	* 	plot(confidence_partition) will show almost overlapping curves.
+	* 
+	***/
+	
+	PyObject* py_dp;
+	PyArrayObject* py_first_passage_time;
+	PyArrayObject* py_confidence_response;
+	int confidence_partition = 100;
+	int first_passage_time_strides[2], confidence_response_strides[2];
+	
+	PyObject* py_out = NULL;
+	
+	static char* kwlist[] = {"decPol", "first_passage_time", "confidence_response", "confidence_partition", NULL};
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OO!O!|i", kwlist,
+									&py_dp, &PyArray_Type, &py_first_passage_time, &PyArray_Type, &py_confidence_response, &confidence_partition))
+		return NULL;
+	
+	if (confidence_partition<=0){
+		PyErr_SetString(PyExc_ValueError, "confidence_partition must be greater than 0");
+		return NULL;
+	}
+	
+	if (PyArray_NDIM(py_first_passage_time)!=2 || PyArray_NDIM(py_confidence_response)!=2){
+		PyErr_SetString(PyExc_ValueError, "first_passage_time and confidence_response must be 2D numpy arrays");
+		return NULL;
+	}
+	if (PyArray_DESCR(py_first_passage_time)->type_num != NPY_DOUBLE || PyArray_DESCR(py_confidence_response)->type_num != NPY_DOUBLE){
+		PyErr_SetString(PyExc_ValueError, "first_passage_time and confidence_response must contain double precision floating point values");
+		return NULL;
+	}
+	int n_alternatives = (int) PyArray_SHAPE(py_first_passage_time)[0];
+	int array_nT = (int) PyArray_SHAPE(py_first_passage_time)[1];
+	if ((int) PyArray_SHAPE(py_confidence_response)[0]!=n_alternatives || (int) PyArray_SHAPE(py_confidence_response)[1]!=array_nT){
+		PyErr_SetString(PyExc_ValueError, "first_passage_time and confidence_response must have the same shape");
+		return NULL;
+	}
+	for (int i=0; i<2; ++i){
+		first_passage_time_strides[i] = ((int) PyArray_STRIDES(py_first_passage_time)[i])/sizeof(double);
+		confidence_response_strides[i] = ((int) PyArray_STRIDES(py_confidence_response)[i])/sizeof(double);
+	}
+	double* first_passage_time = (double*) PyArray_DATA(py_first_passage_time);
+	double* confidence_response = (double*) PyArray_DATA(py_confidence_response);
+	
+	npy_intp out_shape[3] = {(npy_intp)n_alternatives, (npy_intp)array_nT, (npy_intp)confidence_partition};
+	py_out = PyArray_SimpleNew(3, out_shape, NPY_DOUBLE);
+	if (py_out==NULL){
+		PyErr_SetString(PyExc_MemoryError, "Cannot allocate output to memory");
+		return NULL;
+	}
+	double* out = (double*) PyArray_DATA((PyArrayObject*)py_out);
+	for (int i=0;i<n_alternatives*array_nT*confidence_partition;++i){
+		out[i] = 0.;
+	}
+	
+	DecisionPolicyDescriptor* dpd = get_descriptor(py_dp);
+	if (dpd==NULL){
+		// An error occurred while getting the descriptor and the error message was set within get_descriptor
+		Py_DECREF(py_out);
+		return NULL;
+	}
+	if (dpd->nT!=array_nT){
+		PyErr_Format(PyExc_ValueError, "first_passage_time and confidence_response have an inconsistent shape in axis=1. The shape should be equal to the decisionPolicy instance's nT = %d",dpd->nT);
+		delete dpd;
+		Py_DECREF(py_out);
+		return NULL;
+	}
+	
+	DecisionPolicy* dp = DecisionPolicy::create(*dpd);
+	
+	dp->fpt_conf_matrix(first_passage_time, first_passage_time_strides, n_alternatives, confidence_partition, confidence_response, confidence_response_strides, out);
+	
+	delete dp;
+	delete dpd;
+	return PyArray_SwapAxes((PyArrayObject*) py_out, 1, 2);
+}
+
+static PyObject* dpmod_testsuite(PyObject* self, PyObject* args, PyObject* keywds){
+	if (!PyArg_ParseTuple(args, ""))
+		return NULL;
+	
+	int i;
+	PyObject* dict1 = PyDict_New();
+	PyObject* dict2 = PyDict_New();
+	PyObject* dict3 = PyDict_New();
+	
+	double internal_var = 10;
+	double external_var = 100;
+	double model_var = internal_var+external_var;
+	double prior_mu_mean = 0.;
+	double prior_mu_var = 1000.;
+	int n = 101;
+	double dt = 1e-2;
+	double T = 1.;
+	int nT = (int)(T/dt)+1;
+	double reward = 1.;
+	double penalty = 0.;
+	double iti = 3.;
+	double tp = 0.;
+	double cost = 0.;
+	double cost_pointer[nT];
+	for (i=0;i<nT;++i){
+		cost_pointer[i] = cost;
+	}
+	int n_prior = 10;
+	npy_intp discrete_prior_dims[] = {n_prior};
+	PyObject* py_mu_prior = PyArray_SimpleNew(1,discrete_prior_dims,NPY_DOUBLE);
+	PyObject* py_weight_prior = PyArray_SimpleNew(1,discrete_prior_dims,NPY_DOUBLE);
+	double* mu_prior = (double*) PyArray_DATA((PyArrayObject*)py_mu_prior);
+	double* weight_prior = (double*) PyArray_DATA((PyArrayObject*)py_weight_prior);
+	double norm = 0.;
+	for (i=0;i<n_prior;++i){
+		mu_prior[i] = 20./((double)n_prior-1)*((double)i);
+		if (mu_prior[i]==0){
+			mu_prior[i] = 1e-10;
+		}
+		weight_prior[i] = exp(-0.5*mu_prior[i]*mu_prior[i]/100.);
+		//~ mu_prior[i] = 1000./((double)n_prior-1)*((double)i);
+		//~ weight_prior[i] = exp(-0.5*mu_prior[i]*mu_prior[i]/1000.);
+		norm+= weight_prior[i];
+	}
+	for (i=0;i<n_prior;++i){
+		weight_prior[i]*= (0.5/norm);
+	}
+	int n_model_var = 3;
+	npy_intp unknown_var_dims[] = {n_model_var};
+	PyObject* py_unknown_var = PyArray_SimpleNew(1,unknown_var_dims,NPY_DOUBLE);
+	PyObject* py_unknown_external_var = PyArray_SimpleNew(1,unknown_var_dims,NPY_DOUBLE);
+	PyObject* py_prior_var_prob = PyArray_SimpleNew(1,unknown_var_dims,NPY_DOUBLE);
+	double* unknown_var = (double*) PyArray_DATA((PyArrayObject*)py_unknown_var);
+	double* unknown_external_var = (double*) PyArray_DATA((PyArrayObject*)py_unknown_external_var);
+	double* prior_var_prob = (double*) PyArray_DATA((PyArrayObject*)py_prior_var_prob);
+	for (i=0;i<n_model_var;++i){
+		unknown_external_var[i] = (double)(50.*(i+1));
+		unknown_var[i] = internal_var+unknown_external_var[i];
+		prior_var_prob[i] = 1./double(n_model_var);
+	}
+	
+	// Will output 3 dictionaries with the settings of each testsuite
+	PyDict_SetItemString(dict1, "n", PyInt_FromLong((long) n));
+	PyDict_SetItemString(dict1, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict1, "external_var", PyFloat_FromDouble(external_var));
+	PyDict_SetItemString(dict1, "model_var", PyFloat_FromDouble(model_var));
+	PyDict_SetItemString(dict1, "prior_mu_mean", PyFloat_FromDouble(prior_mu_mean));
+	PyDict_SetItemString(dict1, "prior_mu_var", PyFloat_FromDouble(prior_mu_var));
+	PyDict_SetItemString(dict1, "dt", PyFloat_FromDouble(dt));
+	PyDict_SetItemString(dict1, "T", PyFloat_FromDouble(T));
+	PyDict_SetItemString(dict1, "reward", PyFloat_FromDouble(reward));
+	PyDict_SetItemString(dict1, "penalty", PyFloat_FromDouble(penalty));
+	PyDict_SetItemString(dict1, "iti", PyFloat_FromDouble(iti));
+	PyDict_SetItemString(dict1, "tp", PyFloat_FromDouble(tp));
+	PyDict_SetItemString(dict1, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict1, "cost", PyFloat_FromDouble(cost));
+	
+	PyDict_SetItemString(dict2, "n", PyInt_FromLong((long) n));
+	PyDict_SetItemString(dict2, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict2, "external_var", PyFloat_FromDouble(external_var));
+	PyDict_SetItemString(dict2, "model_var", PyFloat_FromDouble(model_var));
+	PyDict_SetItemString(dict2, "discrete_prior", Py_BuildValue("(OO)",py_mu_prior,py_weight_prior));
+	PyDict_SetItemString(dict2, "dt", PyFloat_FromDouble(dt));
+	PyDict_SetItemString(dict2, "T", PyFloat_FromDouble(T));
+	PyDict_SetItemString(dict2, "reward", PyFloat_FromDouble(reward));
+	PyDict_SetItemString(dict2, "penalty", PyFloat_FromDouble(penalty));
+	PyDict_SetItemString(dict2, "iti", PyFloat_FromDouble(iti));
+	PyDict_SetItemString(dict2, "tp", PyFloat_FromDouble(tp));
+	PyDict_SetItemString(dict2, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict2, "cost", PyFloat_FromDouble(cost));
+	
+	PyDict_SetItemString(dict3, "n", PyInt_FromLong((long) n));
+	PyDict_SetItemString(dict3, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict3, "external_var", py_unknown_external_var);
+	PyDict_SetItemString(dict3, "prior_var_prob", py_prior_var_prob);
+	PyDict_SetItemString(dict3, "model_var", py_unknown_var);
+	PyDict_SetItemString(dict3, "prior_mu_mean", PyFloat_FromDouble(prior_mu_mean));
+	PyDict_SetItemString(dict3, "prior_mu_var", PyFloat_FromDouble(prior_mu_var));
+	PyDict_SetItemString(dict3, "dt", PyFloat_FromDouble(dt));
+	PyDict_SetItemString(dict3, "T", PyFloat_FromDouble(T));
+	PyDict_SetItemString(dict3, "reward", PyFloat_FromDouble(reward));
+	PyDict_SetItemString(dict3, "penalty", PyFloat_FromDouble(penalty));
+	PyDict_SetItemString(dict3, "iti", PyFloat_FromDouble(iti));
+	PyDict_SetItemString(dict3, "tp", PyFloat_FromDouble(tp));
+	PyDict_SetItemString(dict3, "internal_var", PyFloat_FromDouble(internal_var));
+	PyDict_SetItemString(dict3, "cost", PyFloat_FromDouble(cost));
+	
+	// Create DecisionPolicyDescriptor
+	DecisionPolicyDescriptor* dpd1 = new DecisionPolicyDescriptor(model_var, prior_mu_mean, prior_mu_var,
+						n, dt, T, reward, penalty, iti, tp, cost_pointer, false);
+	DecisionPolicyDescriptor* dpd2 = new DecisionPolicyDescriptor(model_var, n_prior, mu_prior, weight_prior,
+						n, dt, T, reward, penalty, iti, tp, cost_pointer, false);
+	DecisionPolicyDescriptor* dpd3 = new DecisionPolicyDescriptor(n_model_var, unknown_var, prior_var_prob,
+						prior_mu_mean, prior_mu_var,n, dt, T, reward, penalty, iti, tp, cost_pointer, false);
+	// Create DecisionPolicy
+	DecisionPolicy* dp1 = DecisionPolicy::create(*dpd1);
+	DecisionPolicy* dp2 = DecisionPolicy::create(*dpd2);
+	DecisionPolicy* dp3 = DecisionPolicy::create(*dpd3);
+	
+	// Create output arrays
+	double t = 0.;
+	int noutput = 100;
+	npy_intp output_dims[] = {noutput};
+	PyObject* py_x = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_g1 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_g2 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_g3 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_dg1 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_dg2 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_dg3 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_x1 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_x2 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	PyObject* py_x3 = PyArray_SimpleNew(1,output_dims,NPY_DOUBLE);
+	double* x = (double*) PyArray_DATA((PyArrayObject*)py_x);
+	double* g1 = (double*) PyArray_DATA((PyArrayObject*)py_g1);
+	double* g2 = (double*) PyArray_DATA((PyArrayObject*)py_g2);
+	double* g3 = (double*) PyArray_DATA((PyArrayObject*)py_g3);
+	double* dg1 = (double*) PyArray_DATA((PyArrayObject*)py_dg1);
+	double* dg2 = (double*) PyArray_DATA((PyArrayObject*)py_dg2);
+	double* dg3 = (double*) PyArray_DATA((PyArrayObject*)py_dg3);
+	double* x1 = (double*) PyArray_DATA((PyArrayObject*)py_x1);
+	double* x2 = (double*) PyArray_DATA((PyArrayObject*)py_x2);
+	double* x3 = (double*) PyArray_DATA((PyArrayObject*)py_x3);
+	for (i=0;i<noutput;++i){
+		x[i] = -30. + 60./(double(noutput-1))*double(i);
+		g1[i] = dp1->x2g(t,x[i]);
+		g2[i] = dp2->x2g(t,x[i]);
+		g3[i] = dp3->x2g(t,x[i]);
+		dg1[i] = dp1->dx2g(t,x[i]);
+		dg2[i] = dp2->dx2g(t,x[i]);
+		dg3[i] = dp3->dx2g(t,x[i]);
+		x1[i] = dp1->g2x(t,g1[i]);
+		x2[i] = dp2->g2x(t,g2[i]);
+		x3[i] = dp3->g2x(t,g3[i]);
+	}
+	
+	delete dpd1;
+	delete dpd2;
+	delete dpd3;
+	delete dp1;
+	delete dp2;
+	delete dp3;
+	return Py_BuildValue("(OOOOOOOOOOOOOO)", dict1, dict2, dict3, PyFloat_FromDouble(t), py_x, py_g1, py_g2, py_g3, py_dg1, py_dg2, py_dg3, py_x1, py_x2, py_x3);
 }
 
 static PyMethodDef DPMethods[] = {
     {"xbounds", (PyCFunction) dpmod_xbounds, METH_VARARGS | METH_KEYWORDS,
-     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n'root_bounds' must be a tuple of two elements: (lower_bound, upper_bound). Both 'lower_bound' and 'upper_bound' must be floats that represent the lower and upper bounds in which to perform the root finding of rho."},
+     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space)\n\n  (xub, xlb) = xbounds(dp, tolerance=1e-12, set_rho=False, set_bounds=False, return_values=False, root_bounds=None)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp'.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'tolerance' is a float that indicates the tolerance when searching for the rho value that yields value[int(n/2)]=0.\n'set_rho' must be an expression whose 'truthness' can be evaluated. If set_rho is True, the rho attribute in the python dp object will be set to the rho value obtained after iteration. If false, it will not be set.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n'root_bounds' must be a tuple of two elements: (lower_bound, upper_bound). Both 'lower_bound' and 'upper_bound' must be floats that represent the lower and upper bounds in which to perform the root finding of rho.\n\n"},
     {"xbounds_fixed_rho", (PyCFunction) dpmod_xbounds_fixed_rho, METH_VARARGS | METH_KEYWORDS,
-     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space) without iterating the value of rho\n\n  (xub, xlb) = xbounds_fixed_rho(dp, rho=None, set_bounds=False, return_values=False)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds_fixed_rho(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp' for a given rho value.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'rho' is the fixed reward rate value used to compute the decision bounds and values. If rho=None, then the DecisionPolicy instance's rho is used.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements."},
+     "Computes the decision bounds in x(t) space (i.e. the accumulated sensory input space) without iterating the value of rho\n\n  (xub, xlb) = xbounds_fixed_rho(dp, rho=None, set_bounds=False, return_values=False)\n\n(xub, xlb, value, v_explore, v1, v2) = xbounds_fixed_rho(dp, ..., return_values=True)\n\nComputes the decision bounds for a decisionPolicy instance specified in 'dp' for a given rho value.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); xb = dp.belief_bound_to_x_bound(b); from python. Another difference is that this function returns a tuple of (upper_bound, lower_bound) instead of a numpy array whose first element is upper_bound and second element is lower_bound.\n'rho' is the fixed reward rate value used to compute the decision bounds and values. If rho=None, then the DecisionPolicy instance's rho is used.\n'set_bounds' must be an expression whose 'truthness' can be evaluated. If set_bounds is True, the python DecisionPolicy object's ´bounds´ attribute will be set to the upper and lower bounds in g space computed in the c++ instance. If false, it will do nothing.\nIf 'return_values' evaluates to True, then the function returns four extra numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n\n"},
     {"values", (PyCFunction) dpmod_values, METH_VARARGS | METH_KEYWORDS,
-     "Computes the values for a given reward rate, rho, and decisionPolicy parameters.\n\n(value, v_explore, v1, v2) = values(dp,rho=None)\n\nComputes the value for a given belief g as a function of time for a supplied reward rate, rho. If rho is set to None, then the decisionPolicy instance's rho attribute will be used.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); from python. The function returns a tuple of four numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements."},
+     "Computes the values for a given reward rate, rho, and decisionPolicy parameters.\n\n(value, v_explore, v1, v2) = values(dp,rho=None)\n\nComputes the value for a given belief g as a function of time for a supplied reward rate, rho. If rho is set to None, then the decisionPolicy instance's rho attribute will be used.\nThis function is more memory and computationally efficient than calling dp.invert_belief();dp.value_dp(); from python. The function returns a tuple of four numpy arrays: value, v_explore, v1 and v2. 'value' is an nT by n shaped array that holds the value of a given g at time t. 'v_explore' has shape nT-1 by n and holds the value of exploring at time t with a given g. v1 and v2 are values of immediately deciding for option 1 or 2, and are one dimensional arrays with n elements.\n"},
     {"rt", (PyCFunction) dpmod_rt, METH_VARARGS | METH_KEYWORDS,
-     "Computes the rt distribution for a given drift rate, mu, decisionPolicy parameters and decision bounds in x space, bounds.\n\n(g1, g2) = values(dp,mu,bounds=None)\n\nComputes the rt distribution for selecting options 1 or 2 for a given drift rate mu and the parameters in the decisionPolicy instance dp. If bounds is None, then xbounds is called with default parameters to compute the decision bounds in x space. To avoid this, supply a tuple (xub,xlb) as the one that is returned by the function xbounds. xub and xlb must be one dimensional numpy arrays with the same elements as dp.t."},
+     "Computes the rt distribution for a given drift rate, mu, variance rate, DecisionPolicy parameters and decision bounds in x space, bounds.\n\n(g1, g2) = values(dp,mu,model_var=None,bounds=None)\n\nInput:\n  dp:        DecisionPolicy instace\n  mu:        Float that encodes the diffusion drift rate (net evidence).\n  bounds:    By default None. If None, the method internally calls the function xbounds(dp) with default parameter values to compute the decision bounds in x space. To avoid this, supply a tuple (xub,xlb) as the one that is returned by the function xbounds. xub and xlb must be one dimensional numpy arrays with the same elements as dp.t.\n  model_var: An input that is mandatory for DecisionPolicy instances with unknown variance that represents the variance rate of the diffusion process. If the DecisionPolicy instance has known variance and model_var is None, the instance's model_var is used as the diffusion's variance rate.\n\nOutput:\n  (g1,g2):   Each of these outputs are 1D numpy arrays with dp.nT number of elements representing the first passage time probability density for option 1 and 2 respectively.\n\n"},
+    {"fpt_conf_matrix", (PyCFunction) dpmod_fpt_conf_matrix, METH_VARARGS | METH_KEYWORDS,
+     "This method takes the confidence report as a function of time (CR)\nand converts it to a matrix. This matrix is filled with zeroes\nexcept for the entries that are touched by the plot of CR. The\nvalue of each entry is given by the first passage time probability\ndensity (FPT).\n\n\nfpt_conf_matrix(self,first_passage_time, confidence_response, confidence_partition=100)\n\nInput:\n	first_passage_time: A 2D numpy array of doubles with the FPT.\n		Axis=0 represents different responses and axis=1 time. The\n		shape of axis=1 must be equal to self.nT.\n	confidence_response: A 2D numpy array of doubles with the CR.\n		It must have the same shape as the first_passage_time input.\n	confidence_partition: An int that determines the number of\n		discrete confidence report values, uniformly distributed in\n		the interval [0,1], that will be used to construct the\n		output array.\n\nOutput: A 3D numpy array of shape:\n	(first_passage_time.shape[0],confidence_partition,first_passage_time.shape[1])\n	The values are such that np.sum(output,axis=1)==first_passage_time\n	and calling imshow(output[0]>0,origin='lower') and\n	plot(confidence_partition) will show almost overlapping curves.\n\n"},
+    {"testsuite", (PyCFunction) dpmod_testsuite, METH_VARARGS,""},
     {NULL, NULL, 0, NULL}
 };
 
