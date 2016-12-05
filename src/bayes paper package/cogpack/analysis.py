@@ -1,11 +1,12 @@
-from __future__ import division
-from __future__ import print_function
+#-*- coding: UTF-8 -*-
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 import numpy as np
 import data_io_cognition as io
 import cost_time as ct
 import fits_cognition as fits
 from fits_cognition import Fitter
+import utils
 import matplotlib as mt
 from matplotlib import pyplot as plt
 from matplotlib import colors as mt_colors
@@ -14,7 +15,6 @@ import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools
 from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.stats as stats
-import utils
 try:
 	from diptest.diptest import dip
 except:
@@ -109,11 +109,13 @@ def default_tree_style(mode='r',title=None):
 
 class Analyzer():
 	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '',
-				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				cmap_meth='log_odds', fits_path='fits_cognition/',
+				override=False,n_clusters=2, affinity='euclidean',
 				linkage='ward', pooling_func=np.nanmean, connectivity=None):
 		"""
 		Analyzer(method = 'full_confidence', optimizer = 'cma', suffix = '',
-				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				cmap_meth='log_odds', fits_path='fits_cognition/',
+				override=False,n_clusters=2, affinity='euclidean',
 				linkage='ward', pooling_func=np.nanmean, connectivity=None)
 		
 		This Class implements an interface between the
@@ -172,6 +174,7 @@ class Analyzer():
 		self.optimizer = optimizer
 		self.suffix = suffix
 		self.cmap_meth = cmap_meth
+		self.fits_path = fits_path
 		self.get_summary(override=override)
 		self.init_clusterer(n_clusters=n_clusters, affinity=affinity,\
 				linkage=linkage, pooling_func=pooling_func, connectivity=connectivity)
@@ -316,7 +319,14 @@ class Analyzer():
 			self.summary = {'experimental':{},'theoretical':{}}
 			for s in subjects:
 				print(s.get_key())
-				fname = fits.Fitter_filename(s.experiment,self.method,s.get_name(),s.get_session(),self.optimizer,self.suffix)
+				fname = fits.Fitter_filename(experiment=s.experiment,
+											 method=self.method,
+											 name=s.get_name(),
+											 session=s.get_session(),
+											 optimizer=self.optimizer,
+											 suffix=self.suffix,
+											 confidence_map_method=self.cmap_meth,
+											 fits_path=self.fits_path)
 				if not(os.path.exists(fname) and os.path.isfile(fname)):
 					continue
 				s_measures = self.subjectSession_measures(s)
@@ -432,9 +442,16 @@ class Analyzer():
 		full_confidence_merit = fitter.forced_compute_full_confidence_merit(parameters)
 		full_merit = fitter.forced_compute_full_merit(parameters)
 		confidence_only_merit = fitter.forced_compute_confidence_only_merit(parameters)
-		fitter_stats = fitter.stats(return_mean_rt=True,return_mean_confidence=True,return_median_rt=True,
-				return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
-				return_auc=True)
+		try:
+			# First try to load the fitter stats from memory
+			f = open(fitter.get_save_file_name().replace('.pkl','_stats.pkl'),'r')
+			fitter_stats = pickle.load(f)
+			f.close()
+		except:
+			# If no stats file is found or the load fails, then compute the stats
+			fitter_stats = fitter.stats(return_mean_rt=True,return_mean_confidence=True,return_median_rt=True,
+					return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
+					return_auc=True)
 		
 		performance = fitter_stats['performance']
 		performance_conditioned = fitter_stats['performance_conditioned']
@@ -721,15 +738,15 @@ class Analyzer():
 		exp_dtype = []
 		for exp_ind in experimental_ind_names:
 			try:
-				exp_dtype.append((exp_ind,dtype_dict[exp_ind]))
+				exp_dtype.append((str(exp_ind),dtype_dict[exp_ind]))
 			except:
-				exp_dtype.append((exp_ind,'f'))
+				exp_dtype.append((str(exp_ind),'f'))
 		teo_dtype = []
 		for teo_ind in theoretical_ind_names:
 			try:
-				teo_dtype.append((teo_ind,dtype_dict[teo_ind]))
+				teo_dtype.append((str(teo_ind),dtype_dict[teo_ind]))
 			except:
-				teo_dtype.append((teo_ind,'f'))
+				teo_dtype.append((str(teo_ind),'f'))
 		N = len(experimental[0])
 		experimental_ = []
 		theoretical_ = []
@@ -1288,7 +1305,130 @@ class Analyzer():
 		
 		"""
 		return self.spanner(branchsamples)
-
+	
+	def parameter_correlation(self,used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x)):
+		"""
+		self.parameter_correlation(used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x))
+		
+		Compute the correlation matrix between parameters from the
+		parameter values for each experiment, session and subject name.
+		
+		Input:
+			used_parameters: A list with the parameters that will be
+				used to compute the correlations.
+			method: The method used to compute the correlation matrix.
+				Refer to utils.corrcoef for more information.
+			nanhandling: The nan handling policy used to compute the
+				correlation matrix. Refer to utils.corrcoef for more
+				information.
+			correct_multiple_comparison_pvalues: A bool. If True, the
+				pvalues are corrected for multiple comparisons using the
+				Holm-Bonferroni method. If it is False, no correction is
+				applied.
+			normalize: None or a dict that indicates if and how the
+				parameter values should be normalized. Refer to
+				self.get_summary_stats_array for more information.
+			normalization_function: A callable that is used to normalize
+				the parameter values. Refer to
+				self.get_summary_stats_array for more information.
+		
+		Output:
+			corrs: A 2D numpy array that holds the correlation values.
+				These range from -1 to 1, where 1 indicates full positive
+				correlation, -1 indicates full negative correlation and
+				0 indicates no correlation. The order in which
+				parameters appear in the supplied 'used_parameters'
+				controls the order in which they appear in the corrs and
+				pvals arrays.
+			pvals: A 2D numpy array that holds the correlation statistic's
+				p-value. Typically, p-values below 0.05 are considered
+				indicative of significant correlation.
+		
+		"""
+		subj,model = self.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		parameters = np.array([model[par] for par in used_parameters])
+		corrs,pvals = utils.corrcoef(parameters,method=method,nanhandling=nanhandling)
+		if correct_multiple_comparison_pvalues:
+			pvals = correct_rho_pval(pvals)
+		return corrs,pvals
+	
+	def correlate_parameters_with_stats(self,used_statistics=['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index'],
+							  used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x)):
+		"""
+		self.parameter_correlation(used_statistics=['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index'],
+							  used_parameters=['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope'],
+							  method='pearson',nanhandling='pairwise',
+							  correct_multiple_comparison_pvalues=True,
+							  normalize={'internal_var':'experiment'},
+							  normalization_function=lambda x: x/np.nanstd(x))
+		
+		Compute the correlation matrix between parameters from the
+		parameter values for each experiment, session and subject name.
+		
+		Input:
+			used_statistics: A list with the subject summary statistics
+				that will be correlated with the used_parameters.
+			used_parameters: A list with the parameters that will be
+				used to compute the correlations.
+			method: The method used to compute the correlation matrix.
+				Refer to utils.corrcoef for more information.
+			nanhandling: The nan handling policy used to compute the
+				correlation matrix. Refer to utils.corrcoef for more
+				information.
+			correct_multiple_comparison_pvalues: A bool. If True, the
+				pvalues are corrected for multiple comparisons using the
+				Holm-Bonferroni method. If it is False, no correction is
+				applied.
+			normalize: None or a dict that indicates if and how the
+				parameter values should be normalized. Refer to
+				self.get_summary_stats_array for more information.
+			normalization_function: A callable that is used to normalize
+				the parameter values. Refer to
+				self.get_summary_stats_array for more information.
+		
+		Output:
+			corrs: A 2D numpy array that holds the correlation values.
+				These range from -1 to 1, where 1 indicates full positive
+				correlation, -1 indicates full negative correlation and
+				0 indicates no correlation. The axis=0 indices (rows)
+				correspond to different subject statistics and the axis=1
+				(columns) correspond to the different used parameters.
+				The order in which stats and parameters appear in the
+				supplied 'used_statistics' and 'used_parameters' controls
+				the order in which they appear in the corrs and pvals
+				arrays.
+			pvals: A 2D numpy array that holds the correlation statistic's
+				p-value. Typically, p-values below 0.05 are considered
+				indicative of significant correlation.
+		
+		"""
+		subj,model = self.get_summary_stats_array(normalize=normalize,normalization_function=normalization_function)
+		subj_stats = np.array([subj[s] for s in used_statistics])
+		parameters = np.array([model[par] for par in used_parameters])
+		corrs = []
+		pvals = []
+		for subj_stat in subj_stats:
+			corr,pval = utils.corrcoef(subj_stat,parameters,method=method,nanhandling=nanhandling)
+			corrs.extend(corr[0,1:])
+			pvals.extend(pval[0,1:])
+		corrs = np.array(corrs)
+		pvals = np.array(pvals)
+		if correct_multiple_comparison_pvalues:
+			pvals = utils.holm_bonferroni(pvals)
+		return corrs.reshape((len(used_statistics),len(used_parameters))),pvals.reshape((len(used_statistics),len(used_parameters)))
+	
 def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_mode='r',show=False,extension='svg'):
 	a = Analyzer(**analyzer_kwargs)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
@@ -1312,7 +1452,14 @@ def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_m
 		tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'))
 	tree.render('../../figs/confidence_cluster.'+extension,tree_style=default_tree_style(mode=tree_mode,title='Confidence Hierarchy'), layout=default_tree_layout,\
 				dpi=300, units='mm', w=150)
+	decision_parameters=['cost','internal_var','phase_out_prob']
+	#~ 
+	#~ tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters,filter_nans=filter_nans)
+	#~ tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='D+C Hierarchy'))
+	#~ tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters+['dead_time','dead_time_sigma'],filter_nans=filter_nans)
+	#~ tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='All par Hierarchy'))
 	
+	show=False
 	if show:
 		a.controlled_scatter(scattered_parameters=decision_parameters,merge=merge)
 		plt.legend(loc='best', fancybox=True, framealpha=0.5)
@@ -1333,7 +1480,7 @@ def parameter_correlation(analyzer_kwargs={}):
 													  #~ 'dead_time_sigma':'all',\
 													  #~ 'phase_out_prob':'all'})
 	
-	dtype = [('parameters','O'),('name','i'),('session','i'),('experiment',experiments.dtype)]
+	dtype = [(str('parameters'),'O'),(str('name'),'i'),(str('session'),'i'),(str('experiment'),experiments.dtype)]
 	sort_array = [(p,int(n),int(s),e) for p,n,s,e in zip(parameters,names,sessions,experiments)]
 	sort_array = np.array(sort_array,dtype=dtype)
 	sort_array.sort(order=['experiment', 'session','name'])
@@ -1827,8 +1974,9 @@ def correlation_analysis(analyzer_kwargs={}):
 	plt.show(True)
 
 def test():
-	parameter_correlation()
+	#~ parameter_correlation()
 	#~ correlation_analysis()
+	cluster_analysis(show=True)
 	return
 	#~ parameter_correlation()
 	#~ return

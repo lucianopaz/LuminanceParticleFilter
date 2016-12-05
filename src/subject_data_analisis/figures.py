@@ -18,7 +18,7 @@ import moving_bounds_fits as mo
 import fits_cognition as fits
 from matplotlib import image as mpimg
 from matplotlib.colors import LogNorm
-from fits_cognition import Fitter_plot_handler
+from fits_cognition import Fitter, Fitter_plot_handler
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
 def savefig(fname,extension,figure=None):
@@ -879,11 +879,12 @@ def performance_vs_var_and_cost(fname='performance_vs_var_and_cost',suffix='.svg
 
 def cluster_hierarchy(fname='cluster_hierarchy',suffix='.svg'):
 	fname+=suffix
-	analysis.cluster_analysis(method='full_confidence', optimizer='cma', suffix='', override=False,\
-				affinity='euclidean', linkage='ward', pooling_func=np.nanmean,\
+	analyzer_kwargs={'method':'full_confidence','optimizer':'cma','suffix':'',
+					 'cmap_meth':'belief','override':False,
+					 'affinity':'euclidean','linkage':'ward','pooling_func':np.nanmean}
+	analysis.cluster_analysis(analyzer_kwargs=analyzer_kwargs,
 				merge='names',filter_nans='post', tree_mode='r',extension='png')
-	a = analysis.Analyzer(method='full_confidence', optimizer='cma', suffix='',\
-							override=False, affinity='euclidean', linkage='ward', pooling_func=np.nanmean)
+	a = analysis.Analyzer(**analyzer_kwargs)
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment',\
 												  'confidence_map_slope':'all',\
 												  'cost':'all',\
@@ -1026,8 +1027,10 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 	subjects = io_cog.filter_subjects_list(io_cog.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
 	fitter_plot_handler = None
 	for i,s in enumerate(subjects):
+		#~ handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
+				#~ session=s.get_session(),optimizer='cma',suffix='').replace('.pkl','_plot_handler.pkl')
 		handler_fname = fits.Fitter_filename(experiment=s.experiment,method='full_confidence',name=s.get_name(),
-				session=s.get_session(),optimizer='cma',suffix='').replace('.pkl','_plot_handler.pkl')
+				session=s.get_session(),optimizer='cma',suffix='',confidence_map_method='belief').replace('.pkl','_plot_handler.pkl')
 		try:
 			f = open(handler_fname,'r')
 			temp = pickle.load(f)
@@ -1063,10 +1066,10 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 			subj_c_array = subj['c_array']
 		subj_rt = np.hstack((subj['rt'],np.array([subj['rt'][:,-1]]).T))
 		subj_confidence = np.hstack((subj['confidence'],np.array([subj['confidence'][:,-1]]).T))
-		plt.step(subj_t_array,subj_rt[0],'b',label='Subject hit',where='post')
-		plt.step(subj_t_array,subj_rt[1],'r',label='Subject miss',where='post')
-		plt.plot(model['t_array'],model['rt'][0],'b',label='Model hit',linewidth=3)
-		plt.plot(model['t_array'],model['rt'][1],'r',label='Model miss',linewidth=3)
+		plt.step(subj_t_array,subj_rt[0],'b',label='Subject P(RT,hit)',where='post')
+		plt.step(subj_t_array,subj_rt[1],'r',label='Subject P(RT,miss)',where='post')
+		plt.plot(model['t_array'],model['rt'][0],'b',label='Model P(RT,hit)',linewidth=3)
+		plt.plot(model['t_array'],model['rt'][1],'r',label='Model P(RT,miss)',linewidth=3)
 		axrt.set_xlim([0,subj['t_array'][-1]+0.5*(subj['t_array'][-1]-subj['t_array'][-2])])
 		if row==1:
 			plt.title('RT distribution')
@@ -1076,13 +1079,14 @@ def fits_cognition(fname='fits_cognition',suffix='.svg'):
 		plt.ylabel('Prob density')
 		
 		axconf = plt.subplot(plot_gs[row-1,1])
-		plt.step(subj_c_array,subj_confidence[0],'b',label='Subject hit',where='post')
-		plt.step(subj_c_array,subj_confidence[1],'r',label='Subject miss',where='post')
-		plt.plot(model['c_array'],model['confidence'][0],'b',label='Model hit',linewidth=3)
-		plt.plot(model['c_array'],model['confidence'][1],'r',label='Model miss',linewidth=3)
+		plt.step(subj_c_array,subj_confidence[0],'b',label='Subject P(conf,hit)',where='post')
+		plt.step(subj_c_array,subj_confidence[1],'r',label='Subject P(conf,miss)',where='post')
+		plt.plot(model['c_array'],model['confidence'][0],'b',label='Model P(conf,hit)',linewidth=3)
+		plt.plot(model['c_array'],model['confidence'][1],'r',label='Model P(conf,miss)',linewidth=3)
 		axconf.set_yscale('log')
 		if row==1:
 			plt.title('Confidence distribution')
+			plt.legend(loc='best', fancybox=True, framealpha=0.5)
 		elif row==3:
 			plt.xlabel('Confidence')
 		
@@ -1397,7 +1401,9 @@ def auxiliary_2AFC_stimuli():
 
 def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 	fname+=suffix
-	a = analysis.Analyzer()
+	analyzer_kwargs={'method':'full_confidence','optimizer':'cma','suffix':'',
+					 'cmap_meth':'belief','override':False}
+	a = analysis.Analyzer(**analyzer_kwargs)
 	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope','dead_time','dead_time_sigma']
 	stats_names = ['rt_mean','performance_mean','confidence_mean','auc','multi_mod_index']
 	parameter_aliases = {'cost':r'$c$',

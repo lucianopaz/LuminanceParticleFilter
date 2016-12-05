@@ -109,11 +109,13 @@ def default_tree_style(mode='r',title=None):
 
 class Analyzer():
 	def __init__(self,method = 'full_confidence', optimizer = 'cma', suffix = '',
-				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				cmap_meth='log_odds', fits_path='fits_cognition/',
+				override=False,n_clusters=2, affinity='euclidean',
 				linkage='ward', pooling_func=np.nanmean, connectivity=None):
 		"""
 		Analyzer(method = 'full_confidence', optimizer = 'cma', suffix = '',
-				cmap_meth='log_odds', override=False,n_clusters=2, affinity='euclidean',
+				cmap_meth='log_odds', fits_path='fits_cognition/',
+				override=False,n_clusters=2, affinity='euclidean',
 				linkage='ward', pooling_func=np.nanmean, connectivity=None)
 		
 		This Class implements an interface between the
@@ -172,6 +174,7 @@ class Analyzer():
 		self.optimizer = optimizer
 		self.suffix = suffix
 		self.cmap_meth = cmap_meth
+		self.fits_path = fits_path
 		self.get_summary(override=override)
 		self.init_clusterer(n_clusters=n_clusters, affinity=affinity,\
 				linkage=linkage, pooling_func=pooling_func, connectivity=connectivity)
@@ -316,7 +319,14 @@ class Analyzer():
 			self.summary = {'experimental':{},'theoretical':{}}
 			for s in subjects:
 				print(s.get_key())
-				fname = fits.Fitter_filename(s.experiment,self.method,s.get_name(),s.get_session(),self.optimizer,self.suffix)
+				fname = fits.Fitter_filename(experiment=s.experiment,
+											 method=self.method,
+											 name=s.get_name(),
+											 session=s.get_session(),
+											 optimizer=self.optimizer,
+											 suffix=self.suffix,
+											 confidence_map_method=self.cmap_meth,
+											 fits_path=self.fits_path)
 				if not(os.path.exists(fname) and os.path.isfile(fname)):
 					continue
 				s_measures = self.subjectSession_measures(s)
@@ -432,9 +442,16 @@ class Analyzer():
 		full_confidence_merit = fitter.forced_compute_full_confidence_merit(parameters)
 		full_merit = fitter.forced_compute_full_merit(parameters)
 		confidence_only_merit = fitter.forced_compute_confidence_only_merit(parameters)
-		fitter_stats = fitter.stats(return_mean_rt=True,return_mean_confidence=True,return_median_rt=True,
-				return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
-				return_auc=True)
+		try:
+			# First try to load the fitter stats from memory
+			f = open(fitter.get_save_file_name().replace('.pkl','_stats.pkl'),'r')
+			fitter_stats = pickle.load(f)
+			f.close()
+		except:
+			# If no stats file is found or the load fails, then compute the stats
+			fitter_stats = fitter.stats(return_mean_rt=True,return_mean_confidence=True,return_median_rt=True,
+					return_median_confidence=True,return_std_rt=True,return_std_confidence=True,
+					return_auc=True)
 		
 		performance = fitter_stats['performance']
 		performance_conditioned = fitter_stats['performance_conditioned']
@@ -536,9 +553,17 @@ class Analyzer():
 			vals = []
 			for pn in self._parameter_names:
 				if pn=='high_confidence_threshold':
-					val = pd[pn] if pd[pn]<=2. else np.nan
+					if self.cmap_meth=='log_odds':
+						val = pd[pn] if pd[pn]<=2. else np.nan
+					else:
+						val = pd[pn]
 				elif pn=='confidence_map_slope':
-					val = pd[pn] if pd[pn]<=100. else np.nan
+					if self.cmap_meth=='log_odds':
+						val = pd[pn] if pd[pn]<=100. else np.nan
+					elif self.cmap_meth=='belief':
+						val = pd[pn] if pd[pn]<=40. else np.nan
+					else:
+						val = pd[pn]
 				else:
 					val = pd[pn]
 				vals.append(val)
@@ -1437,10 +1462,10 @@ def cluster_analysis(analyzer_kwargs={},merge='names',filter_nans='post', tree_m
 				dpi=300, units='mm', w=150)
 	decision_parameters=['cost','internal_var','phase_out_prob']
 	
-	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters,filter_nans=filter_nans)
-	tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='D+C Hierarchy'))
-	tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters+['dead_time','dead_time_sigma'],filter_nans=filter_nans)
-	tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='All par Hierarchy'))
+	#~ tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters,filter_nans=filter_nans)
+	#~ tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='D+C Hierarchy'))
+	#~ tree = a.cluster(merge=merge,clustered_parameters=decision_parameters+confidence_parameters+['dead_time','dead_time_sigma'],filter_nans=filter_nans)
+	#~ tree.copy().show(tree_style=default_tree_style(mode=tree_mode,title='All par Hierarchy'))
 	
 	show=False
 	if show:
@@ -1957,33 +1982,25 @@ def correlation_analysis(analyzer_kwargs={}):
 	plt.show(True)
 
 def test():
-	#~ parameter_correlation()
-	#~ correlation_analysis()
-	cluster_analysis(show=True)
-	return
-	#~ parameter_correlation()
-	#~ return
-	#~ binary_confidence_analysis()
 	
-	a = Analyzer()
-	#~ subjects = io.filter_subjects_list(io.unique_subject_sessions(fits.raw_data_dir),'all_sessions_by_experiment')
-	#~ a.subjectSession_measures(subjects[0])
-	#~ a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
-	tree = a.cluster(merge='names')
+	a = Analyzer(cmap_meth='belief')
+	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
+	tree = a.cluster(merge='names',clustered_parameters=['high_confidence_threshold','confidence_map_slope'])
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='r'), layout=default_tree_layout)
 	tree.show(tree_style=default_tree_style(mode='r'))
-	#~ tree = a.cluster(merge='sessions')
+	tree = a.cluster(merge='sessions',clustered_parameters=['high_confidence_threshold','confidence_map_slope'])
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
-	#~ tree.show(tree_style=default_tree_style(mode='c'))
-	#~ tree = a.cluster()
+	tree.show(tree_style=default_tree_style(mode='c'))
+	tree = a.cluster(clustered_parameters=['high_confidence_threshold','confidence_map_slope'])
 	#~ tree.copy().render('cluster_test.svg',tree_style=default_tree_style(mode='c'), layout=default_tree_layout)
-	#~ tree.show(tree_style=default_tree_style(mode='c'))
-	#~ a.scatter_parameters()
+	tree.show(tree_style=default_tree_style(mode='c'))
+	a.scatter_parameters(show=True)
 	a.scatter_parameters(merge='names',show=True)
-	#~ a.scatter_parameters(merge='sessions')
+	a.scatter_parameters(merge='sessions',show=True)
 	a.set_pooling_func(np.median)
+	a.scatter_parameters(show=True)
 	a.scatter_parameters(merge='names',show=True)
-	#~ a.scatter_parameters(merge='sessions')
+	a.scatter_parameters(merge='sessions',show=True)
 	#~ unams,indnams = np.unique(a._names,return_inverse=True)
 	#~ uexps,indexps = np.unique(a._experiments,return_inverse=True)
 	#~ usess,indsess = np.unique(a._sessions,return_inverse=True)

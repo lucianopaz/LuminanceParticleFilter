@@ -332,6 +332,50 @@ class Fitter:
 		self.binary_split_method = str(binary_split_method).lower()
 		self.__fit_internals__ = None
 	
+	def __str__(self):
+		if hasattr(self,'_fit_arguments'):
+			_fit_arguments = self._fit_arguments
+		else:
+			_fit_arguments = None
+		if hasattr(self,'_fit_output'):
+			_fit_output = self._fit_output
+		else:
+			_fit_output = None
+		string = """
+<{class_module}.{class_name} object at {address}>
+fits_path = {fits_path},
+raw_data_dir = {raw_data_dir},
+experiment = {experiment},
+method = {method},
+optimizer = {optimizer},
+high_confidence_mapping_method = {high_confidence_mapping_method},
+suffix = {suffix},
+binary_split_method = {binary_split_method},
+time_units = {time_units},
+rt_cutoff = {rt_cutoff},
+decisionPolicyKwArgs = {decisionPolicyKwArgs},
+confidence_partition = {confidence_partition},
+_fit_arguments = {_fit_arguments},
+_fit_output = {_fit_output}
+		""".format(class_module=self.__class__.__module__,
+					class_name=self.__class__.__name__,
+					address=hex(id(self)),
+					fits_path=self.fits_path,
+					raw_data_dir=self.raw_data_dir,
+					experiment = self.experiment,
+					method = self.method,
+					optimizer = self.optimizer,
+					high_confidence_mapping_method = self.high_confidence_mapping_method,
+					suffix = self.suffix,
+					binary_split_method = self.binary_split_method,
+					time_units = self.time_units,
+					rt_cutoff = self.rt_cutoff,
+					decisionPolicyKwArgs = self.decisionPolicyKwArgs,
+					confidence_partition = self.confidence_partition,
+					_fit_arguments = self._fit_arguments,
+					_fit_output = self._fit_output)
+		return string
+	
 	# Setters
 	def set_experiment(self,experiment):
 		"""
@@ -3303,6 +3347,7 @@ def parse_input():
  '-s' or '--save': This flag takes no values. If present it saves the figure.
  '--save_plot_handler': This flag takes no value. If present, the plot_handler is saved.
  '--load_plot_handler': This flag takes no value. If present, the plot_handler is loaded from the disk.
+ '--save_stats': This flag takes no value. If present, the Fitter.stats() dictionary is saved.
  '--show': This flag takes no values. If present it displays the plotted figure
            and freezes execution until the figure is closed.
  '--fit': This flag takes no values. If present it performs the fit for the selected
@@ -3496,7 +3541,7 @@ def parse_input():
 				'optimizer_kwargs':{},'experiment':'all','debug':False,'confidence_partition':100,
 				'plot_merge':None,'verbose':False,'save_plot_handler':False,'load_plot_handler':False,
 				'start_point_from_fit_output':None,'override':False,'plot_handler_rt_cutoff':None,
-				'high_confidence_mapping_method':'log_odds','plot_binary':None,
+				'high_confidence_mapping_method':'log_odds','plot_binary':None,'save_stats':False,
 				'binary_split_method':'median','fits_path':'fits_cognition'}
 	if '-g' in sys.argv or '--debug' in sys.argv:
 		options['debug'] = True
@@ -3535,6 +3580,8 @@ def parse_input():
 				options['save_plot_handler'] = True
 			elif arg=='--load_plot_handler':
 				options['load_plot_handler'] = True
+			elif arg=='--save_stats':
+				options['save_stats'] = True
 			elif arg=='--show':
 				options['show'] = True
 			elif arg=='-g' or arg=='--debug':
@@ -3879,6 +3926,36 @@ if __name__=="__main__":
 					fitter.save()
 				else:
 					package_logger.warning('File {0} already exists, will skip enumerated subject {1} whose key is {2}. If you wish to override saved Fitter instances, supply the flag -w.'.format(fname,i,s.get_key()))
+			
+			# Store stats is necessary
+			if options['save_stats']:
+				fname = Fitter_filename(experiment=s.experiment,method=options['method'],name=s.get_name(),
+							session=s.get_session(),optimizer=options['optimizer'],suffix=options['suffix'],
+							confidence_map_method=options['high_confidence_mapping_method'],
+							fits_path=options['fits_path'])
+				package_logger.debug('save_stats flag was true. Will load Fitter instance from file {0} and compute stats.'.format(fname))
+				# Try to load the fitted data from file 'fname' or continue to next subject
+				try:
+					fitter = load_Fitter_from_file(fname)
+					loaded_fitter = True
+				except:
+					package_logger.warning('Failed to load fitter from file {0}. Will continue to next subject.'.format(fname))
+					loaded_fitter = False
+				if loaded_fitter:
+					fname = fname.replace('.pkl','_stats.pkl')
+					if options['override'] or not (os.path.exists(fname) and os.path.isfile(fname)):
+						with open(fname,'w') as f:
+							package_logger.debug('Computing stats and storing them in file "{0}".'.format(fname))
+							pickle.dump(f,fitter.stats(return_mean_rt=True,
+													   return_mean_confidence=True,
+													   return_median_rt=True,
+													   return_median_confidence=True,
+													   return_std_rt=True,
+													   return_std_confidence=True,
+													   return_auc=True))
+					else:
+						package_logger.warning('File {0} already exists, will skip stats computation for enumerated subject {1} whose key is {2}. If you wish to override saved a Fitter instance stats, supply the flag -w.'.format(fname,i,s.get_key()))
+			
 			# Prepare plotable data
 			if options['show'] or options['save'] or options['save_plot_handler']:
 				package_logger.debug('show, save or save_plot_fitter flags were True.')
