@@ -555,6 +555,9 @@ class Analyzer():
 				if pn=='high_confidence_threshold':
 					if self.cmap_meth=='log_odds':
 						val = pd[pn] if pd[pn]<=2. else np.nan
+					elif self.cmap_meth=='belief':
+						#~ val = pd[pn]+0.5/pd['confidence_map_slope']
+						val = pd[pn]
 					else:
 						val = pd[pn]
 				elif pn=='confidence_map_slope':
@@ -709,9 +712,20 @@ class Analyzer():
 					for par in teo[teo_k].keys():
 						par = str(par)
 						if par=='high_confidence_threshold':
-							val = teo[teo_k][par] if teo[teo_k][par]<=2. else np.nan
+							if self.cmap_meth=='log_odds':
+								val = teo[teo_k][par] if teo[teo_k][par]<=2. else np.nan
+							elif self.cmap_meth=='belief':
+								#~ val = teo[teo_k][par]+0.5/teo[teo_k]['confidence_map_slope']
+								val = teo[teo_k][par]
+							else:
+								val = teo[teo_k][par]
 						elif par=='confidence_map_slope':
-							val = teo[teo_k][par] if teo[teo_k][par]<=100. else np.nan
+							if self.cmap_meth=='log_odds':
+								val = teo[teo_k][par] if teo[teo_k][par]<=100. else np.nan
+							elif self.cmap_meth=='belief':
+								val = teo[teo_k][par] if teo[teo_k][par]<=40. else np.nan
+							else:
+								val = teo[teo_k][par]
 						else:
 							val = teo[teo_k][par]
 						if par not in parameter_names:

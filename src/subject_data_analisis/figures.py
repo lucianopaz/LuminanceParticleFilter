@@ -930,14 +930,15 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	subjects = io_cog.merge_subjectSessions(io_cog.filter_subjects_list(subjects,'experiment_Luminancia'),merge='all')
 	subject = subjects[0]
 
-	fitter = fits.Fitter(subject,method='full_cognition',decisionPolicyKwArgs={'n':201,'dt':1e-3,'T':1.},high_confidence_mapping_method='belief')
+	fitter = fits.Fitter(subject,method='full_cognition',decisionPolicyKwArgs={'n':201,'dt':8e-3,'T':1.},high_confidence_mapping_method='belief')
 	fitter.set_fixed_parameters({'high_confidence_threshold': 0.53,'dead_time_sigma': 0.3,'confidence_map_slope':20})
 	parameters = fitter.default_start_point()
 	fitter.dp.set_cost(parameters['cost'])
 	fitter.dp.set_internal_var(parameters['internal_var'])
 	fpt = fitter.dp.rt(0,fitter.dp.xbounds())
 	H_c_ind = np.argmin(np.abs(fitter.dp.log_odds()[0]-1.2))
-	belief_H_c = 2*fitter.dp.bounds[0][H_c_ind]-1-0.5/parameters['confidence_map_slope']
+	#~ belief_H_c = 2*fitter.dp.bounds[0][H_c_ind]-1-0.5/parameters['confidence_map_slope']
+	belief_H_c = 2*fitter.dp.bounds[0][H_c_ind]-1
 	logodds_H_c = fitter.dp.log_odds()[0][H_c_ind]
 	fitter.set_fixed_parameters({'high_confidence_threshold': belief_H_c,'dead_time_sigma': 0.3})
 	
@@ -957,14 +958,11 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	plt.gca().set_xlim([0,0.4])
 	plt.xlabel('T [s]',fontsize=16)
 	plt.ylabel('Confidence map',fontsize=16)
-	#~ xytext_bin = [fitter.dp.t[(bin_map[0]==0).nonzero()[0][0]],0.8]
-	#~ xytext_cont = [fitter.dp.t[np.argmin(np.abs(logodds_map[0]-0.2))+2],0.2]
 	
 	bin_pdf = fitter.rt_confidence_pdf(fpt,parameters,bin_map)
 	t = np.arange(0,bin_pdf.shape[-1],dtype=np.float)*fitter.dp.dt
 	
 	ax2 = plt.subplot(gs2[:,0])
-	#~ plt.imshow(bin_pdf[0],aspect='auto',interpolation='none',origin='lower',extent=[0,t[-1],0,1])
 	plt.plot(t,bin_pdf[0][-1],color='forestgreen',label='high confidence',linewidth=2)
 	plt.plot(t,bin_pdf[0][0],color='mediumpurple',label='low confidence',linewidth=2)
 	plt.ylabel('Prob density',fontsize=16)
@@ -1003,18 +1001,6 @@ def confidence_mapping(fname='confidence_mapping',suffix='.svg'):
 	cbar_ax.set_ylabel('Prob density',fontsize=16)
 	cbar_ax.yaxis.set_label_position("right")
 	cbar_ax.tick_params(bottom=False,top=False,labelbottom=False,labelleft=False,labelright=True,labelsize=14)
-	
-	
-	
-	#~ ax1.annotate('', xy=[-0.12,0.8], xytext=xytext_bin,
-				#~ size=10, va="center", ha="center",
-				#~ xycoords=(ax2,'axes fraction'), textcoords=('data'),
-				#~ arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
-	#~ 
-	#~ ax1.annotate('', xy=[-0.17,0.2], xytext=xytext_cont,
-				#~ size=10, va="center", ha="center",
-				#~ xycoords=(ax3,'axes fraction'), textcoords=('data'),
-				#~ arrowprops=dict(arrowstyle='simple',connectionstyle='arc3,rad=0',color='black'))
 	
 	place_axes_subfig_label(ax1,'A',horizontal=-0.11,vertical=1.05,fontsize='24')
 	place_axes_subfig_label(ax2,'B',horizontal=-0.11,vertical=1.05,fontsize='24')
@@ -1518,6 +1504,8 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
+	cluster_hierarchy()
+	plt.show(True)
 	opts = parse_input()
 	for k in opts.keys():
 		if k not in ['suffix','show'] and opts[k]:

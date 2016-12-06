@@ -1853,6 +1853,7 @@ _fit_output = {_fit_output}
 			belief = np.array([np.interp(_t,self.dp.t,2*(belief[0]-0.5)),np.interp(_t,self.dp.t,2*(0.5-belief[1]))])
 		else:
 			_nT = self.dp.nT
+			_t = self.dp.t
 			belief = self.dp.bounds.copy()
 			belief[0] = 2*(belief[0]-0.5)
 			belief[1] = 2*(0.5-belief[1])
@@ -1860,7 +1861,7 @@ _fit_output = {_fit_output}
 		
 		with warnings.catch_warnings():
 			warnings.simplefilter("ignore")
-			phigh = confidence_map_slope*(belief-high_confidence_threshold)
+			phigh = confidence_map_slope*(belief-high_confidence_threshold)+0.5
 			phigh[np.isnan(phigh)] = 0.5
 			phigh[phigh>1] = 1
 			phigh[phigh<0] = 0
