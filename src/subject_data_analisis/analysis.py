@@ -556,8 +556,8 @@ class Analyzer():
 					if self.cmap_meth=='log_odds':
 						val = pd[pn] if pd[pn]<=2. else np.nan
 					elif self.cmap_meth=='belief':
-						#~ val = pd[pn]+0.5/pd['confidence_map_slope']
-						val = pd[pn]
+						val = pd[pn]+0.7/pd['confidence_map_slope']
+						#~ val = pd[pn]
 					else:
 						val = pd[pn]
 				elif pn=='confidence_map_slope':
@@ -715,8 +715,8 @@ class Analyzer():
 							if self.cmap_meth=='log_odds':
 								val = teo[teo_k][par] if teo[teo_k][par]<=2. else np.nan
 							elif self.cmap_meth=='belief':
-								#~ val = teo[teo_k][par]+0.5/teo[teo_k]['confidence_map_slope']
-								val = teo[teo_k][par]
+								val = teo[teo_k][par]+0.7/teo[teo_k]['confidence_map_slope']
+								#~ val = teo[teo_k][par]
 							else:
 								val = teo[teo_k][par]
 						elif par=='confidence_map_slope':
@@ -1995,8 +1995,30 @@ def correlation_analysis(analyzer_kwargs={}):
 	utils.maximize_figure()
 	plt.show(True)
 
-def test():
+def compare_mappings():
+	lo = Analyzer(cmap_meth='log_odds').get_summary_stats_array()[1]
+	# For some reason we dont have the fit result for the linear mapping
+	# of experiment Luminancia subject 12 and session 1 (index 113 of lo)
+	lo = np.concatenate((lo[:113],lo[114:]),axis=0)
+	li = Analyzer(cmap_meth='belief').get_summary_stats_array()[1]
+	total_lo_nLL = np.sum(lo['full_confidence_merit'])
+	total_li_nLL = np.sum(li['full_confidence_merit'])
+	percent_of_low_li = np.sum((lo['full_confidence_merit']>li['full_confidence_merit']).astype(np.float))/float(len(lo))*100
+	log_likelihood_ratio = lo['full_confidence_merit']-li['full_confidence_merit'] # The stored values are nLL so this is equal to log(li_like/lo_like)
+	print('Overall log_odds mapping nLL = {0}'.format(total_lo_nLL))
+	print('Overall linear mapping nLL = {0}'.format(total_li_nLL))
+	print('Percent of experiment,subject,session tuples that are better explained with the linear mapping = {0}%'.format(percent_of_low_li))
+	print('Mean log likelihood ratio in favor of linear mapping = {0}'.format(np.mean(log_likelihood_ratio)))
+	print('Likelihood ratio T-value = {0}'.format(np.exp(np.mean(log_likelihood_ratio))))
+	print('Likelihood ratio p-value = {0}'.format(0.5*(1-stats.t.cdf(np.exp(np.mean(log_likelihood_ratio)),1))))
 	
+	plt.hist(log_likelihood_ratio, 50)
+	plt.xlabel('nLL(log_odds)-nLL(linear)')
+	plt.show(True)
+
+def test():
+	compare_mappings()
+	return
 	a = Analyzer(cmap_meth='belief')
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
 	tree = a.cluster(merge='names',clustered_parameters=['high_confidence_threshold','confidence_map_slope'])

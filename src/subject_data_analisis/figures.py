@@ -1504,7 +1504,6 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
-	cluster_hierarchy()
 	plt.show(True)
 	opts = parse_input()
 	for k in opts.keys():
