@@ -87,6 +87,21 @@ def normgamma(x,t,mu=0.,l=1.,beta=2.,alpha=2.):
 def norminvgamma(x,sigma,mu=0.,l=1.,beta=2.,alpha=2.):
 	return normgamma(x,sigma**(-2),mu,l,beta,alpha)
 
+def unique_rows(a,**kwargs):
+	if a.ndim!=2:
+		raise ValueError('Input array must be a two dimensional array')
+	b = np.ascontiguousarray(a).view(np.dtype((np.void, a.dtype.itemsize * a.shape[1])))
+	return_index = kwargs.pop('return_index', False)
+	out = np.unique(b, return_index=True, **kwargs)
+	idx = out[1]
+	uvals = a[idx]
+	if (not return_index) and (len(out) == 2):
+		return uvals
+	elif return_index:
+		return (uvals,) + out[1:]
+	else:
+		return (uvals,) + out[2:]
+
 def average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float):
 	"""
 	b = average_downsample(a,output_len,axis=None,ignore_nans=True,dtype=np.float)

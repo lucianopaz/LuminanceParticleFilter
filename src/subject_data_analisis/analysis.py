@@ -1996,25 +1996,116 @@ def correlation_analysis(analyzer_kwargs={}):
 	plt.show(True)
 
 def compare_mappings():
-	lo = Analyzer(cmap_meth='log_odds').get_summary_stats_array()[1]
+	experiment_alias = {'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}
+	all_lo = Analyzer(cmap_meth='log_odds').get_summary_stats_array()[1]
 	# For some reason we dont have the fit result for the linear mapping
 	# of experiment Luminancia subject 12 and session 1 (index 113 of lo)
-	lo = np.concatenate((lo[:113],lo[114:]),axis=0)
-	li = Analyzer(cmap_meth='belief').get_summary_stats_array()[1]
-	total_lo_nLL = np.sum(lo['full_confidence_merit'])
-	total_li_nLL = np.sum(li['full_confidence_merit'])
-	percent_of_low_li = np.sum((lo['full_confidence_merit']>li['full_confidence_merit']).astype(np.float))/float(len(lo))*100
-	log_likelihood_ratio = lo['full_confidence_merit']-li['full_confidence_merit'] # The stored values are nLL so this is equal to log(li_like/lo_like)
-	print('Overall log_odds mapping nLL = {0}'.format(total_lo_nLL))
-	print('Overall linear mapping nLL = {0}'.format(total_li_nLL))
-	print('Percent of experiment,subject,session tuples that are better explained with the linear mapping = {0}%'.format(percent_of_low_li))
-	print('Mean log likelihood ratio in favor of linear mapping = {0}'.format(np.mean(log_likelihood_ratio)))
-	print('Likelihood ratio T-value = {0}'.format(np.exp(np.mean(log_likelihood_ratio))))
-	print('Likelihood ratio p-value = {0}'.format(0.5*(1-stats.t.cdf(np.exp(np.mean(log_likelihood_ratio)),1))))
+	all_lo = np.concatenate((all_lo[:113],all_lo[114:]),axis=0)
+	all_li = Analyzer(cmap_meth='belief').get_summary_stats_array()[1]
+	cat = 'experiment'
+	ucat_lo = np.unique(all_lo[cat])
+	ucat_li = np.unique(all_li[cat])
+	output = [['Experiment',r'$nLL\left(\mathcal{C}_{\mathcal{L}_{o}}\right)$',r'$nLL\left(\mathcal{C}_{s}\right)$',r'$2\log\left(\frac{\mathcal{L}(\mathcal{C}_{s})}{\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})}\right)$']]
+	all_lo_nLL = 0.
+	all_li_nLL = 0.
+	for ucat in ucat_lo:
+		lo = all_lo[ucat==all_lo[cat]]
+		li = all_li[ucat==all_li[cat]]
+		total_lo_nLL = np.sum(lo['full_confidence_merit'])
+		total_li_nLL = np.sum(li['full_confidence_merit'])
+		all_lo_nLL+= total_lo_nLL
+		all_li_nLL+= total_li_nLL
+		percent_of_low_li = np.sum((lo['full_confidence_merit']>li['full_confidence_merit']).astype(np.float))/float(len(lo))*100
+		log_likelihood_ratio = lo['full_confidence_merit']-li['full_confidence_merit'] # The stored values are nLL so this is equal to log(li_like/lo_like)
+		#~ print(ucat)
+		#~ print('Overall log_odds mapping nLL = {0}'.format(total_lo_nLL))
+		#~ print('Overall linear mapping nLL = {0}'.format(total_li_nLL))
+		#~ print('Percent of experiment,subject,session tuples that are better explained with the linear mapping = {0}%'.format(percent_of_low_li))
+		#~ print('Mean log likelihood ratio in favor of linear mapping = {0}'.format(np.mean(log_likelihood_ratio)))
+		#~ print('Likelihood ratio T-value = {0}'.format(np.exp(np.mean(log_likelihood_ratio))))
+		#~ print('Likelihood ratio p-value = {0}'.format(0.5*(1-stats.t.cdf(np.exp(np.mean(log_likelihood_ratio)),1))))
+		#~ print('Total double log likelihood ratio = {0}'.format(2*np.sum(log_likelihood_ratio)))
+		#~ print('Total log likelihood ratio Wilk´s p-value = {0}'.format(0.5*(1-stats.chi2.cdf(2*np.sum(log_likelihood_ratio),1))))
+		
+		#~ plt.hist(log_likelihood_ratio)
+		#~ plt.xlabel('nLL(log_odds)-nLL(linear)')
+		#~ plt.show(True)
+		output.append([experiment_alias[str(ucat).replace(' x00','')],'{0:.2f}'.format(total_lo_nLL),'{0:.2f}'.format(total_li_nLL),'{0:.2f}'.format(2*np.sum(log_likelihood_ratio))])
+	output.append([u'All','{0:.2f}'.format(all_lo_nLL),'{0:.2f}'.format(all_li_nLL),'{0:.2f}'.format(2*(all_lo_nLL-all_li_nLL))])
+	output = ' \\\\ \\hline\n'.join([' & '.join(x) for x in output])+' \\\\ \\hline\n'
+	print(output)
 	
-	plt.hist(log_likelihood_ratio, 50)
-	plt.xlabel('nLL(log_odds)-nLL(linear)')
-	plt.show(True)
+	
+	cat = 'name'
+	ucat_lo = np.unique(all_lo[cat])
+	ucat_li = np.unique(all_li[cat])
+	output = [['Subject id',r'$nLL\left(\mathcal{C}_{\mathcal{L}_{o}}\right)$',r'$nLL\left(\mathcal{C}_{s}\right)$',r'$2\log\left(\frac{\mathcal{L}(\mathcal{C}_{s})}{\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})}\right)$']]
+	all_lo_nLL = 0.
+	all_li_nLL = 0.
+	dtype = ucat_lo.dtype
+	ucat_lo = np.sort(ucat_lo.astype(np.int)).astype(dtype)
+	for ucat in ucat_lo:
+		lo = all_lo[ucat==all_lo[cat]]
+		li = all_li[ucat==all_li[cat]]
+		total_lo_nLL = np.sum(lo['full_confidence_merit'])
+		total_li_nLL = np.sum(li['full_confidence_merit'])
+		all_lo_nLL+= total_lo_nLL
+		all_li_nLL+= total_li_nLL
+		percent_of_low_li = np.sum((lo['full_confidence_merit']>li['full_confidence_merit']).astype(np.float))/float(len(lo))*100
+		log_likelihood_ratio = lo['full_confidence_merit']-li['full_confidence_merit'] # The stored values are nLL so this is equal to log(li_like/lo_like)
+		#~ print(ucat)
+		#~ print('Overall log_odds mapping nLL = {0}'.format(total_lo_nLL))
+		#~ print('Overall linear mapping nLL = {0}'.format(total_li_nLL))
+		#~ print('Percent of experiment,subject,session tuples that are better explained with the linear mapping = {0}%'.format(percent_of_low_li))
+		#~ print('Mean log likelihood ratio in favor of linear mapping = {0}'.format(np.mean(log_likelihood_ratio)))
+		#~ print('Likelihood ratio T-value = {0}'.format(np.exp(np.mean(log_likelihood_ratio))))
+		#~ print('Likelihood ratio p-value = {0}'.format(0.5*(1-stats.t.cdf(np.exp(np.mean(log_likelihood_ratio)),1))))
+		#~ print('Total double log likelihood ratio = {0}'.format(2*np.sum(log_likelihood_ratio)))
+		#~ print('Total log likelihood ratio Wilk´s p-value = {0}'.format(0.5*(1-stats.chi2.cdf(2*np.sum(log_likelihood_ratio),1))))
+		
+		#~ plt.hist(log_likelihood_ratio)
+		#~ plt.xlabel('nLL(log_odds)-nLL(linear)')
+		#~ plt.show(True)
+		output.append([str(ucat).replace(' x00',''),'{0:.2f}'.format(total_lo_nLL),'{0:.2f}'.format(total_li_nLL),'{0:.2f}'.format(2*np.sum(log_likelihood_ratio))])
+	output.append([u'All','{0:.2f}'.format(all_lo_nLL),'{0:.2f}'.format(all_li_nLL),'{0:.2f}'.format(2*(all_lo_nLL-all_li_nLL))])
+	output = ' \\\\ \\hline\n'.join([' & '.join(x) for x in output])+' \\\\ \\hline\n'
+	print(output)
+	
+	
+	label_ind,ucat_lo_inds = utils.unique_rows(np.hstack((all_lo['experiment'][:,None],all_lo['session'][:,None])),return_index=True,return_inverse=True)[1:]
+	ucat_li_inds = utils.unique_rows(np.hstack((all_li['experiment'][:,None],all_li['session'][:,None])),return_inverse=True)[1]
+	output = [['Experiment session',r'$nLL\left(\mathcal{C}_{\mathcal{L}_{o}}\right)$',r'$nLL\left(\mathcal{C}_{s}\right)$',r'$2\log\left(\frac{\mathcal{L}(\mathcal{C}_{s})}{\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})}\right)$']]
+	all_lo_nLL = 0.
+	all_li_nLL = 0.
+	ucat_label = sorted([' '.join([experiment_alias[str(x['experiment']).strip(' \x00')],'Ses='+str(x['session']).strip(' \x00')]) for x in all_lo[label_ind]])
+	dtype = ucat_lo.dtype
+	ucat_lo = np.sort(ucat_lo.astype(np.int)).astype(dtype)
+	for ind,ucat in enumerate(ucat_label):
+		lo = all_lo[ucat_lo_inds==ind]
+		li = all_li[ucat_li_inds==ind]
+		total_lo_nLL = np.sum(lo['full_confidence_merit'])
+		total_li_nLL = np.sum(li['full_confidence_merit'])
+		all_lo_nLL+= total_lo_nLL
+		all_li_nLL+= total_li_nLL
+		percent_of_low_li = np.sum((lo['full_confidence_merit']>li['full_confidence_merit']).astype(np.float))/float(len(lo))*100
+		log_likelihood_ratio = lo['full_confidence_merit']-li['full_confidence_merit'] # The stored values are nLL so this is equal to log(li_like/lo_like)
+		#~ print(ucat)
+		#~ print('Overall log_odds mapping nLL = {0}'.format(total_lo_nLL))
+		#~ print('Overall linear mapping nLL = {0}'.format(total_li_nLL))
+		#~ print('Percent of experiment,subject,session tuples that are better explained with the linear mapping = {0}%'.format(percent_of_low_li))
+		#~ print('Mean log likelihood ratio in favor of linear mapping = {0}'.format(np.mean(log_likelihood_ratio)))
+		#~ print('Likelihood ratio T-value = {0}'.format(np.exp(np.mean(log_likelihood_ratio))))
+		#~ print('Likelihood ratio p-value = {0}'.format(0.5*(1-stats.t.cdf(np.exp(np.mean(log_likelihood_ratio)),1))))
+		#~ print('Total double log likelihood ratio = {0}'.format(2*np.sum(log_likelihood_ratio)))
+		#~ print('Total log likelihood ratio Wilk´s p-value = {0}'.format(0.5*(1-stats.chi2.cdf(2*np.sum(log_likelihood_ratio),1))))
+		
+		#~ plt.hist(log_likelihood_ratio)
+		#~ plt.xlabel('nLL(log_odds)-nLL(linear)')
+		#~ plt.show(True)
+		output.append([str(ucat).replace(' x00',''),'{0:.2f}'.format(total_lo_nLL),'{0:.2f}'.format(total_li_nLL),'{0:.2f}'.format(2*np.sum(log_likelihood_ratio))])
+	output.append([u'All','{0:.2f}'.format(all_lo_nLL),'{0:.2f}'.format(all_li_nLL),'{0:.2f}'.format(2*(all_lo_nLL-all_li_nLL))])
+	output = ' \\\\ \\hline\n'.join([' & '.join(x) for x in output])+' \\\\ \\hline\n'
+	print(output)
 
 def test():
 	compare_mappings()

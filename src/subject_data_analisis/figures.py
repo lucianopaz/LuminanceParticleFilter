@@ -1444,6 +1444,127 @@ def parameter_correlation(fname='parameter_correlation',suffix='.svg'):
 	place_axes_subfig_label(ax2,'B',horizontal=-0.08,vertical=1.03,fontsize='24')
 	savefig(fname,suffix)
 
+def dec_conf_parameter_correlation(fname='dec_conf_parameter_correlation',suffix='.svg'):
+	fname+=suffix
+	analyzer_kwargs={'method':'full_confidence','optimizer':'cma','suffix':'',
+					 'cmap_meth':'belief','override':False}
+	a = analysis.Analyzer(**analyzer_kwargs)
+	parameter_names = ['cost','internal_var','phase_out_prob','high_confidence_threshold','confidence_map_slope','dead_time','dead_time_sigma']
+	parameter_aliases = {'cost':r'$c$',
+						'internal_var':r'$\sigma^{2}$',
+						'phase_out_prob':r'$p_{po}$',
+						'high_confidence_threshold':r'$C_{H}$',
+						'confidence_map_slope':r'$\alpha$',
+						'dead_time':r'$\tau_{c}$',
+						'dead_time_sigma':r'$\sigma_{c}$'}
+	method = 'spearman'
+	corrs,pvals = a.parameter_correlation(parameter_names,method=method,correct_multiple_comparison_pvalues=True)
+	corrs = corrs[3:5,:3]
+	pvals = pvals[3:5,:3]
+	#~ pvals = utils.holm_bonferroni(pvals.flatten()).reshape((2,-1))
+	annotations = []
+	for pval in pvals:
+		t = []
+		for p in pval:
+			mark = ''
+			if p<0.05:
+				mark+= '*'
+				if p<0.005:
+					mark+= '*'
+					if p<0.0005:
+						mark+= '*'
+			t.append(mark)
+		annotations.append(t)
+	plt.figure(figsize=(8,4))
+	ax = plt.subplot(111)
+	grouped_bar_plot(corrs,ax=ax,annotations=annotations,colors=['r','b'],
+					group_member_names=[parameter_aliases[p] for p in parameter_names[3:5]],
+					group_names=[parameter_aliases[s] for s in parameter_names[:3]])
+	ax.set_ylim([-1,1])
+	plt.ylabel('Correlation',fontsize=18)
+	[tick.label.set_fontsize(18) for tick in ax.xaxis.get_major_ticks()]
+	savefig(fname,suffix)
+
+def mapping_comparison(fname='mapping_comparison',suffix='.svg'):
+	fname+=suffix
+	analyzer_kwargs={'method':'full_confidence','optimizer':'cma','suffix':'',
+					 'override':False}
+	all_li = analysis.Analyzer(cmap_meth='belief',**analyzer_kwargs).get_summary_stats_array()[1]
+	all_lo = analysis.Analyzer(cmap_meth='log_odds',**analyzer_kwargs).get_summary_stats_array()[1]
+	experiment_alias = {'2AFC':'Con','Auditivo':'Aud','Luminancia':'Lum'}
+	
+	lo_ues = np.unique(all_lo['experiment'])
+	li_ues = np.unique(all_li['experiment'])
+	lo_uss = np.unique(all_lo['session'])
+	li_uss = np.unique(all_li['session'])
+	lo_uns = np.unique(all_lo['name'])
+	li_uns = np.unique(all_li['name'])
+	
+	lo_inds = []
+	li_inds = []
+	exp = []
+	ses = []
+	nam = []
+	lab = []
+	minor_ticks = [0]
+	major_tick_label = []
+	c = 0
+	for ue in (lo_ue for lo_ue in lo_ues if lo_ue in li_ues):
+		for us in (lo_us for lo_us in lo_uss if lo_us in li_uss):
+			for un in (lo_un for lo_un in lo_uns if lo_un in li_uns):
+				c+=1
+				temp1_inds = np.logical_and(np.logical_and(ue==all_lo['experiment'],us==all_lo['session']),un==all_lo['name'])
+				temp2_inds = np.logical_and(np.logical_and(ue==all_li['experiment'],us==all_li['session']),un==all_li['name'])
+				if any(temp1_inds) and any(temp2_inds):
+					lo_inds.append(np.where(temp1_inds))
+					li_inds.append(np.where(temp2_inds))
+					exp.append(experiment_alias[str(ue).strip(' x00')])
+					ses.append(str(us).strip(' x00'))
+					nam.append(str(un).strip(' x00'))
+					lab.append(experiment_alias[str(ue).strip(' x00')]+' ses='+str(us).strip(' x00'))
+			major_tick_label.append(lab[-1])
+			minor_ticks.append(c)
+	all_lo = np.squeeze(all_lo[np.array(lo_inds)])
+	all_li = np.squeeze(all_li[np.array(li_inds)])
+	
+	lo_nLL = all_lo['full_confidence_merit']
+	li_nLL = all_li['full_confidence_merit']
+	
+	likelihood_ratio = 2*(lo_nLL-li_nLL)
+	m = np.floor(np.min(likelihood_ratio)*1e-2)*1e2
+	M = np.ceil(np.max(likelihood_ratio)*1e-2)*1e2
+	n = 41
+	zero_ind = np.round(-m*(n-1)/(M-m))
+	edges = (np.arange(n)*(-m)/(zero_ind-1)+m)
+	nlr = np.histogram(likelihood_ratio,edges)[0]
+	red_bars = nlr[edges[1:]<=0]
+	red_bars_bottoms = np.array([e0 for e1,e0 in zip(edges[1:],edges[:-1]) if e1<=0])
+	blue_bars = nlr[edges[1:]>0]
+	blue_bars_bottoms = np.array([e0 for e0 in edges[:-1] if e0>=0])
+	height = edges[1]-edges[0]
+	
+	major_ticks = [0.5*(t1+t0) for t1,t0 in zip(minor_ticks[1:],minor_ticks[:-1])]
+	
+	plt.figure(figsize=(12,7))
+	gs = gridspec.GridSpec(1, 2, width_ratios=[5,1], wspace=0,right=0.95,top=0.95,bottom=0.25)
+	ax1 = plt.subplot(gs[0])
+	plt.scatter(np.arange(len(lo_nLL))+1,likelihood_ratio,c=(2*(lo_nLL-li_nLL)<=0).astype(np.float),cmap='bwr')
+	plt.ylabel(r'$2\log\left(\frac{\mathcal{L}(\mathcal{C}_{s})}{\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})}\right)$',fontsize=20)
+	ax1.set_xticks(major_ticks)
+	ax1.set_xticklabels(major_tick_label,rotation=60)
+	ax1.set_xticks(minor_ticks,minor=True)
+	ax1.tick_params(axis='x',which='major',length=0)
+	ax1.tick_params(axis='x',which='minor',length=4)
+	ax1.grid(True, which='minor', axis='x', linewidth=1)
+	plt.gca().set_xlim([0,len(lo_nLL)+1])
+	plt.plot(plt.gca().get_xlim(),[0,0],'-k')
+	
+	ax2 = plt.subplot(gs[1],sharey=ax1)
+	plt.barh(red_bars_bottoms,red_bars,height,color='r',edgecolor=None)
+	plt.barh(blue_bars_bottoms,blue_bars,height,color='b',edgecolor=None)
+	ax2.axis('off')
+	savefig(fname,suffix)
+
 def parse_input():
 	script_help = """ figures.py help
  Sintax:
@@ -1504,6 +1625,7 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
+	dec_conf_parameter_correlation()
 	plt.show(True)
 	opts = parse_input()
 	for k in opts.keys():
