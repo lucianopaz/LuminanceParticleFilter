@@ -2107,8 +2107,39 @@ def compare_mappings():
 	output = ' \\\\ \\hline\n'.join([' & '.join(x) for x in output])+' \\\\ \\hline\n'
 	print(output)
 
+def mapping_strengths_and_weaknesses(analyzer_kwargs={}):
+	belief_kwargs = analyzer_kwargs.copy()
+	belief_kwargs['cmap_meth'] = 'belief'
+	log_odds_kwargs = analyzer_kwargs.copy()
+	log_odds_kwargs['cmap_meth'] = 'log_odds'
+	ab = Analyzer(**belief_kwargs)
+	alo = Analyzer(**log_odds_kwargs)
+	teob,expb = ab.get_summary_stats_array()
+	teolo,explo = alo.get_summary_stats_array()
+	
+	compared_keys = ['rt_mean', 'confidence_mean', 'auc',
+					 'hit_confidence_mean', 'miss_confidence_mean',
+					 'hit_rt_mean', 'miss_rt_mean']
+	plt.figure()
+	for ind,k in enumerate(compared_keys):
+		ax = plt.subplot(2,4,ind)
+		if k.endswith('_mean'):
+			ax.errorbar(teob[k],expb[k],expb[k.replace('_mean','_std')],'.b')
+			ax.errorbar(teolo[k],explo[k],explo[k.replace('_mean','_std')],'.r')
+		else:
+			ax.plot(teob[k],expb[k],'ob')
+			ax.plot(teolo[k],explo[k],'or')
+		lims = [0,0]
+		lims[0] = np.min([ax.get_xlim()[0],ax.get_ylim()[0]])
+		lims[1] = np.max([ax.get_xlim()[1],ax.get_ylim()[1]])
+		ax.plot(lims,lims,'--k')
+		ax.set_xlim(lims)
+		ax.set_ylim(lims)
+	plt.show(True)
+
 def test():
-	compare_mappings()
+	mapping_strengths_and_weaknesses()
+	#~ compare_mappings()
 	return
 	a = Analyzer(cmap_meth='belief')
 	a.get_parameter_array_from_summary(normalize={'internal_var':'experiment','dead_time':'name','dead_time_sigma':'session'})
