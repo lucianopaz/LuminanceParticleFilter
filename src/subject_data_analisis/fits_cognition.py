@@ -12,11 +12,14 @@ class Location(enum.Enum):
 	home = 1
 	cluster = 2
 	cecar = 3
+	sissa = 4
 
 opsys,computer_name,kern,bla,bits = os.uname()
 if opsys.lower().startswith("linux"):
 	if computer_name=="facultad":
 		loc = Location.facu
+	elif computer_name=="Diamond-RAPH":
+		loc = Location.sissa
 	elif computer_name.startswith("sge") or computer_name.startswith("slurm"):
 		loc = Location.cluster
 	elif computer_name.startswith("odin"):
@@ -28,6 +31,8 @@ else:
 
 if loc==Location.facu:
 	raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
+elif loc==Location.sissa:
+	raw_data_dir='/home/lpaz/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.home:
 	raw_data_dir='/Users/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.cluster:

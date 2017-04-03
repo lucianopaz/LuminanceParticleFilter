@@ -14,7 +14,7 @@ import matplotlib.gridspec as gridspec
 import os, re, pickle, warnings, json, logging, copy, scipy.integrate, itertools, ete3, sys
 from sklearn import cluster
 from mpl_toolkits.mplot3d import Axes3D
-import scipy.stats as stats
+from scipy import stats
 try:
 	from diptest.diptest import dip
 except:
@@ -481,7 +481,7 @@ class Analyzer():
 					'miss_confidence_mean':miss_confidence,'rt_median':rt_median,
 					'hit_rt_median':hit_rt_median,'miss_rt_median':miss_rt_median,
 					'confidence_median':confidence_median,'hit_confidence_median':hit_confidence_median,
-					'miss_confidence_median':miss_confidence_median}}
+					'miss_confidence_median':miss_confidence_median,'auc':auc}}
 		return out
 	
 	def get_parameter_array_from_summary(self,summary=None,normalize={'internal_var':'experiment'},normalization_function=lambda x: x/np.nanstd(x)):
@@ -685,7 +685,7 @@ class Analyzer():
 		
 		"""
 		if summary is None:
-			summary = self.summary
+			summary = self.get_summary()
 		
 		experimental = []
 		experimental_ind_names = []
@@ -694,9 +694,33 @@ class Analyzer():
 		max_experiment_len = 0
 		max_name_len = 0
 		parameter_names = []
-		for k in summary['theoretical'].keys():
-			teo = summary['theoretical'][k]
+		missing_fit = []
+		for counter,k in enumerate(summary['experimental'].keys()):
 			exp = summary['experimental'][k]
+			for exp_k in exp.keys():
+				if exp_k=='experiment':
+					max_experiment_len = max([max_experiment_len,len(exp[exp_k])])
+				elif exp_k=='name':
+					max_name_len = max([max_name_len,len(str(exp[exp_k]))])
+				if exp_k not in ['means','stds','medians']:
+					if exp_k not in experimental_ind_names:
+						experimental_ind_names.append(exp_k)
+						experimental.append([exp[exp_k]])
+					else:
+						experimental[experimental_ind_names.index(exp_k)].append(exp[exp_k])
+				else:
+					for nested_key in exp[exp_k].keys():
+						composed_key = nested_key+{'means':'_mean','stds':'_std','medians':'_median'}[exp_k]
+						if composed_key not in experimental_ind_names:
+							experimental_ind_names.append(composed_key)
+							experimental.append([exp[exp_k][nested_key]])
+						else:
+							experimental[experimental_ind_names.index(composed_key)].append(exp[exp_k][nested_key])
+			try:
+				teo = summary['theoretical'][k]
+			except:
+				missing_fit.append(counter)
+				continue
 			for teo_k in teo.keys():
 				if teo_k=='experiment':
 					max_experiment_len = max([max_experiment_len,len(teo[teo_k])])
@@ -734,25 +758,31 @@ class Analyzer():
 							theoretical.append([val])
 						else:
 							theoretical[theoretical_ind_names.index(par)].append(val)
-			for exp_k in exp.keys():
-				if exp_k=='experiment':
-					max_experiment_len = max([max_experiment_len,len(exp[exp_k])])
-				elif exp_k=='name':
-					max_name_len = max([max_name_len,len(str(exp[exp_k]))])
-				if exp_k not in ['means','stds','medians']:
-					if exp_k not in experimental_ind_names:
-						experimental_ind_names.append(exp_k)
-						experimental.append([exp[exp_k]])
-					else:
-						experimental[experimental_ind_names.index(exp_k)].append(exp[exp_k])
+		for ind in missing_fit:
+			experiment = experimental[experimental_ind_names.index('experiment')][ind]
+			session = experimental[experimental_ind_names.index('session')][ind]
+			name = experimental[experimental_ind_names.index('name')][ind]
+			if len(theoretical_ind_names)==0:
+				theoretical_ind_names = ['experiment','name','session',
+										 'full_merit','full_confidence_merit','confidence_only_merit',
+										 'auc','rt_mean','hit_rt_mean','miss_rt_mean','performance_mean',
+										 'confidence_mean','hit_confidence_mean','miss_confidence_mean',
+										 'rt_median','hit_rt_median','miss_rt_median','confidence_median',
+										 'hit_confidence_median','miss_confidence_median',
+										 'cost','internal_var','phase_out_prob','dead_time','dead_time_sigma',
+										 'high_confidence_threshold','confidence_map_slope']
+				for i in range(len(theoretical_ind_names)):
+					theoretical.append([])
+			for teo_k_ind,teo_k in enumerate(theoretical_ind_names):
+				if teo_k=='experiment':
+					theoretical[theoretical_ind_names.index(teo_k)].insert(ind,experiment)
+				elif teo_k=='session':
+					theoretical[theoretical_ind_names.index(teo_k)].insert(ind,session)
+				elif teo_k=='name':
+					theoretical[theoretical_ind_names.index(teo_k)].insert(ind,name)
 				else:
-					for nested_key in exp[exp_k].keys():
-						composed_key = nested_key+{'means':'_mean','stds':'_std','medians':'_median'}[exp_k]
-						if composed_key not in experimental_ind_names:
-							experimental_ind_names.append(composed_key)
-							experimental.append([exp[exp_k][nested_key]])
-						else:
-							experimental[experimental_ind_names.index(composed_key)].append(exp[exp_k][nested_key])
+					theoretical[theoretical_ind_names.index(teo_k)].insert(ind,np.nan)
+		
 		dtype_dict = {'experiment':'S'+str(max_experiment_len),
 					  'n':'i',
 					  'session':'i',
@@ -2000,7 +2030,7 @@ def compare_mappings():
 	all_lo = Analyzer(cmap_meth='log_odds').get_summary_stats_array()[1]
 	# For some reason we dont have the fit result for the linear mapping
 	# of experiment Luminancia subject 12 and session 1 (index 113 of lo)
-	all_lo = np.concatenate((all_lo[:113],all_lo[114:]),axis=0)
+	#~ all_lo = np.concatenate((all_lo[:113],all_lo[114:]),axis=0)
 	all_li = Analyzer(cmap_meth='belief').get_summary_stats_array()[1]
 	cat = 'experiment'
 	ucat_lo = np.unique(all_lo[cat])
@@ -2108,33 +2138,137 @@ def compare_mappings():
 	print(output)
 
 def mapping_strengths_and_weaknesses(analyzer_kwargs={}):
-	belief_kwargs = analyzer_kwargs.copy()
-	belief_kwargs['cmap_meth'] = 'belief'
+	linear_kwargs = analyzer_kwargs.copy()
+	linear_kwargs['cmap_meth'] = 'belief'
 	log_odds_kwargs = analyzer_kwargs.copy()
 	log_odds_kwargs['cmap_meth'] = 'log_odds'
-	ab = Analyzer(**belief_kwargs)
+	ali = Analyzer(**linear_kwargs)
 	alo = Analyzer(**log_odds_kwargs)
-	teob,expb = ab.get_summary_stats_array()
-	teolo,explo = alo.get_summary_stats_array()
+	expli,teoli = ali.get_summary_stats_array()
+	explo,teolo = alo.get_summary_stats_array()
+	compared_keys = ['rt_mean', 'hit_rt_mean', 'miss_rt_mean',
+					 'auc', 'confidence_mean',
+					 'hit_confidence_mean', 'miss_confidence_mean']
 	
-	compared_keys = ['rt_mean', 'confidence_mean', 'auc',
-					 'hit_confidence_mean', 'miss_confidence_mean',
-					 'hit_rt_mean', 'miss_rt_mean']
-	plt.figure()
-	for ind,k in enumerate(compared_keys):
-		ax = plt.subplot(2,4,ind)
-		if k.endswith('_mean'):
-			ax.errorbar(teob[k],expb[k],expb[k.replace('_mean','_std')],'.b')
-			ax.errorbar(teolo[k],explo[k],explo[k.replace('_mean','_std')],'.r')
+	plt.figure(figsize=(11,8))
+	gs0 = gridspec.GridSpec(2,1,left=0.08, right=0.98,hspace=0.35, bottom=0.10, top=0.95)
+	gs00 = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=gs0[0])
+	gs10 = gridspec.GridSpecFromSubplotSpec(1, 4, subplot_spec=gs0[1])
+	compared_keys_axes = [gs00[0],gs00[1],gs00[2],
+						  gs10[0],gs10[1],gs10[2],gs10[3]]
+	compared_keys_titles = [r'$\left\langle RT\right\rangle$', r'$\left\langle RT|hit\right\rangle$', r'$\left\langle RT|miss\right\rangle$',
+					 'AUC', r'$\left\langle conf\right\rangle$',
+					 r'$\left\langle conf|hit\right\rangle$', r'$\left\langle conf|miss\right\rangle$']
+	compared_keys_xlabels = ['Theoretical']*7
+	compared_keys_ylabels = ['Experimental','','','Experimental','','','']
+	suppressed_yticklabels = [False,True,True,
+						 False,False,True,True]
+	axp = None
+	axs = []
+	uexp = np.unique(teoli['experiment'])
+	for k,gs,tit,xlabel,ylabel,sup_tick in zip(compared_keys,compared_keys_axes,compared_keys_titles,compared_keys_xlabels,compared_keys_ylabels,suppressed_yticklabels):
+		if not sup_tick:
+			ax = plt.subplot(gs)
 		else:
-			ax.plot(teob[k],expb[k],'ob')
+			ax = plt.subplot(gs,sharex=axp,sharey=axp)
+		if k.endswith('_mean'):
+			ax.errorbar(teoli[k],expli[k],yerr=expli[k.replace('_mean','_std')],fmt='.b')
+			ax.errorbar(teolo[k],explo[k],explo[k.replace('_mean','_std')],fmt='.r')
+		else:
+			ax.plot(teoli[k],expli[k],'ob')
 			ax.plot(teolo[k],explo[k],'or')
+		ax.set_title(tit)
+		ax.set_xlabel(xlabel)
+		ax.set_ylabel(ylabel)
+		if sup_tick:
+			ax.tick_params(labelleft=False)
+		else:
+			axp = ax
+		if k=='rt_mean':
+			ax.legend([r'$\mathcal{L}(\mathcal{C}_{s})$',r'$\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})$'],loc='best', fancybox=True, framealpha=0.5)
+		axs.append(ax)
+	for ax in axs:
 		lims = [0,0]
 		lims[0] = np.min([ax.get_xlim()[0],ax.get_ylim()[0]])
 		lims[1] = np.max([ax.get_xlim()[1],ax.get_ylim()[1]])
 		ax.plot(lims,lims,'--k')
 		ax.set_xlim(lims)
 		ax.set_ylim(lims)
+	
+	#~ chi2li = []
+	#~ chi2lo = []
+	#~ for k in compared_keys:
+		#~ if k.endswith('_mean'):
+			#~ chi2li.append(np.sum((teoli[k]-expli[k]/expli[k.replace('_mean','_std')])**2))
+			#~ chi2lo.append(np.sum((teolo[k]-explo[k]/explo[k.replace('_mean','_std')])**2))
+		#~ else:
+			#~ chi2li.append(np.sum((teoli[k]-expli[k])**2))
+			#~ chi2lo.append(np.sum((teolo[k]-explo[k])**2))
+	#~ chi2li = np.array(chi2li)
+	#~ chi2lo = np.array(chi2lo)
+	#~ plt.figure()
+	#~ plt.subplot(121)
+	#~ plt.bar(np.arange(len(chi2li)),chi2li/(chi2li+chi2lo),width=0.45,color='b')
+	#~ plt.bar(np.arange(len(chi2lo))+0.45,chi2lo/(chi2li+chi2lo),width=0.40,color='r')
+	#~ plt.subplot(122)
+	#~ plt.bar(np.arange(len(chi2lo)),chi2li-chi2lo,color='r')
+	#~ print((chi2li-chi2lo)[3])
+	
+	plt.figure(figsize=(11,8))
+	compared_keys_xlabels = [r'$\left\langle RT\right\rangle_{theo}-\left\langle RT\right\rangle_{exp}$',
+							r'$\left\langle RT|hit\right\rangle_{theo}-\left\langle RT|hit\right\rangle_{exp}$',
+							r'$\left\langle RT|miss\right\rangle_{theo}-\left\langle RT|miss\right\rangle_{exp}$',
+							r'AUC$_{theo}$-AUC$_{exp}$',
+							r'$\left\langle conf\right\rangle_{theo}-\left\langle conf\right\rangle_{exp}$',
+							r'$\left\langle conf|hit\right\rangle_{theo}-\left\langle conf|hit\right\rangle_{exp}$',
+							r'$\left\langle conf|miss\right\rangle_{theo}-\left\langle conf|miss\right\rangle_{exp}$']
+	
+	compared_keys_ylabels = ['Count','','','Count','','','']
+	for k,gs,xlabel,ylabel,sup_tick in zip(compared_keys,compared_keys_axes,compared_keys_xlabels,compared_keys_ylabels,suppressed_yticklabels):
+		#~ print(k)
+		if not sup_tick:
+			ax = plt.subplot(gs)
+		else:
+			ax = plt.subplot(gs,sharey=axp)
+		edges = np.histogram(np.array([teoli[k]-expli[k],teolo[k]-explo[k]]),bins=20)[1]
+		centers = np.array([0.5*(e1+e0) for e1,e0 in zip(edges[1:],edges[:-1])])
+		histli = np.histogram(teoli[k]-expli[k],bins=edges,density=True)[0]
+		histlo = np.histogram(teolo[k]-explo[k],bins=edges,density=True)[0]
+		ax.step(edges,np.hstack((histli,histli[-1:])),'b',where='post')
+		ax.step(edges,np.hstack((histlo,histlo[-1:])),'r',where='post')
+		tli = [0]
+		tlo = [0]
+		pli = [0]
+		plo = [0]
+		tli[0],pli[0] = stats.ttest_1samp(teoli[k]-expli[k],0.)
+		tlo[0],plo[0] = stats.ttest_1samp(teolo[k]-explo[k],0.)
+		for exp in uexp:
+			indsli = teoli['experiment']==exp
+			indslo = teolo['experiment']==exp
+			temp1,temp2 = stats.ttest_1samp(teoli[k][indsli]-expli[k][indsli],0.)
+			tli.append(temp1)
+			pli.append(temp2)
+			temp1,temp2 = stats.ttest_1samp(teolo[k][indslo]-explo[k][indslo],0.)
+			tlo.append(temp1)
+			plo.append(temp2)
+		pv = np.array([np.array(pli),np.array(plo)])
+		pv = utils.holm_bonferroni(pv)
+		print(pv.reshape((2,-1)).T)
+		print('{0}, {1} ({2}), {3} ({4})'.format(k,tli[0],pli[0],tlo[0],plo[0]))
+		for i,exp in enumerate(uexp):
+			print('{0} ({5}), {1} ({2}), {3} ({4})'.format(k,tli[1+i],pli[1+i],tlo[1+i],plo[1+i],exp))
+		lims = list(ax.get_ylim())
+		lims[0] = 0.
+		ax.set_ylim(lims)
+		ax.set_xlabel(xlabel)
+		ax.set_ylabel(ylabel)
+		if sup_tick:
+			ax.tick_params(labelleft=False)
+		else:
+			axp = ax
+		if k=='rt_mean':
+			ax.legend([r'$\mathcal{L}(\mathcal{C}_{s})$',r'$\mathcal{L}(\mathcal{C}_{\mathcal{L}_{o}})$'],loc='best', fancybox=True, framealpha=0.5)
+	
 	plt.show(True)
 
 def test():

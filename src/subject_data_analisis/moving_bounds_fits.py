@@ -5,28 +5,38 @@ import numpy as np
 from utils import normpdf
 
 class Location(enum.Enum):
+	unknown = -1
 	facu = 0
 	home = 1
 	cluster = 2
-	unknown = 3
+	cecar = 3
+	sissa = 4
 
 opsys,computer_name,kern,bla,bits = os.uname()
 if opsys.lower().startswith("linux"):
 	if computer_name=="facultad":
 		loc = Location.facu
-	elif computer_name.startswith("sge"):
+	elif computer_name=="Diamond-RAPH":
+		loc = Location.sissa
+	elif computer_name.startswith("sge") or computer_name.startswith("slurm"):
 		loc = Location.cluster
+	elif computer_name.startswith("odin"):
+		loc = Location.cecar
 elif opsys.lower().startswith("darwin"):
 	loc = Location.home
 else:
 	loc = Location.unknown
 
 if loc==Location.facu:
-	data_dir='/home/luciano/facultad/dropbox_backup_2015_02_03/LuminanceConfidenceKernels/data/controles'
+	raw_data_dir='/home/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
+elif loc==Location.sissa:
+	raw_data_dir='/home/lpaz/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.home:
-	data_dir='/Users/luciano/Facultad/datos'
+	raw_data_dir='/Users/luciano/Dropbox/Luciano/datos joaquin/para_luciano/raw_data'
 elif loc==Location.cluster:
-	data_dir='/homedtic/lpaz/DecisionConfidenceKernels/data'
+	raw_data_dir='/homedtic/lpaz/inference/raw_data/raw_data'
+elif loc==Location.cecar:
+	raw_data_dir='/home/lpaz/bayes_cognition/raw_data/raw_data'
 elif loc==Location.unknown:
 	raise ValueError("Unknown data_dir location")
 

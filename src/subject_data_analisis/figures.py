@@ -1563,7 +1563,7 @@ def mapping_comparison(fname='mapping_comparison',suffix='.svg'):
 	plt.barh(red_bars_bottoms,red_bars,height,color='r',edgecolor=None)
 	plt.barh(blue_bars_bottoms,blue_bars,height,color='b',edgecolor=None)
 	ax2.axis('off')
-	savefig(fname,suffix)
+	#~ savefig(fname,suffix)
 
 def parse_input():
 	script_help = """ figures.py help
@@ -1599,7 +1599,7 @@ def parse_input():
 				'bounds_vs_var':False,'performance_vs_var_and_cost':False,'cluster_hierarchy':False,
 				'confidence_mapping':False,'fits_cognition':False,'binary_confidence':False,
 				'parameter_correlation':False,'fits_cognition_mixture':False,
-				'cognition_prior_sketch':False}
+				'cognition_prior_sketch':False,'mapping_comparison':False}
 	keys = options.keys()
 	skip_arg = False
 	for i,arg in enumerate(sys.argv[1:]):
@@ -1625,8 +1625,8 @@ def parse_input():
 	return options
 
 if __name__=="__main__":
-	dec_conf_parameter_correlation()
-	plt.show(True)
+	#~ dec_conf_parameter_correlation()
+	#~ plt.show(True)
 	opts = parse_input()
 	for k in opts.keys():
 		if k not in ['suffix','show'] and opts[k]:
